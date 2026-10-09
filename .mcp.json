@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "workbench": {
+      "command": "node",
+      "args": [
+        "server/mcp.js"
+      ]
+    }
+  }
+}

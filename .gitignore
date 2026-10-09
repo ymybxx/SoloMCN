@@ -1,0 +1,16 @@
+node_modules/
+.env
+data/*.json
+data/*.tmp
+.DS_Store
+hot-service/.venv/
+hot-service/data/
+hot-service/config/
+hot-service/.env
+__pycache__/
+logs/
+# 生成的视频项目（脚本做成的成片、素材、配音），只在本机
+videos/
+data/voice-previews/
+data/uploads/
+data/publish/

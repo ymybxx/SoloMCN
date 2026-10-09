@@ -1,0 +1,52 @@
+{
+  "provider": "配音：HyperFrames 托管配音（登录且有额度时）或 macOS 系统中文语音（免费、本地）",
+  "model": "",
+  "note": "音色只是给 Claude 的偏好，做视频时它会按能用的配音方式选最接近的。",
+  "voices": [
+    {
+      "id": "Tingting",
+      "label": "婷婷",
+      "hint": "女声，标准普通话，适合旁白"
+    },
+    {
+      "id": "Flo (中文（中国大陆）)",
+      "label": "Flo",
+      "hint": "年轻女声"
+    },
+    {
+      "id": "Sandy (中文（中国大陆）)",
+      "label": "Sandy",
+      "hint": "女声，偏活泼"
+    },
+    {
+      "id": "Shelley (中文（中国大陆）)",
+      "label": "Shelley",
+      "hint": "女声，偏温和"
+    },
+    {
+      "id": "Reed (中文（中国大陆）)",
+      "label": "Reed",
+      "hint": "男声，中年，偏沉稳"
+    },
+    {
+      "id": "Eddy (中文（中国大陆）)",
+      "label": "Eddy",
+      "hint": "男声，偏年轻"
+    },
+    {
+      "id": "Rocko (中文（中国大陆）)",
+      "label": "Rocko",
+      "hint": "男声，偏粗"
+    },
+    {
+      "id": "Grandpa (中文（中国大陆）)",
+      "label": "Grandpa",
+      "hint": "老年男声"
+    },
+    {
+      "id": "Grandma (中文（中国大陆）)",
+      "label": "Grandma",
+      "hint": "老年女声"
+    }
+  ]
+}
