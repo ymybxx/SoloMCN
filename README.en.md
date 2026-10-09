@@ -2,7 +2,9 @@
 
 # SoloMCN
 
-**Turn Claude Code into your short-video team: from trending topics to multi-platform publishing, one person runs a whole channel network.**
+### Don't build workflows. Let Claude do the work.
+
+**A one-person AI short-video MCN: from trending topics to Douyin, Xiaohongshu, Bilibili and YouTube, every step done by Claude itself.**
 
 [中文](README.md) · MIT License · Powered by [Claude Code](https://claude.com/claude-code)
 
@@ -10,22 +12,46 @@
 
 ![SoloMCN workbench](docs/images/hero.png)
 
-## What it does
+## A different way to build AI software
 
-SoloMCN takes an AI short video from nothing to published. You only approve at the key steps:
+Most AI apps start with a workflow: drag nodes, wire them up, hard-code a prompt at every step, plug in a pile of APIs. The AI can only ever do what the workflow allows.
+
+SoloMCN goes the other way: **zero workflow building, drive Claude directly.**
+
+|  | Workflow-built AI apps | SoloMCN |
+|---|---|---|
+| How a step is defined | Nodes, wires, fixed prompts | A plain-language "job description" (a Claude Code skill) |
+| When something unexpected happens | Any branch nobody wired up gets stuck | Claude decides, switches approach, retries |
+| How good it can get | Capped by the workflow design | **Claude's own ceiling.** Better models make the whole system better |
+| What you configure | One API key per capability | One Claude subscription |
+| Changing the process | Edit nodes and code | Edit a paragraph |
+
+The workbench does just two things: **hands Claude its tools** (read and write channels and trends, capture web pages, publish to each platform) and **gives you a place to watch and decide**. The real work is done by Claude Code: it researches on the web, writes code to build the video, checks the frames and fixes its own mistakes.
+
+### Things that actually happened
+
+While making the demo video in this README:
+
+- **Voice credits ran out.** The hosted voice-over allowance was zero. Nobody had written that branch. Claude set up a local voice on its own, gave the parrot, turtle and lion each a different voice, and finished the video.
+- **One-sentence revisions.** We found the voice hard to understand and wrote one line in the workbench: "the voice is unclear, switch to the system Chinese voice". Claude re-voiced it, re-timed the captions and re-rendered, without touching a single frame, in 10 minutes.
+- **It makes its own visuals.** The characters are original vector art it drew. The GitHub pages, news report and scholar's blog cut into the video are real pages it captured during research, with highlighter marks and red circles added.
+
+None of this was a pre-built flow. Claude worked it out on the spot.
+
+## From trend to publish, all handed to Claude
 
 ```
-Trending lists ─→ Claude curation ─→ Ideas per channel ─→ Sourced research ─→ Storyboard script ─→ AI precheck
-                                                                                          │
-   Analytics ←─ One-click publish to Douyin / Xiaohongshu / Bilibili / YouTube ←─ Cover & copy ←─ Finished video
+Trending lists ─→ Curate topics ─→ Ideas per channel ─→ Sourced research ─→ Storyboard ─→ Precheck
+                                                                                   │
+      Analytics ←─ Publish to Douyin / Xiaohongshu / Bilibili / YouTube ←─ Cover & copy ←─ Video
 ```
 
-- **A one-person MCN.** Several channels, each with several series. Audience, tone, voice and visual style live on the series, so ideas, scripts and videos stay on-brand and channels don't overlap.
-- **Claude Code is the brain.** Every AI step runs through the Claude Code on your machine, on your own Claude subscription. **No extra AI API key required.** You watch each step live and can interject mid-run.
-- **Research with sources.** Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures web pages and official videos as footage for the edit.
-- **It actually publishes.** One click to Douyin, Xiaohongshu, Bilibili and YouTube, using a browser you logged into yourself and driven by page state. For platforms you'd rather post by hand, tick "manual" and get the video, cover, title, description and tags ready to copy and paste.
-- **Bring your own video.** Pick a local file (not copied). Claude "watches" it (frames plus speech-to-text) and writes the copy for each platform.
-- **Editable job descriptions.** Each step is a Claude Code skill in `.claude/skills/`, written in plain language. Change the taste, the script style or how videos are made by editing the skill.
+Every arrow is a Claude Code run. You watch each step live and can interject mid-run. You decide at three points: which idea to make, whether the video is good, whether to publish.
+
+- **A one-person MCN.** Several channels, each with several series. Audience, tone, voice and visual style live on the series, so channels don't overlap.
+- **Research with sources.** Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures pages and official videos as footage.
+- **It actually publishes.** One click to Douyin, Xiaohongshu, Bilibili and YouTube using a browser you logged into yourself, with portrait and landscape covers uploaded separately. Tick "manual" for any platform to get everything ready to copy and paste.
+- **Bring your own video.** Pick a local file (not copied). Claude "watches" it (frames plus speech-to-text) and writes copy for each platform.
 
 ## Screenshots
 
@@ -37,62 +63,68 @@ Trending lists ─→ Claude curation ─→ Ideas per channel ─→ Sourced re
 
 ## Quick start
 
-macOS, plus:
+All you need is a Claude subscription. macOS, plus:
 
 | Need | Install |
 |---|---|
-| [Claude Code](https://claude.com/claude-code) | Install it and run `claude` once to log in with your Claude subscription |
+| [Claude Code](https://claude.com/claude-code) | Install it and run `claude` once to log in |
 | Node.js 22.9+ | `brew install node` |
 | Python 3.11+ | Comes with macOS, or `brew install python` |
 | Postgres | `brew install postgresql@18 && brew services start postgresql@18` (the database is created for you) |
 | ffmpeg | `brew install ffmpeg` |
 | Google Chrome | Used for publishing |
 
-Then:
-
 ```bash
 git clone https://github.com/ymybxx/SoloMCN.git
 cd SoloMCN
 npm run setup     # Node dependencies and the Python env for the trends service
+npx hyperframes skills update faceless-explainer   # HyperFrames skill used to make videos
 npm start
 ```
 
-Open http://127.0.0.1:5178 and configure everything in the app:
+Open http://127.0.0.1:5178 and do the rest in the app:
 
-1. **Channels** (账号矩阵): replace the 4 sample channels with your own, and scan the QR code to bind each platform.
-2. **Settings → Connections** (all optional):
-   - Claude long-lived token: run `claude setup-token` and paste it for more reliable background runs. Without it, the local `claude` login is used.
-   - Image generation: an OpenAI key (or any compatible endpoint and key) lets AI draw covers. Without it, covers are taken from a frame of the video.
-3. Go to the **Topic radar** and click "Let Claude curate".
+1. **Channels** (账号矩阵): replace the 4 sample channels with your own and scan the QR code to bind each platform.
+2. **Topic radar**: click "Let Claude curate" to start.
+3. **Settings → Connections** (optional):
+   - Paste a long-lived token from `claude setup-token` for more reliable background runs.
+   - Add an OpenAI key (or any compatible endpoint and key) to have AI draw covers; otherwise a frame from the video is used.
 
-Videos are rendered with [HyperFrames](https://github.com/heygen-com/hyperframes). Before your first video, install its Claude Code skill:
+Voice-over needs no key: hosted voices after logging in to HyperFrames, otherwise the macOS built-in Chinese voices.
 
-```bash
-npx hyperframes skills update faceless-explainer
-```
+## Changing the process = editing a paragraph
 
-Voice-over uses HyperFrames: hosted voices after `npx hyperframes login`, or a local voice otherwise. No extra key either way; if neither works the video is captions-only.
+Each step is a job description under `.claude/skills/`:
 
-## How it works
+| Skill | Responsible for |
+|---|---|
+| `curate-topics` | Picking topics worth making from the trending lists |
+| `account-ideas` | Ideas that fit each channel and series |
+| `research-topic` | Web research and footage capture |
+| `write-script` | A storyboard script ready to produce |
+| `precheck-content` | Pre-publish check |
+| `make-video` / `revise-video` | Making the video, revising it from feedback |
+| `review-data` | Analytics review |
+
+Want sharper topics, shorter scripts or a different visual style? Edit the skill. No code involved. You can also run skills by hand in Claude Code: open the project and type `/curate-topics` and so on.
+
+Pick the model and effort for each step in Settings (Opus, Sonnet, Haiku…). New model versions are used automatically: **when Claude gets better, SoloMCN gets better.**
+
+## Layout
 
 ```
 public/            UI (plain HTML/CSS/JS, no build step)
 server/
-  index.js         HTTP server and API
   agent.js         Runs Claude Code (claude -p) skills in the background and streams each step
-  mcp.js           Workbench tools for Claude (read channels and trends, save picks, scripts…)
+  mcp.js           Tools handed to Claude: channels and trends, picks, scripts, page capture…
   publish/         Browser publishing for Douyin, Xiaohongshu, Bilibili, YouTube
   assets.js        Captures web pages and videos as footage during research
   watch.js         "Watches" local videos: frame sheets plus speech-to-text
 hot-service/       Trends service (Python): Douyin, Weibo, Bilibili, Zhihu, Baidu, Toutiao and Hacker News
-.claude/skills/    One skill per step: curate, ideas, research, script, precheck, make video, revise, review
-data/              Your data (channels, content, logins, keys), never committed
+.claude/skills/    The job description for each step
+data/              Your data (channels, content, logins, keys), local only, never committed
 videos/            Generated video projects, never committed
 ```
-
-- **Your data stays local.** Content lives in `data/db.json`, platform logins in per-channel Chrome profiles under `data/publish/`, keys in `data/secrets.json` (readable only by your user).
-- **Pick the model and effort per feature** in Settings (Opus, Sonnet, Haiku…). New model versions are picked up automatically.
-- **Run skills by hand** in Claude Code: open the project and type `/curate-topics` and so on.
 
 ## Before you use it
 
@@ -102,7 +134,7 @@ videos/            Generated video projects, never committed
 
 ## Roadmap
 
-- [ ] **AI staff**: each step becomes a configurable "employee" (scout, editor, writer, video editor, operator) with a job description, direction and budget, working together through tickets.
+- [ ] **AI staff**: each step becomes a configurable "employee" (scout, editor, writer, video editor, operator) with a job description, direction and budget, working together through tickets while you just set the direction.
 - [ ] Scheduled runs: daily curation and ideas waiting for your approval.
 - [ ] Automatic analytics collection from each platform.
 - [ ] More platforms: Kuaishou, WeChat Channels, TikTok.
