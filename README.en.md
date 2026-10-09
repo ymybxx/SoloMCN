@@ -2,9 +2,9 @@
 
 # SoloMCN
 
-### Don't build workflows. Let Claude do the work.
+### Turn Claude Code into your short-video team
 
-**A one-person AI short-video MCN: from trending topics to Douyin, Xiaohongshu, Bilibili and YouTube, every step done by Claude itself.**
+**Don't build workflows. Let Claude do the work. From trending topics to Douyin, Xiaohongshu, Bilibili and YouTube, one person runs a whole channel network, and every step is done by Claude itself.**
 
 [中文](README.md) · MIT License · Powered by [Claude Code](https://claude.com/claude-code)
 

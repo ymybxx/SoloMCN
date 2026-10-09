@@ -2,9 +2,9 @@
 
 # SoloMCN
 
-### 不搭工作流，直接让 Claude 干活。
+### 把 Claude Code 变成你的短视频团队
 
-**一个人的 AI 短视频 MCN：从全网热点到抖音、小红书、B站、YouTube 发布，每一步都是 Claude 亲手做的。**
+**不搭工作流，直接让 Claude 干活。从全网热点到抖音、小红书、B站、YouTube 发布，一个人运营一个账号矩阵，每一步都是 Claude 亲手做的。**
 
 [English](README.en.md) · MIT License · Powered by [Claude Code](https://claude.com/claude-code)
 
