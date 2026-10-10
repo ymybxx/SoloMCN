@@ -493,8 +493,34 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
+// 只接受本机页面和本机程序的请求。工作台能让 Claude 干活、改技能、发到你的账号，
+// 不能让别的网站借你的浏览器来调：
+// - Host 不是本机地址的拒绝：挡住 DNS 重绑定（恶意域名解析到 127.0.0.1 后来读写接口）
+// - 带 Origin 的必须和工作台同源：挡住别的网页在后台偷偷发请求（CSRF）
+// 用 HOST=0.0.0.0 等开放给局域网时，访问地址由你自己决定，只校验同源。
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+const LOCAL_ONLY = LOOPBACK.has(HOST) || HOST === '::1';
+function fromSelf(req) {
+  const host = req.headers.host || '';
+  let hostname;
+  try {
+    hostname = new URL(`http://${host}`).hostname;
+  } catch {
+    return false;
+  }
+  if (LOCAL_ONLY && !LOOPBACK.has(hostname)) return false;
+  const origin = req.headers.origin;
+  if (origin === undefined) return true;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false; // Origin: null（沙盒 iframe、本地文件打开的网页）
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const { pathname } = new URL(req.url, 'http://localhost');
+  if (!fromSelf(req)) return sendError(res, 403, 'forbidden', '只接受从本机打开的工作台发来的请求');
   try {
     if (pathname.startsWith('/api/')) {
       return await handleApi(req, res, pathname.slice(5).split('/').filter(Boolean));

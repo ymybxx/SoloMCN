@@ -5,9 +5,10 @@
 """
 import asyncio
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 import uvicorn
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -48,6 +49,24 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="热点数据服务", lifespan=lifespan)
+
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+@app.middleware("http")
+async def only_from_self(request: Request, call_next):
+    """只接受本机程序（工作台）和同源页面的请求，挡住别的网站借浏览器来调：
+    Host 不是本机地址的拒绝（DNS 重绑定），带 Origin 的必须同源（CSRF）。
+    用 HOT_HOST=0.0.0.0 开放给局域网时只校验同源。"""
+    host = request.headers.get("host", "")
+    origin = request.headers.get("origin")
+    if HOST in LOOPBACK and (urlsplit(f"http://{host}").hostname or "") not in LOOPBACK:
+        allowed = False
+    else:
+        allowed = origin is None or urlsplit(origin).netloc == host
+    if not allowed:
+        return JSONResponse(status_code=403, content={"error": {"code": "forbidden", "message": "只接受本机发来的请求"}})
+    return await call_next(request)
 
 @app.exception_handler(Exception)
 async def any_error(_req, exc: Exception):
