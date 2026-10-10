@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/3db8f9d6-2435-43d9-a3a7-a553002618d9
 
 ### Turn Claude Code into your short-video team
 
-**Don't build workflows. Let Claude do the work. From trending topics to Douyin, Xiaohongshu, Bilibili and YouTube, one person runs a whole channel network, and every step is done by Claude itself.**
+**Don't build workflows. Let Claude do the work. From China's trending lists and hot posts on X to Douyin, Xiaohongshu, Bilibili, YouTube and X, one person runs a whole channel network, and every step is done by Claude itself.**
 
 [中文](README.md) · MIT License · Powered by [Claude Code](https://claude.com/claude-code)
 
@@ -47,19 +47,36 @@ None of this was a pre-built flow. Claude worked it out on the spot.
 ## From trend to publish, all handed to Claude
 
 ```
-Trending lists ─→ Curate topics ─→ Ideas per channel ─→ Sourced research ─→ Storyboard ─→ Precheck
-                                                                                   │
-      Analytics ←─ Publish to Douyin / Xiaohongshu / Bilibili / YouTube ←─ Cover & copy ←─ Video
+Trending lists + X ─→ Curate topics ─→ Ideas per channel ─→ Sourced research ─→ Storyboard ─→ Precheck
+                                                                                               │
+   Analytics ←─ Publish to Douyin / Xiaohongshu / Bilibili / YouTube / X ←─ Cover & copy ←─ Video
 ```
 
 Every arrow is a Claude Code run. You watch each step live and can interject mid-run. You decide at three points: which idea to make, whether the video is good, whether to publish.
 
 - **A one-person MCN.** Several channels, each with several series. Audience, tone, voice and visual style live on the series, so channels don't overlap.
 - **Research with sources.** Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures pages and official videos as footage.
-- **See what's hot overseas.** An optional X (Twitter) source: paste the cookies of a few spare accounts under Sources → X to form a pool, and it fetches high-engagement posts for the search queries you write. Claude reads them when curating and can search X on demand. Without accounts it stays off.
+- **See what's hot overseas.** A built-in X (Twitter) source catches new AI formats before they take off in China. See "The X source" below.
 - **It actually publishes.** One click to Douyin, Xiaohongshu, Bilibili, YouTube and X using a browser you logged into yourself, with portrait and landscape covers uploaded separately. Tick "manual" for any platform to get everything ready to copy and paste.
 - **Bring your own video.** Pick a local file (not copied). Claude "watches" it (frames plus speech-to-text) and writes copy for each platform.
 - **English or Chinese UI.** Switch in Settings; Claude's progress notes follow. Content language follows each series: describe a series as English and its ideas, scripts, voice-over and copy come out in English.
+
+## The X source: see what hasn't taken off in China yet
+
+Many new AI formats and tools go viral on X first, and it takes days or weeks before anyone in China makes videos about them. That gap is where short-video creators win. Most trend tools only read Chinese charts; SoloMCN reads X directly:
+
+- **No developer API, no fees.** Paste the cookies of a few spare accounts under Sources → X. Account data stays on your machine.
+- **Search your own angles, not just a trending list.** Write a few categories of queries in X's advanced search syntax, such as "AI + parents, school, dating", "AI + jobs and industries" or "AI-generated animation and short films", set a like threshold, and it regularly fetches the fastest-growing posts from the last two days. Test any query before saving it.
+- **Read it in the feed.** Posts come with the full text, the quoted post, likes, reposts and views, and whether there's video, ranked by engagement per hour. Switch between 24 h, 48 h and 7 days, and send anything worth making straight to the topic radar.
+- **Claude uses it on its own.** Curation reads posts by category alongside the Chinese charts; research can search X or read a creator's or list's latest posts; overseas trends include X trends.
+- **The pool maintains itself.** Each account is checked regularly with a real search. Accounts that X blocks from searching cool down and others take over, and they rejoin when they recover. Each account has a daily request cap with gaps between requests.
+- **Post to X too.** Publish finished videos to your own X account in one click. Chinese videos get a bilingual post, with the length counted the way X counts it.
+
+| X in the feed | Your own search angles |
+|---|---|
+| ![X in the feed](docs/images/x-feed-en.png) | ![X search queries](docs/images/x-queries-en.png) |
+
+> The pool searches X with the accounts' login cookies, which is against X's terms; accounts may be rate-limited or banned. Use spare accounts, not your main one.
 
 ## Screenshots
 
