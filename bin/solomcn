@@ -86,9 +86,9 @@ stop() {
 status() {
   if up; then
     ok "正在运行：$URL"
-    alive && info "进程：$(pid)（后台运行，日志在 $LOG）" || info "（不是用 solomcn start 启动的，可能是在某个终端里 npm start）"
+    alive && info "进程：$(pid)（后台运行，日志在 ${LOG}）" || info "（不是用 solomcn start 启动的，可能是在某个终端里 npm start）"
   elif [ -n "$(listener "$PORT")" ]; then
-    info "工作台开着，但热点服务没响应：$URL（可以试试 solomcn restart）"
+    info "工作台开着，但热点服务没响应：${URL}（可以试试 solomcn restart）"
   else
     info "没在运行。启动：solomcn start"
   fi
