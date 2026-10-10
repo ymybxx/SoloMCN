@@ -562,7 +562,7 @@ const hotPython = path.join(root, 'hot-service', '.venv', 'bin', 'python');
 if (!process.env.HOT_SERVICE_URL && existsSync(hotPython)) {
   const running = await fetch(HOT_URL + '/health', { signal: AbortSignal.timeout(1000) }).then((r) => r.ok).catch(() => false);
   if (!running) {
-    hotProc = spawn(hotPython, ['app.py'], { cwd: path.join(root, 'hot-service'), env: { ...process.env, HOT_PORT: String(HOT_PORT), YT_COOKIES_FILE: ytLogin.cookieFile }, stdio: ['ignore', 'inherit', 'inherit'] });
+    hotProc = spawn(hotPython, ['app.py'], { cwd: path.join(root, 'hot-service'), env: { ...process.env, HOT_PORT: String(HOT_PORT), YT_COOKIES_FILE: ytLogin.cookieFile, YT_NODE: process.execPath }, stdio: ['ignore', 'inherit', 'inherit'] });
     hotProc.on('exit', (code) => code && console.log(`热点数据服务退出（${code}）`));
     console.log(`已启动热点数据服务：${HOT_URL}`);
   }

@@ -1,5 +1,6 @@
 """配置：全部可以用环境变量或 hot-service/.env 覆盖。"""
 import os
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -48,6 +49,9 @@ YOUTUBE_RESERVE = int(os.getenv("YOUTUBE_RESERVE", "3000"))  # 定时抓取不�
 
 # 拉 YouTube 字幕用的登录（可选）：不带登录被要求验证时，用工作台导出的 cookie 再试一次。限量保护账号
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE") or ""
+# yt-dlp 读 YouTube 要用 JavaScript 运行环境解播放器的签名题（官方的标准做法，解题脚本在 yt-dlp[default] 里）；
+# 用工作台自己的 Node，没有就按 PATH 找
+YT_NODE = os.getenv("YT_NODE") or shutil.which("node") or ""
 YT_LOGIN_DAILY_CAP = int(os.getenv("YT_LOGIN_DAILY_CAP", "100"))  # 每天最多用登录拉几次（防出错时狂刷）
 YT_LOGIN_MIN_GAP_SEC = float(os.getenv("YT_LOGIN_MIN_GAP_SEC", "5"))  # 两次用登录拉字幕至少间隔（只在被拦后用登录重试时才有）
 

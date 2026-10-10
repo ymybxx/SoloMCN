@@ -71,6 +71,16 @@ class PickTrackTests(unittest.TestCase):
         self.assertIn("不去绕过", str(e))
 
 
+class OptsTests(unittest.TestCase):
+    def test_node_solves_youtube_challenges_and_cookies_only_when_given(self):
+        with mock.patch.object(config, "YT_NODE", "/usr/local/bin/node"):
+            self.assertEqual(videonotes.ydl_opts()["js_runtimes"], {"node": {"path": "/usr/local/bin/node"}})
+            self.assertNotIn("cookiefile", videonotes.ydl_opts())
+            self.assertEqual(videonotes.ydl_opts("/tmp/c.txt")["cookiefile"], "/tmp/c.txt")
+        with mock.patch.object(config, "YT_NODE", ""):
+            self.assertNotIn("js_runtimes", videonotes.ydl_opts())
+
+
 class NotesTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         tmp = tempfile.TemporaryDirectory()

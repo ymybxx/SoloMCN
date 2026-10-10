@@ -103,11 +103,17 @@ def pick_track(info: dict) -> tuple[str, str, str] | None:
     return None
 
 
-def _extract(video_id: str, cookiefile: str | None = None) -> dict:
+def ydl_opts(cookiefile: str | None = None) -> dict:
     opts = {"skip_download": True, "quiet": True, "no_warnings": True, "noplaylist": True}
+    if config.YT_NODE:  # 解签名题用 Node；解不开时 YouTube 的响应不完整，会报「The page needs to be reloaded」
+        opts["js_runtimes"] = {"node": {"path": config.YT_NODE}}
     if cookiefile:
         opts["cookiefile"] = cookiefile
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    return opts
+
+
+def _extract(video_id: str, cookiefile: str | None = None) -> dict:
+    with yt_dlp.YoutubeDL(ydl_opts(cookiefile)) as ydl:
         return ydl.extract_info(WATCH.format(video_id), download=False)
 
 
