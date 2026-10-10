@@ -64,7 +64,7 @@ const PLATFORM_INFO = { type: 'object', required: ['title', 'desc', 'tags'], pro
 const PLATFORM_RULES = {
   douyin: 'douyin：title 不超过 30 字，前几个字就要有钩子；desc 一到三句，最后一句引导评论；tags 3–5 个，和内容相关、大家会搜的词，不带 #',
   bilibili: 'bilibili：title 不超过 80 字，可以更完整；desc 写清楚这期讲了什么，有调研来源就列出主要来源；tags 5–10 个',
-  youtube: 'youtube：面向海外华人观众，仍用中文；title 不超过 100 字，可以带一两个英文关键词方便搜索；desc 写清楚这期讲了什么，有调研来源就列出主要来源；tags 5–10 个，可以中英文混合',
+  youtube: 'youtube：和视频同一种语言；title 不超过 100 字，可以带一两个英文关键词方便搜索；desc 写清楚这期讲了什么，有调研来源就列出主要来源；tags 5–10 个，可以中英文混合',
   xhs: 'xhs：title 不超过 20 字；desc 写成小红书笔记的口吻，100–300 字，分段；tags 5–8 个',
 };
 const PUBLISH_KEYS = Object.keys(PLATFORM_RULES);
@@ -79,7 +79,7 @@ export const infoSchema = (keys, withCover) => {
 };
 
 export function infoPrompt(item, account = {}, keys = PUBLISH_KEYS, withCover = true, root = process.cwd()) {
-  return `为下面这条短视频写${keys.length < PUBLISH_KEYS.length ? '这几个平台' : '各平台'}的发布信息${withCover ? (imageReady() ? '，写一段封面图的生成提示词，再选一帧备用' : '，并选一帧当封面') : ''}。都用中文。
+  return `为下面这条短视频写${keys.length < PUBLISH_KEYS.length ? '这几个平台' : '各平台'}的发布信息${withCover ? (imageReady() ? '，写一段封面图的生成提示词，再选一帧备用' : '，并选一帧当封面') : ''}。用这条视频的语言写（按系列和脚本，系列没写明就用中文）。
 
 账号：${account.code || ''} ${account.name || ''}
 ${creativeBlock(account, item)}

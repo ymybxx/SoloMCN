@@ -360,13 +360,13 @@ function vVideo(it,id){
     :w.status==='failed'?`<p class="err">没看成：${esc(w.message||'')} <button class="btn" data-act="video-rewatch">重新看</button></p>`
     :w.status==='done'?`<p class="hint">Claude 看过了：${w.frames} 帧画面${w.transcript?`、语音转文字 ${w.transcript.length} 字`:`（${esc(w.transcriptNote||'没有语音')}）`} · ${(w.sheets||[]).map((f,i)=>`<a href="/media/${esc(f)}" target="_blank" rel="noopener">画面 ${i+1}</a>`).join(' ')} <button class="btn ghost" data-act="video-rewatch">重新看</button></p>`:'';
   if(local)return `<video class="vplayer" style="aspect-ratio:${v.width&&v.height?v.width+'/'+v.height:'9/16'}" controls preload="metadata" src="${vidUrl(id,v.mp4)}"></video>
-    <div class="kv"><span>第 <b class="num">${v.version||1}</b> 版</span><span>时长 <b class="num">${v.durationS} 秒</b></span><span>${v.width&&v.height?`${v.width}×${v.height}`:''}</span><span>添加于 <b class="num">${fmtTime(v.at)}</b></span></div>
+    <div class="kv"><span>版本 <b class="num">${v.version||1}</b></span><span>时长 <b class="num">${v.durationS} 秒</b></span><span>${v.width&&v.height?`${v.width}×${v.height}`:''}</span><span>添加于 <b class="num">${fmtTime(v.at)}</b></span></div>
     <p class="hint">本机文件：${esc(v.mp4)}</p>
     ${watchLine}
     <div class="field"><label for="vGuide">这条视频讲什么 <span class="faint">（生成发布信息时 Claude 会按这个方向写）</span></label><textarea id="vGuide" data-vguide="1" rows="2">${esc(v.guide||'')}</textarea></div>
     ${(v.history||[]).length?`<details class="vhist"><summary>旧版本（${v.history.length}）</summary>${v.history.map(h=>`<div class="row-s"><a href="${vidUrl(id,h.mp4)}" target="_blank" rel="noopener">第 ${h.version||1} 版 · ${h.durationS} 秒</a></div>`).join('')}</details>`:''}`;
   return `<video class="vplayer" style="aspect-ratio:${v.width&&v.height?v.width+'/'+v.height:'9/16'}" controls preload="metadata" src="/media/${esc(v.mp4)}"></video>
-    <div class="kv"><span>第 <b class="num">${v.version||1}</b> 版</span><span>时长 <b class="num">${v.durationS} 秒</b>${mb}</span><span>生成于 <b class="num">${fmtTime(v.at)}</b></span>${v.contactSheet?`<a href="/media/${esc(v.contactSheet)}" target="_blank" rel="noopener">缩略图拼图</a>`:''}</div>
+    <div class="kv"><span>版本 <b class="num">${v.version||1}</b></span><span>时长 <b class="num">${v.durationS} 秒</b>${mb}</span><span>生成于 <b class="num">${fmtTime(v.at)}</b></span>${v.contactSheet?`<a href="/media/${esc(v.contactSheet)}" target="_blank" rel="noopener">缩略图拼图</a>`:''}</div>
     ${v.notes?`<p class="hint" style="white-space:pre-wrap">Claude 的说明：${esc(v.notes)}</p>`:''}
     <div class="revise">
       <div class="field"><label for="videoFb">修改意见</label>
@@ -489,7 +489,7 @@ function vPublish(it,id){
   const running=Object.values(pb.results||{}).some(r=>r.status==='running');
   const genBusy=pb.gen?.status==='running'; // 发布信息或封面还在生成，等它好了再发
   const ai=!!S.conf?.image?.configured;
-  const coverBtns=`<button class="btn ghost" data-act="pub-cover" data-k="frame">截取</button><label class="cover-t">第 <input type="number" id="pubCoverTime" min="0" step="0.5" value="${esc(pb.coverTime??1)}"> 秒</label>${ai?'<button class="btn ghost" data-act="pub-cover" data-k="ai">AI 画一张</button>':''}`;
+  const coverBtns=`<button class="btn ghost" data-act="pub-cover" data-k="frame">截取</button><label class="cover-t">截取时间（秒）<input type="number" id="pubCoverTime" min="0" step="0.5" value="${esc(pb.coverTime??1)}"></label>${ai?'<button class="btn ghost" data-act="pub-cover" data-k="ai">AI 画一张</button>':''}`;
   const cover=pb.cover?`<figure class="pub-cover"><img src="/media/${esc(pb.cover)}" alt="竖版封面图"><span class="faint">竖版 3:4 · 抖音竖封面、小红书</span>${pb.coverWide?`<img class="wide" src="/media/${esc(pb.coverWide)}" alt="横版封面图"><span class="faint">横版 16:9 · B站，横屏视频的 YouTube</span>${pb.coverWide43?`<img class="wide43" src="/media/${esc(pb.coverWide43)}" alt="横版 4:3 封面图"><span class="faint">横版 4:3 · 抖音横封面</span>`:''}`:'<span class="err" style="font-size:12px">横版封面没生成出来，B站会用竖版裁剪</span>'}<figcaption>${coverBtns}</figcaption></figure>`:`<div class="pub-cover"><p class="hint">还没有封面图</p>${coverBtns}</div>`;
   const plats=PUB_PLATFORMS.map(p=>{const v=pb.platforms[p.k]||{};const lim=PUB_LIMITS[p.k]?.title;
     return `<div class="pub-plat ${p.ready?'':'off'}">
@@ -994,7 +994,8 @@ async function loadConf(){try{S.conf=await api('GET','/api/config')}catch{S.conf
 function vConnect(){
   const cf=S.conf;if(!cf)return '<div class="panel"><p class="hint">正在读取连接设置…</p></div>';
   const im=cf.image,cl=cf.claude;
-  return `<div class="panel grid" style="gap:14px"><div class="blk-head"><h3>连接</h3></div>
+  return `<div class="panel grid" style="gap:14px"><div class="blk-head"><h3>连接</h3>
+      <label class="cfg-field" style="margin-left:auto;flex-direction:row;align-items:center;gap:8px">界面语言<select id="uiLang" class="no-tr"><option value="zh" ${window.UI_LANG!=='en'?'selected':''}>中文</option><option value="en" ${window.UI_LANG==='en'?'selected':''}>English</option></select></label></div>
     <div class="grid" style="gap:6px"><div class="label">Claude Code ${cl.tokenSet?`<span class="pill ok"><i></i>长期令牌 ····${esc(cl.tail)}</span>`:'<span class="pill"><i></i>用本机 claude 的登录</span>'}</div>
       <p class="hint">所有 AI 环节都通过本机的 Claude Code 跑，用你自己的 Claude 订阅。装好 Claude Code 并在终端登录过就能用；想更稳（不和终端、桌面端抢登录），在终端运行 <code>claude setup-token</code>，把生成的令牌粘贴到这里。</p>
       <div class="cfg-row"><input type="password" id="confClaude" autocomplete="off" spellcheck="false" placeholder="${cl.tokenSet?'粘贴新令牌可替换':'sk-ant-oat…（可选）'}" aria-label="Claude 长期令牌" style="flex:1;min-width:14em">
@@ -1365,6 +1366,7 @@ document.addEventListener('change',e=>{
     store.update('accounts',it.accountId,{manualPublish:{[k]:t.checked}});
     const lab=t.closest('.pub-sel-row')?.querySelector('.pub-sel-note');if(lab)lab.outerHTML=pubSelNote(it,k);
     toast(t.checked?`${PUB_PLATFORMS.find(x=>x.k===k)?.n}改成手动发，这个账号以后默认都手动`:'改回自动发');return}
+  if(t.id==='uiLang'){store.set('settings','ui',{...(local.settings.ui||{}),lang:t.value}).finally(()=>window.setUiLang(t.value));return}
   if(t.dataset.model){setModel(t.dataset.model,t.value);return}
   if(t.dataset.effort){const f=S.modelCfg.features.find(x=>x.key===t.dataset.effort);const cur={...(local.settings.efforts||{})};if(t.value===f?.defaultEffort)delete cur[t.dataset.effort];else cur[t.dataset.effort]=t.value;store.set('settings','efforts',cur).then(()=>{toast(`「${f?.name||''}」思考强度改成 ${t.value}，下次运行生效`);loadModels()});return}
   if(t.dataset.mode){const cur={...(local.settings.modes||{})};cur[t.dataset.mode]=t.value;store.set('settings','modes',cur);toast(`改成${t.value==='agent'?'后台 Agent':'单次调用'}，下次点按钮生效`);return}

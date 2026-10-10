@@ -52,6 +52,7 @@ Every arrow is a Claude Code run. You watch each step live and can interject mid
 - **Research with sources.** Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures pages and official videos as footage.
 - **It actually publishes.** One click to Douyin, Xiaohongshu, Bilibili and YouTube using a browser you logged into yourself, with portrait and landscape covers uploaded separately. Tick "manual" for any platform to get everything ready to copy and paste.
 - **Bring your own video.** Pick a local file (not copied). Claude "watches" it (frames plus speech-to-text) and writes copy for each platform.
+- **English or Chinese UI.** Switch in Settings; Claude's progress notes follow. Content language follows each series: describe a series as English and its ideas, scripts, voice-over and copy come out in English.
 
 ## Screenshots
 

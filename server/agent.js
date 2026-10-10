@@ -20,7 +20,11 @@ const ALLOWED_TOOLS = ['mcp__workbench__*', ...BUILTIN_TOOLS];
 const DENIED_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'NotebookEdit', 'Glob', 'Grep'];
 const MAX_STEPS = 600;
 // 工作台页面会实时显示这些内容，所以要求中文
-const LANG_PROMPT = '你的过程说明、给命令行工具写的 description、子任务的 description、最后的汇报，一律用简体中文写，简短直白。代码、命令、文件名保持原样。';
+// 过程说明和汇报的语言跟着页面「设置」里的界面语言走；作品内容（脚本、字幕、文案）按系列定，不受影响
+const LANG_PROMPTS = {
+  zh: '你的过程说明、给命令行工具写的 description、子任务的 description、最后的汇报，一律用简体中文写，简短直白。代码、命令、文件名保持原样。',
+  en: 'Write your progress notes, the descriptions you give command-line tools and sub-tasks, and your final report in plain, concise English. Keep code, commands and file names as they are. This only affects your notes and report: the content you create (ideas, scripts, captions, voice-over, publish copy) follows the series and the skill instructions as usual.',
+};
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const KEEP_RUNS = 20;
 
@@ -172,9 +176,18 @@ const TOOL_NAMES = {
   save_research: '保存调研报告',
 };
 
+const TOOL_NAMES_EN = {
+  get_feed: 'Read trends', get_hot_topics: 'Read trending lists', get_overseas_hot: 'Read overseas trends', get_accounts: 'Read channel profiles',
+  get_recent_context: 'Read recent ideas and results', get_picks: 'Read picks', add_picks: 'Save picks', add_ideas: 'Save ideas',
+  get_item: 'Read item and profile', save_script: 'Save script', save_precheck: 'Save precheck', get_published: 'Read published stats',
+  save_analysis: 'Save review', save_video: 'Save video', save_research: 'Save research', capture_source: 'Capture page',
+};
+const CHANNEL_NAMES_EN = { douyin: 'Douyin', weibo: 'Weibo', bilibili: 'Bilibili', zhihu: 'Zhihu', baidu: 'Baidu', toutiao: 'Toutiao', 'bilibili-video': 'Bilibili videos', hackernews: 'Hacker News' };
+
 const CHANNEL_NAMES = { douyin: '抖音', weibo: '微博', bilibili: 'B站', zhihu: '知乎', baidu: '百度', toutiao: '头条', 'bilibili-video': 'B站热门视频', hackernews: 'Hacker News' };
 
-function describeTool(name, input = {}) {
+function describeTool(name, input = {}, lang = 'zh') {
+  if (lang === 'en') return describeToolEn(name, input);
   if (name === 'WebSearch') return `上网搜索：${input.query || ''}`;
   if (name === 'WebFetch') return `打开网页：${input.url || ''}`;
   if (name === 'Skill') return `使用技能：${input.skill || input.command || ''}`;
@@ -194,7 +207,27 @@ function describeTool(name, input = {}) {
   return label;
 }
 
+function describeToolEn(name, input = {}) {
+  if (name === 'WebSearch') return `Web search: ${input.query || ''}`;
+  if (name === 'WebFetch') return `Open page: ${input.url || ''}`;
+  if (name === 'Skill') return `Use skill: ${input.skill || input.command || ''}`;
+  if (name === 'Bash') return `Run: ${input.description || String(input.command || '').slice(0, 80)}`;
+  if (name === 'Write') return `Write file: ${String(input.file_path || '').split('/videos/').pop()}`;
+  if (name === 'Edit') return `Edit file: ${String(input.file_path || '').split('/videos/').pop()}`;
+  if (name === 'Read') return `Read file: ${String(input.file_path || '').split('/').slice(-2).join('/')}`;
+  if (name === 'Agent' || name === 'Task') return `Sub-task: ${input.description || ''}`;
+  if (name === 'TodoWrite') return 'Update to-do list';
+  if (name === 'Glob' || name === 'Grep') return `Find files: ${input.pattern || ''}`;
+  const short = name.replace(/^mcp__workbench__/, '');
+  const label = TOOL_NAMES_EN[short] || short;
+  if (short === 'get_feed' && input.channels) return `${label} (${input.channels.map((c) => CHANNEL_NAMES_EN[c] || c).join(', ')})`;
+  if (short === 'add_picks') return `${label}: ${input.picks?.length ?? ''}`;
+  if (short === 'add_ideas') return `${label}: ${input.ideas?.length ?? ''}`;
+  return label;
+}
+
 export function createAgent({ store, cwd }) {
+  const uiLang = () => (store.get('settings', 'ui')?.lang === 'en' ? 'en' : 'zh');
   // 每条队列同一时间只跑一个任务：main（精选、出题、写脚本……）和 video（生成视频）互不阻塞
   const current = {}; // lane -> { id, proc, stopped }
   const laneOf = (task) => TASKS[task]?.lane || 'main';
@@ -325,7 +358,7 @@ export function createAgent({ store, cwd }) {
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
       ['-p', prompt, ...(resumeSession ? ['--resume', resumeSession] : []),
         '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--max-turns', String(t.maxTurns),
-        '--append-system-prompt', LANG_PROMPT + '\n' + CONTENT_OUTPUT_POLICY,
+        '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY,
         '--permission-mode', 'dontAsk', '--tools', t.tools ?? BUILTIN_TOOLS.join(','),
         '--allowedTools', (t.allowed ?? ALLOWED_TOOLS).join(','), '--disallowedTools', (t.denied ?? DENIED_TOOLS).join(','),
         ...(t.schema ? ['--json-schema', JSON.stringify(t.schema)] : [])],
@@ -373,7 +406,7 @@ export function createAgent({ store, cwd }) {
         }
         if (ev.type === 'assistant') {
           for (const c of ev.message?.content || []) {
-            if (c.type === 'tool_use' && c.name !== 'ToolSearch') step('tool', describeTool(c.name, c.input));
+            if (c.type === 'tool_use' && c.name !== 'ToolSearch') step('tool', describeTool(c.name, c.input, uiLang()));
             else if (c.type === 'text' && c.text.trim()) step('text', c.text.trim());
           }
         } else if (ev.type === 'user') {
