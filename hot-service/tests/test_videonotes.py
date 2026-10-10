@@ -150,16 +150,6 @@ class NotesTests(unittest.IsolatedAsyncioTestCase):
 BOT = Exception("ERROR: [youtube] x: Sign in to confirm you're not a bot. Use --cookies-from-browser")
 
 
-class FakeRes:
-    status_code = 200
-    text = VTT
-
-
-class FakeClient:
-    async def get(self, url):
-        return FakeRes()
-
-
 class LoginFallbackTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -169,17 +159,18 @@ class LoginFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.calls = []
         self.with_cookies = {"language": "en", "subtitles": {"en": fmt("m-en")}, "title": "标题"}
 
-        def extract(vid, cookiefile=None):
+        def fetch(vid, cookiefile=None):
             self.calls.append(cookiefile)
             if cookiefile is None:
                 raise BOT
             if isinstance(self.with_cookies, Exception):
                 raise self.with_cookies
-            return self.with_cookies
+            track = pick_track(self.with_cookies)
+            return self.with_cookies, track, VTT if track else None
 
         patches = [mock.patch.object(config, "DATA_DIR", Path(tmp.name)), mock.patch.object(config, "YT_COOKIES_FILE", str(self.cookies)),
                    mock.patch.object(config, "YT_LOGIN_MIN_GAP_SEC", 0), mock.patch.object(config, "YT_LOGIN_DAILY_CAP", 2),
-                   mock.patch.object(videonotes, "_extract", extract), mock.patch.object(videonotes, "client", lambda: FakeClient())]
+                   mock.patch.object(videonotes, "_fetch", fetch)]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)

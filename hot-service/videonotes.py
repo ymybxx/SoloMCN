@@ -19,7 +19,6 @@ from pathlib import Path
 import yt_dlp
 
 import config
-from channels.http import client
 from db import DB
 
 RETRY_AFTER = 6 * 3600  # 上次没拿到字幕，多久之内不自动重试
@@ -112,9 +111,13 @@ def ydl_opts(cookiefile: str | None = None) -> dict:
     return opts
 
 
-def _extract(video_id: str, cookiefile: str | None = None) -> dict:
+def _fetch(video_id: str, cookiefile: str | None = None) -> tuple[dict, tuple | None, str | None]:
+    """读视频信息、选一份字幕，并在同一个 yt-dlp 会话里把字幕下载下来（同一套连接和登录状态）。"""
     with yt_dlp.YoutubeDL(ydl_opts(cookiefile)) as ydl:
-        return ydl.extract_info(WATCH.format(video_id), download=False)
+        info = ydl.extract_info(WATCH.format(video_id), download=False)
+        track = pick_track(info)
+        vtt = ydl.urlopen(track[2]).read().decode("utf-8", "replace") if track else None
+    return info, track, vtt
 
 
 # ---------- 登录（可选）：用量和是否失效记在 data/youtube-login.json ----------
@@ -149,13 +152,13 @@ def login_status() -> dict:
 _login_lock = asyncio.Lock()  # 用登录的请求排队一个一个来，几条同时被拦时也保持间隔
 
 
-async def _extract_logged_in(video_id: str) -> dict:
+async def _fetch_logged_in(video_id: str) -> tuple:
     """不带登录被拦之后，用登录再试一次。限量，登录了也被拦就判定失效。"""
     async with _login_lock:
-        return await _extract_logged_in_locked(video_id)
+        return await _fetch_logged_in_locked(video_id)
 
 
-async def _extract_logged_in_locked(video_id: str) -> dict:
+async def _fetch_logged_in_locked(video_id: str) -> tuple:
     st = _login_state()
     if st.get("used", 0) >= config.YT_LOGIN_DAILY_CAP:
         raise NoteError("login_limited", f"今天用登录拉字幕已经 {config.YT_LOGIN_DAILY_CAP} 次了，为了保护账号先停一停，明天再试")
@@ -165,7 +168,7 @@ async def _extract_logged_in_locked(video_id: str) -> dict:
     st.update(used=st.get("used", 0) + 1, lastAt=time.time())
     _save_login_state(st)
     try:
-        info = await asyncio.to_thread(_extract, video_id, config.YT_COOKIES_FILE)
+        got = await asyncio.to_thread(_fetch, video_id, config.YT_COOKIES_FILE)
     except Exception as e:  # noqa: BLE001
         msg = str(e)
         # 登录了还被要求验证或登录，才算登录失效；请求太频繁只是限流，不算
@@ -176,7 +179,7 @@ async def _extract_logged_in_locked(video_id: str) -> dict:
         raise explain(e) from e
     st.update(expired=False, error=None, okAt=time.time())
     _save_login_state(st)
-    return info
+    return got
 
 
 def explain(err: Exception) -> NoteError:
@@ -193,22 +196,16 @@ def explain(err: Exception) -> NoteError:
 async def fetch_transcript(video_id: str) -> dict:
     """读视频信息、下载一份字幕并整理成文字。不碰数据库。"""
     try:
-        info = await asyncio.to_thread(_extract, video_id)
+        info, track, vtt = await asyncio.to_thread(_fetch, video_id)
     except Exception as e:  # noqa: BLE001 — yt-dlp 的错误类型很多，统一换成能读懂的原因
         err = explain(e)
         if err.code != "blocked" or not login_status()["cookies"]:
             raise err from e
-        info = await _extract_logged_in(video_id)  # 被要求验证、又登录过：用登录再试一次
-    track = pick_track(info)
+        info, track, vtt = await _fetch_logged_in(video_id)  # 被要求验证、又登录过：用登录再试一次
     if not track:
         raise NoteError("no_subtitles", "这条视频没有字幕，也没有自动生成的字幕")
-    lang, source, url = track
-    res = await client().get(url)
-    if res.status_code == 429:
-        raise NoteError("blocked", "YouTube 说请求太频繁，这次拿不到字幕，稍后再试")
-    if res.status_code >= 400:
-        raise NoteError("failed", f"下载字幕失败：HTTP {res.status_code}")
-    text = parse_vtt(res.text)
+    lang, source, _url = track
+    text = parse_vtt(vtt or "")
     if not text:
         raise NoteError("no_subtitles", "字幕是空的")
     return {"title": info.get("title"), "lang": lang, "source": source, "text": text}
