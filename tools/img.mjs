@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// 生成图片（封面图）：任何 OpenAI 兼容的图片接口（/images/generations）。
+// 生成图片：任何 OpenAI 兼容的图片接口。不带参考图走 /images/generations，带参考图走 /images/edits。
 // 接口地址、key、模型在工作台「设置 → 连接」里填（存在 data/secrets.json）。
 //
 //   node tools/img.mjs --prompt "…" --out cover.png [--size 1024x1536]
+//   node tools/img.mjs --prompt "…" --out a.png --ref 角色.png [--ref 另一张.png] [--background transparent]
 //
-// 也可以被 server 直接 import：generateImage({ prompt, out, size })
+// 也可以被 server 直接 import：generateImage({ prompt, out, size, refs, background })
 import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
@@ -35,15 +36,42 @@ function request(url, { method = 'GET', headers = {}, body, timeout = 400_000 } 
   });
 }
 
-export async function generateImage({ prompt, out, size = '1024x1536', quality = 'high' }) {
+const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+
+// multipart/form-data：参考图用 image[] 字段，可以传多张
+function multipart(fields, files) {
+  const boundary = `----smcn${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  const parts = [];
+  for (const [k, v] of Object.entries(fields)) parts.push(Buffer.from(`--${boundary}\r\ncontent-disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  for (const f of files) {
+    const type = MIME[path.extname(f).toLowerCase()];
+    if (!type) throw new Error(`参考图只支持 png、jpg、webp：${f}`);
+    parts.push(Buffer.from(`--${boundary}\r\ncontent-disposition: form-data; name="image[]"; filename="${path.basename(f).replace(/"/g, '')}"\r\ncontent-type: ${type}\r\n\r\n`));
+    parts.push(fs.readFileSync(f), Buffer.from('\r\n'));
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return { body: Buffer.concat(parts), type: `multipart/form-data; boundary=${boundary}` };
+}
+
+export async function generateImage({ prompt, out, size = '1024x1536', quality = 'high', refs = [], background }) {
   const { base, key, model } = settings();
-  const body = JSON.stringify({ model, prompt, size, quality, n: 1, output_format: 'png' });
+  const fields = { model, prompt, size, quality, n: 1, output_format: 'png', ...(background ? { background } : {}) };
+  let endpoint, body, type;
+  if (refs.length) {
+    if (refs.length > 16) throw new Error('参考图最多 16 张');
+    ({ body, type } = multipart(fields, refs));
+    endpoint = 'edits';
+  } else {
+    body = JSON.stringify(fields);
+    type = 'application/json';
+    endpoint = 'generations';
+  }
   const t = Date.now();
   let res;
   for (let attempt = 1; ; attempt++) {
-    res = await request(`${base}/images/generations`, {
+    res = await request(`${base}/images/${endpoint}`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+      headers: { authorization: `Bearer ${key}`, 'content-type': type, 'content-length': Buffer.byteLength(body) },
       body,
     });
     const text = res.status >= 400 ? res.body.toString().slice(0, 300) : '';
@@ -67,14 +95,18 @@ export async function generateImage({ prompt, out, size = '1024x1536', quality =
 
 // 命令行用法
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const a = {};
+  const a = { ref: [] };
   const argv = process.argv.slice(2);
-  for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) a[argv[i].slice(2)] = argv[++i];
+  for (let i = 0; i < argv.length; i++) {
+    if (!argv[i].startsWith('--')) continue;
+    const k = argv[i].slice(2), v = argv[++i];
+    if (k === 'ref') a.ref.push(v); else a[k] = v;
+  }
   if (!a.prompt || !a.out) {
-    console.error('用法：node tools/img.mjs --prompt "…" --out cover.png [--size 1024x1536]');
+    console.error('用法：node tools/img.mjs --prompt "…" --out a.png [--size 1024x1536] [--ref 参考图.png …] [--background transparent]');
     process.exit(1);
   }
-  generateImage({ prompt: a.prompt, out: a.out, size: a.size || '1024x1536' })
+  generateImage({ prompt: a.prompt, out: a.out, size: a.size || '1024x1536', quality: a.quality || 'high', refs: a.ref, background: a.background })
     .then((r) => console.log(JSON.stringify(r)))
     .catch((err) => {
       console.error(`生成图片失败：${err.message}`);

@@ -691,6 +691,16 @@ server.registerTool(
       account: a && (() => { const c = creativeOf(a, it); return { code: a.code, name: a.name, brief: a.brief || undefined, audience: c.audience, persona: c.persona, style: c.visual, platforms: (a.platforms || []).map((p) => PLATFORM_NAMES[p] || p), emotions: c.emotions, voice: c.voice }; })(),
       // 这条内容属于哪个系列：人群、主角、画面、结构、时长都按它
       series: (() => { const x = (a?.series || []).find((v) => v.id === it.seriesId); return x ? seriesForAgent(x) : null; })(),
+      // 系列配了解说员：角色库里的表情差分（dir 相对项目根目录），做视频时按 make-video 的「解说员」一节用
+      presenter: await (async () => {
+        const cid = (a?.series || []).find((v) => v.id === it.seriesId)?.character;
+        if (!cid) return undefined;
+        try {
+          const c = await call('GET', `/api/characters/${cid}`);
+          const expressions = c.expressions.filter((e) => e.variants.closed).map((e) => ({ key: e.key, label: e.label, variants: Object.keys(e.variants).filter((v) => e.variants[v]) }));
+          return expressions.length ? { name: c.name, dir: c.dir, expressions } : undefined;
+        } catch { return undefined; }
+      })(),
     };
   }),
 );

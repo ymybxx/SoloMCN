@@ -1267,6 +1267,7 @@ function readSeriesForm(){
   o.emotions=[...f.querySelectorAll('[data-group="semo"][aria-pressed="true"]')].map(b=>b.dataset.v);
   o.collections=Object.fromEntries(SERIES_COLL.map(c=>[c.k,$('#sColl-'+c.k).value.trim()]).filter(([,v])=>v));
   o.active=$('#sActive').checked;
+  const ch=$('#sChar')?.value;o.character=ch&&ch!=='__new'?ch:null;
   return o;
 }
 function fillSeriesForm(o){
@@ -1301,6 +1302,7 @@ function openSeriesModal(accId,sid){ // 右侧滑出的面板
         <div class="field"><label for="sSummary">一句话定位</label><input type="text" id="sSummary" maxlength="200" value="${esc(s.summary)}" placeholder="每集拆一个 AI 神话"></div>
         <div class="field"><label for="sAud">目标人群</label><input type="text" id="sAud" maxlength="200" value="${esc(s.audience)}" placeholder="25–40 岁一二线城市职场人"></div>
         <div class="field"><label for="sPersona">主角和语气</label><textarea id="sPersona" rows="3" placeholder="固定角色的形象、性格、说话方式、口头禅">${esc(s.persona)}</textarea></div>
+        <div class="field"><span class="lbl">解说员形象 <span class="faint">（可选：用一张角色图生成整套表情，视频里由她出镜解说）</span></span><div id="charBlock" data-cur="${esc(s.character||'')}"></div></div>
         <div class="field"><label for="fVoice">配音音色</label>
           <div class="say"><select id="fVoice"><option value="">不指定（生成视频时按主角挑一个）</option>${(S.voices?.voices||[]).map(v=>`<option value="${esc(v.id)}" ${s.voice===v.id?'selected':''}>${esc(v.label)}｜${esc(v.hint)}</option>`).join('')}${s.voice&&!(S.voices?.voices||[]).some(v=>v.id===s.voice)?`<option value="${esc(s.voice)}" selected>${esc(s.voice)}</option>`:''}</select>
           </div></div>
@@ -1328,6 +1330,45 @@ function openSeriesModal(accId,sid){ // 右侧滑出的面板
     await store.set('accounts',accId,{...acc,series:list});m.innerHTML='';toast('系列已保存');
   });
   setTimeout(()=>$(cur?'#sFeedback':'#sBrief')?.focus(),30);
+  loadCharBlock();
+}
+// 解说员形象：选角色、新建（上传参考图）、补齐表情差分、重画某个表情。生成中每 3 秒刷新一次
+const charFile=(c,f)=>`/api/characters/${c.id}/file/${f}?v=${c.updatedAt||0}`;
+async function loadCharBlock(sel){
+  const box=$('#charBlock');if(!box)return;
+  let list=[];try{list=(await api('GET','/api/characters')).characters}catch{}
+  const cur=sel??($('#sChar')?.value??box.dataset.cur??'');
+  const c=list.find(x=>x.id===cur);
+  const opts=`<option value="">不用解说员</option>${list.map(x=>`<option value="${esc(x.id)}" ${x.id===cur?'selected':''}>${esc(x.name)}</option>`).join('')}<option value="__new" ${cur==='__new'?'selected':''}>＋ 新建角色…</option>`;
+  let body='';
+  if(cur==='__new'){
+    body=`<div class="char-new"><input type="text" id="charName" maxlength="30" placeholder="角色名，例如 小T"><input type="file" id="charRef" accept="image/png,image/jpeg,image/webp"><button type="button" class="btn" data-act="char-create">上传并新建</button></div>
+      <p class="hint">参考图用全身或半身立绘，背景越干净越好。新建后点「生成」，按这张图出一整套表情。</p>`;
+  }else if(c){
+    const j=c.job,run=c.running;
+    const thumbs=[`<figure><img src="${charFile(c,c.ref)}" alt=""><figcaption>参考图</figcaption></figure>`,
+      ...(c.base?[`<figure><img src="${charFile(c,c.base)}" alt=""><figcaption>基准</figcaption></figure>`]:[]),
+      ...c.expressions.map(e=>{const n=Object.values(e.variants).filter(Boolean).length;return `<figure>${e.variants.closed?`<img src="${charFile(c,e.variants.closed)}" alt="">`:'<div class="ph"></div>'}<figcaption>${esc(e.label)} <span class="faint">${n}/4</span>${n&&!run?` <button type="button" class="linkbtn" data-act="char-redo" data-k="${e.key}" title="删掉这个表情的 4 张，再点生成会重画">重画</button>`:''}</figcaption></figure>`})].join('');
+    const status=run?`生成中：${j?.done||0}/${j?.total||0} 张`:c.missing?`已有 ${c.total-c.missing}/${c.total} 张`:`整套 ${c.total} 张都齐了`;
+    const fail=!run&&j?.failed?.length?`<p class="hint" style="color:var(--bad)">上次有 ${j.failed.length} 张没生成成功：${esc(j.failed[0].error)}</p>`:'';
+    body=`<div class="char-grid">${thumbs}</div>
+      <div class="char-bar"><span class="faint">${status}</span>${run?`<button type="button" class="btn" data-act="char-stop">停止</button>`:c.missing?`<button type="button" class="btn" data-act="char-gen" data-n="${c.missing}" data-cost="${c.estimate}">生成缺的 ${c.missing} 张（约 $${c.estimate}）</button>`:''}</div>${fail}`;
+    if(run){clearTimeout(S.charPoll);S.charPoll=setTimeout(()=>loadCharBlock(),3000)}
+  }
+  box.innerHTML=`<select id="sChar">${opts}</select>${body}`;
+  box.dataset.cur=cur;
+  $('#sChar').onchange=e=>loadCharBlock(e.target.value);
+}
+async function charCreate(){
+  const name=$('#charName').value.trim(),file=$('#charRef').files[0];
+  if(!name){toast('给角色起个名字');return}
+  if(!file||!/^image\/(png|jpeg|webp)$/.test(file.type)){toast('选一张 PNG、JPG 或 WebP 图片');return}
+  try{
+    const r=await fetch('/api/uploads',{method:'POST',headers:{'content-type':file.type},body:file});const j=await r.json();
+    if(!r.ok)throw j.error||{message:'上传失败'};
+    const c=await api('POST','/api/characters',{name,ref:j.path});
+    await loadCharBlock(c.id);toast('角色建好了，点「生成」出整套表情');
+  }catch(e){toast(e.message||'新建失败')}
 }
 async function seriesAi(btn,mode){
   const f=$('#seriesForm');const msg=$('#seriesMsg');
@@ -1825,6 +1866,10 @@ document.addEventListener('click',e=>{
     case 'acc-sel':S.accSel=id;S.bindMenu=null;render();break;
     case 'bind-menu':S.bindMenu=S.bindMenu===id?null:id;render();break;
     case 'series-ai-new':seriesAi(b,'new');break;
+    case 'char-create':charCreate();break;
+    case 'char-gen':arm(b,`确认生成 ${b.dataset.n} 张？约 $${b.dataset.cost}`,async()=>{try{await api('POST',`/api/characters/${$('#sChar').value}/generate`);loadCharBlock()}catch(e){toast(e.message||'生成失败')}});break;
+    case 'char-stop':api('POST',`/api/characters/${$('#sChar').value}/stop`).then(()=>loadCharBlock()).catch(e=>toast(e.message||'停止失败'));break;
+    case 'char-redo':arm(b,'确认重画？',async()=>{const id=$('#sChar').value;for(const v of ['closed','open','half','shut'])await api('DELETE',`/api/characters/${id}/files/${b.dataset.k}/${v}`).catch(()=>{});loadCharBlock()});break;
     case 'series-ai-revise':seriesAi(b,'revise');break;
     case 'series-undo':{const f=$('#seriesForm');const cur=(S.accounts[f.dataset.acc]?.series||[]).find(x=>x.id===f.dataset.sid);const prev=cur?.history?.[0];if(!prev)break;
       fillSeriesForm(prev);$('#seriesMsg').textContent=`已经退回到 ${fmtTime(prev.savedAt)} 保存前的那一版，点保存才生效`;break}

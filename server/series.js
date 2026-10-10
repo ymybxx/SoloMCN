@@ -13,6 +13,8 @@ export function cleanSeries(list) {
     id: /^[A-Za-z0-9_-]{1,40}$/.test(s.id || '') ? s.id : `s${Date.now().toString(36)}${i}`,
     ...Object.fromEntries(Object.entries(SERIES_TEXT_FIELDS).map(([k, n]) => [k, clip(s[k], n)])),
     voice: s.voice ? clip(s.voice, 60) : null,
+    // 解说员形象：角色库里的角色 id（data/characters/<id>/）
+    character: /^[a-z0-9]{6,40}$/.test(s.character || '') ? s.character : null,
     emotions: (Array.isArray(s.emotions) ? s.emotions : []).map((e) => clip(e, 10)).filter(Boolean).slice(0, 4),
     collections: Object.fromEntries(COLLECTION_PLATFORMS.map((p) => [p, clip(s.collections?.[p], 40)]).filter(([, v]) => v)),
     active: s.active !== false,
@@ -38,6 +40,7 @@ export function creativeOf(account = {}, item = {}) {
     persona: s?.persona || account.persona || '',
     visual: s?.visual || account.style || '',
     voice: s?.voice || account.voice || null,
+    character: s?.character || null,
     emotions: s?.emotions?.length ? s.emotions : account.emotions || [],
     brief: account.brief || '',
   };
@@ -50,6 +53,7 @@ export function seriesText(s) {
     `系列：《${bare(s.name)}》${s.summary ? `——${s.summary}` : ''}`,
     s.audience && `目标人群：${s.audience}`,
     s.persona && `主角和语气：${s.persona}`,
+    s.character && '解说员：有固定的解说员形象（角色库里的表情差分），视频里由她出镜解说',
     s.visual && `视觉风格：${s.visual}`,
     s.emotions?.length && `主打情绪：${s.emotions.join('、')}`,
     s.structure && `固定结构：${s.structure}`,

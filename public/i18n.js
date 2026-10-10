@@ -156,7 +156,14 @@
     '只填账号名称、大方向和平台。目标人群、主角、风格在保存后的「添加系列」里写': 'Only the channel name, broad direction and platforms here. Audience, persona and style go into a series after saving.',
     '已保存，接着点「添加系列」写目标人群、主角和风格': 'Saved. Now add a series with its audience, persona and style',
     '已暂停': 'Paused', '（暂停）': '(paused)', '正在运营（取消后不再出现在选题和总览里）': 'Active (uncheck to hide from ideas and overview)',
-    '目标人群': 'Audience', '主角和语气': 'Persona and tone', '视觉风格': 'Visual style', '一句话定位': 'One-line positioning',
+    '目标人群': 'Audience', '主角和语气': 'Persona and tone',
+    '解说员形象': 'Presenter', '（可选：用一张角色图生成整套表情，视频里由她出镜解说）': '(Optional: generate a full set of expressions from one character image; she presents in the videos)',
+    '不用解说员': 'No presenter', '＋ 新建角色…': '+ New character…', '角色名，例如 小T': 'Character name, e.g. Tia', '上传并新建': 'Upload and create',
+    '参考图用全身或半身立绘，背景越干净越好。新建后点「生成」，按这张图出一整套表情。': 'Use a full-body or waist-up illustration with a clean background. After creating it, click Generate to make the full expression set.',
+    '参考图': 'Reference', '基准': 'Base', '重画': 'Redraw', '删掉这个表情的 4 张，再点生成会重画': 'Delete the 4 images of this expression; Generate will redraw them',
+    '确认重画？': 'Redraw?', '给角色起个名字': 'Name the character', '选一张 PNG、JPG 或 WebP 图片': 'Pick a PNG, JPG or WebP image',
+    '角色建好了，点「生成」出整套表情': 'Character created. Click Generate for the full expression set', '新建失败': 'Could not create',
+    '讲解': 'Explaining', '得意': 'Smug', '惊讶': 'Surprised', '疑惑': 'Puzzled', '无奈': 'Shrug', '吐槽': 'Roasting', '认真': 'Serious', '开心': 'Happy', '视觉风格': 'Visual style', '一句话定位': 'One-line positioning',
     '固定结构': 'Structure', '适合的题材': 'Topics', '主打情绪': 'Emotions', '配音音色': 'Voice',
     '不指定（生成视频时按主角挑一个）': 'Not set (picked by persona when making the video)', '各平台的合集': 'Collections per platform',
     '（填合集名，发布时自动放进去；要先在平台上建好同名合集，目前抖音已接上）': '(collection name; videos are added automatically on publish. Create it on the platform first; Douyin supported for now)',
@@ -382,6 +389,9 @@
   // 带数字、名字的句式：(.+?) 抓到的部分会再翻译一遍
   const num = (x, k) => { const v = parseFloat(x) * k; return v >= 1e9 ? +(v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? +(v / 1e3).toFixed(1) + 'k' : String(Math.round(v)); };
   const PATTERNS = [
+    [/^生成缺的 (\d+) 张（约 \$([\d.]+)）$/, 'Generate the missing $1 (about $$$2)'], [/^确认生成 (\d+) 张？约 \$([\d.]+)$/, 'Generate $1 images? About $$$2'],
+    [/^生成中：(\d+)\/(\d+) 张$/, 'Generating: $1/$2'], [/^已有 (\d+)\/(\d+) 张$/, '$1/$2 ready'], [/^整套 (\d+) 张都齐了$/, 'All $1 images ready'],
+    [/^上次有 (\d+) 张没生成成功：(.+)$/, '$1 images failed last time: $2'],
     [/^第 (\d+) 步 (.+)，(.+)$/, (m, n, a, b) => `Step ${n} ${tr(a)}, ${tr(b)}`],
     [/^(抖音|B站|小红书|YouTube)(播放|点赞|评论|分享|涨粉)$/, (m, a, b) => `${tr(a)} ${tr(b).toLowerCase()}`],
     [/^文件：(.+)。想在 HyperFrames 里继续改：在 (.+) 目录运行$/, 'File: $1. To keep editing in HyperFrames, run this in $2:'],

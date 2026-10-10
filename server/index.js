@@ -16,6 +16,7 @@ import { createSkills, voicesFile } from './skills.js';
 import { createSetupCheck } from './setupcheck.js';
 import { createYtLogin } from './ytlogin.js';
 import { createLab } from './lab.js';
+import { createCharacters } from './characters.js';
 import { runClaude } from './cli.js';
 import { captureSource } from './assets.js';
 import { watchVideo, probe } from './watch.js';
@@ -44,6 +45,7 @@ const notifyChange = () => {
 const store = await createStore(path.join(root, 'data', 'db.json'), { onChange: notifyChange });
 // 调研里的动手实践：实验目录、录制实验画面、实践浏览器、等人处理（登录、付款、花钱确认）
 const lab = createLab({ root, store });
+const characters = createCharacters({ root });
 lab.clearStale();
 // 定时清理实践占用的空间：启动一分钟后一次，之后每 6 小时一次
 const labCleanup = () => { try { const r = lab.cleanup(); if (r.done.length) console.log(`实践空间清理：${r.done.length} 项`); } catch (err) { console.error('实践空间清理出错：', err.message); } };
@@ -343,6 +345,28 @@ ${mine}`;
     }
   }
   // 调研素材：截网页（和页面里的视频）存到内容卡片上；删掉不要的
+  // 解说员角色库：参考图 → 表情差分（一次生成，之后每条视频直接用）
+  if (parts[0] === 'characters') {
+    try {
+      const id = parts[1];
+      if (parts.length === 1 && method === 'GET') return sendJson(res, 200, { characters: characters.list() });
+      if (parts.length === 1 && method === 'POST') return sendJson(res, 200, characters.create(await readBody(req)));
+      if (parts.length === 2 && method === 'GET') return sendJson(res, 200, characters.view(id));
+      if (parts.length === 2 && method === 'PATCH') return sendJson(res, 200, characters.rename(id, (await readBody(req)).name));
+      if (parts.length === 2 && method === 'DELETE') return sendJson(res, 200, characters.remove(id));
+      if (parts[2] === 'generate' && method === 'POST') return sendJson(res, 200, characters.generate(id));
+      if (parts[2] === 'stop' && method === 'POST') return sendJson(res, 200, characters.stop(id));
+      if (parts[2] === 'files' && parts.length === 5 && method === 'DELETE') return sendJson(res, 200, characters.removeFile(id, parts[3], parts[4]));
+      if (parts[2] === 'file' && parts.length === 4 && method === 'GET') {
+        const f = characters.file(id, parts[3]);
+        if (!f) return sendError(res, 404, 'not_found', '没有这张图');
+        return serveFile(req, res, f);
+      }
+    } catch (err) {
+      return sendError(res, err.status || 500, 'characters', err.message);
+    }
+    return sendError(res, 404, 'not_found', '没有这个接口');
+  }
   // 实践的共用工具箱、经验本和空间管理
   if (parts[0] === 'lab') {
     try {
