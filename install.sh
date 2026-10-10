@@ -60,7 +60,7 @@ cd "$DIR"
 ok "$DIR"
 
 say "装项目依赖"
-node scripts/setup.mjs
+SOLOMCN_INSTALLER=1 node scripts/setup.mjs
 
 say "检查 Claude Code 登录"
 if claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then

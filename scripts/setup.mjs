@@ -54,7 +54,8 @@ try {
   fs.existsSync('/Applications/Google Chrome.app') || process.env.CHROME_PATH ? ok('Google Chrome') : warn('缺 Google Chrome：发布到各平台时要用，运行 brew install --cask google-chrome');
   has('claude') ? ok('Claude Code') : warn('缺 Claude Code：所有 AI 环节都靠它，见 https://claude.com/claude-code');
 
-  console.log('\n装好了。运行 npm start，打开 http://127.0.0.1:5178');
+  // 一键安装（install.sh）调用时不提示：它接下来会检查登录、自动启动
+  if (!process.env.SOLOMCN_INSTALLER) console.log(`\n装好了。运行 npm start，打开 http://127.0.0.1:${process.env.PORT || 5178}`);
 } catch (err) {
   console.error(`\n✗ ${err.message}`);
   process.exit(1);
