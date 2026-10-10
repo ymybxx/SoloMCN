@@ -523,12 +523,14 @@ if (!process.env.HOT_SERVICE_URL && existsSync(hotPython)) {
     console.log(`已启动热点数据服务：${HOT_URL}`);
   }
 }
-for (const sig of ['SIGINT', 'SIGTERM']) {
+// 工作台退出时把它启动的热点服务一起停掉：Ctrl+C、solomcn stop（SIGTERM）、直接关掉终端窗口（SIGHUP）都算
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => {
     hotProc?.kill();
     process.exit(0);
   });
 }
+process.on('exit', () => hotProc?.kill());
 
 server.listen(PORT, HOST, () => {
   console.log(`SoloMCN 工作台已启动：http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);

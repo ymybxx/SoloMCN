@@ -73,7 +73,21 @@ SoloMCN 反过来：**零搭建工作流，直接操纵 Claude。**
 curl -fsSL https://raw.githubusercontent.com/ymybxx/SoloMCN/main/install.sh | bash
 ```
 
-它会装好缺的软件（Homebrew、Node、Python、ffmpeg、Chrome、Claude Code），下载 SoloMCN 到 `~/SoloMCN`，装好依赖，没登录 Claude Code 的话带你登录一次，最后启动并打开工作台。已经装好的都会跳过，可以放心重复运行。以后启动：`cd ~/SoloMCN && npm start`。
+它会装好缺的软件（Homebrew、Node、Python、ffmpeg、Chrome、Claude Code），下载 SoloMCN 到 `~/SoloMCN`，装好依赖，没登录 Claude Code 的话带你登录一次，最后在后台启动并打开工作台。已经装好的都会跳过，可以放心重复运行。
+
+装好后用 `solomcn` 命令启停，在任何目录、新开的终端里都能用：
+
+| 命令 | 作用 |
+|---|---|
+| `solomcn start` | 在后台启动，关掉终端也不影响，就绪后打开浏览器 |
+| `solomcn stop` | 停止 |
+| `solomcn restart` | 重启 |
+| `solomcn status` | 看看开着没有 |
+| `solomcn open` | 在浏览器里打开工作台 |
+| `solomcn logs` | 看运行日志 |
+| `solomcn update` | 更新到最新版本，开着的话自动重启 |
+
+开发调试时也可以在项目目录运行 `npm start`，在前台看输出，按 `Ctrl+C` 停止。
 
 <details><summary>想自己一步步装</summary>
 

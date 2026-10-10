@@ -76,7 +76,21 @@ All you need is a Mac and a Claude subscription. Open Terminal and run:
 curl -fsSL https://raw.githubusercontent.com/ymybxx/SoloMCN/main/install.sh | bash
 ```
 
-It installs whatever is missing (Homebrew, Node, Python, ffmpeg, Chrome, Claude Code), downloads SoloMCN to `~/SoloMCN`, installs dependencies, walks you through logging in to Claude Code if needed, then starts the app and opens it. Anything already installed is skipped, so it's safe to run again. To start later: `cd ~/SoloMCN && npm start`.
+It installs whatever is missing (Homebrew, Node, Python, ffmpeg, Chrome, Claude Code), downloads SoloMCN to `~/SoloMCN`, installs dependencies, walks you through logging in to Claude Code if needed, then starts it in the background and opens it. Anything already installed is skipped, so it's safe to run again.
+
+Afterwards, use the `solomcn` command from any folder or new terminal:
+
+| Command | What it does |
+|---|---|
+| `solomcn start` | Start in the background (closing the terminal is fine) and open the browser when ready |
+| `solomcn stop` | Stop |
+| `solomcn restart` | Restart |
+| `solomcn status` | Is it running? |
+| `solomcn open` | Open the workbench in the browser |
+| `solomcn logs` | Show the logs |
+| `solomcn update` | Update to the latest version, restarting if it was running |
+
+For development you can also run `npm start` in the project folder to see output in the foreground; press `Ctrl+C` to stop.
 
 <details><summary>Prefer to install step by step?</summary>
 

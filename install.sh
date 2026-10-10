@@ -75,8 +75,21 @@ else
   printf '  工作台总览页顶部也会一直提醒，登录好后点「重新检查」。\n'
 fi
 
+say "solomcn 命令"
+# 链接到 ~/.local/bin（Claude Code 也装在这里），以后在任何目录都能用 solomcn start / stop
+mkdir -p "$HOME/.local/bin"
+ln -sf "$DIR/bin/solomcn" "$HOME/.local/bin/solomcn"
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+RC="$HOME/.zshrc"; [ "${SHELL##*/}" = "bash" ] && RC="$HOME/.bash_profile"
+grep -qs '.local/bin' "$RC" || printf '\n# SoloMCN / Claude Code\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC"
+ok "solomcn"
+
 say "启动"
-printf '  工作台地址：http://127.0.0.1:%s（以后启动：cd %s && npm start）\n' "$PORT" "$DIR"
-# 等工作台和热点服务都就绪了再打开浏览器（第一次启动热点服务要先建库、抓一遍热榜，会慢几秒）
-[ -n "${SOLOMCN_NO_OPEN:-}" ] || (for _ in $(seq 1 60); do curl -fs "http://127.0.0.1:$PORT/api/hs/health" >/dev/null 2>&1 && break; sleep 1; done; open "http://127.0.0.1:$PORT") >/dev/null 2>&1 &
-exec npm start
+"$DIR/bin/solomcn" start
+printf '\n  以后用这几个命令（新开的终端里也能用）：\n'
+printf '    solomcn start     启动（在后台运行，关掉终端也不影响）\n'
+printf '    solomcn stop      停止\n'
+printf '    solomcn status    看看开着没有\n'
+printf '    solomcn open      在浏览器里打开工作台\n'
+printf '    solomcn logs      看运行日志\n'
+printf '    solomcn update    更新到最新版本\n'

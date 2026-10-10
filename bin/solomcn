@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# SoloMCN 的启停命令。一键安装时会链接到 ~/.local/bin/solomcn，在任何目录都能用：
+#   solomcn start     在后台启动（关掉终端也不影响），就绪后打开浏览器
+#   solomcn stop      停止工作台和热点服务
+#   solomcn restart   重启
+#   solomcn status    看看开着没有
+#   solomcn open      在浏览器里打开工作台
+#   solomcn logs      看运行日志（Ctrl+C 退出）
+#   solomcn update    更新到最新版本、补装依赖，开着的话自动重启
+# 端口默认 5178（热点服务用 5179），用环境变量 PORT 指定别的。
+set -euo pipefail
+
+# 找到项目目录：这个脚本可能是 ~/.local/bin 里的链接，顺着链接找到真正的位置
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+ROOT="$(cd -P "$(dirname "$src")/.." && pwd)"
+cd "$ROOT"
+
+PORT="${PORT:-5178}"
+HOT_PORT=$((PORT + 1))
+URL="http://127.0.0.1:$PORT"
+PIDFILE="$ROOT/data/solomcn.pid"
+LOGDIR="$ROOT/data/logs"
+LOG="$LOGDIR/workbench.log"
+mkdir -p "$ROOT/data" "$LOGDIR"
+
+ok() { printf '  ✓ %s\n' "$1"; }
+info() { printf '  %s\n' "$1"; }
+die() { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
+
+pid() { [ -f "$PIDFILE" ] && cat "$PIDFILE" || true; }
+alive() { local p; p="$(pid)"; [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
+up() { curl -fs -m 2 "$URL/api/hs/health" >/dev/null 2>&1; }
+listener() { lsof -nP -t -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -1 || true; }
+# 端口上的进程是不是这个项目的（避免误杀别的程序）
+ours() { local p="$1"; [ -n "$p" ] && lsof -a -p "$p" -d cwd -Fn 2>/dev/null | grep -q "^n$ROOT"; }
+
+start() {
+  if up; then ok "已经在运行：$URL"; [ "${1:-}" = "--no-open" ] || [ -n "${SOLOMCN_NO_OPEN:-}" ] || open "$URL"; return 0; fi
+  local l; l="$(listener "$PORT")"
+  if [ -n "$l" ] && ! ours "$l"; then die "端口 $PORT 被别的程序占用了，换个端口：PORT=5188 solomcn start"; fi
+  if alive || [ -n "$l" ]; then
+    # 已经有一个在启动或者卡住了：等一会儿，还不行就提示重启，不重复启动
+    for _ in $(seq 1 30); do up && { ok "已经在运行：$URL"; return 0; }; sleep 1; done
+    die "SoloMCN 开着但没响应，试试 solomcn restart（日志：solomcn logs）"
+  fi
+  printf '启动 SoloMCN…\n'
+  printf '\n===== %s 启动 =====\n' "$(date '+%Y-%m-%d %H:%M:%S')" >>"$LOG"
+  PORT="$PORT" nohup node server/index.js >>"$LOG" 2>&1 &
+  echo $! >"$PIDFILE"
+  # 等工作台和热点服务都就绪（第一次启动热点服务要先建库、抓一遍热榜）
+  for _ in $(seq 1 60); do
+    up && break
+    alive || { tail -n 20 "$LOG"; die "启动失败，上面是最后几行日志（完整日志：solomcn logs）"; }
+    sleep 1
+  done
+  up || info "工作台起来了，热点服务还在准备，页面会自动连上"
+  ok "已启动：$URL"
+  info "停止：solomcn stop　　看日志：solomcn logs"
+  [ "${1:-}" = "--no-open" ] || [ -n "${SOLOMCN_NO_OPEN:-}" ] || open "$URL"
+}
+
+stop() {
+  local stopped=0 p
+  if alive; then
+    p="$(pid)"
+    kill "$p" 2>/dev/null || true
+    for _ in $(seq 1 20); do kill -0 "$p" 2>/dev/null || break; sleep 0.25; done
+    kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
+    stopped=1
+  fi
+  rm -f "$PIDFILE"
+  # 用 npm start 在前台启动、或者上次没停干净留下的进程：只停这个项目自己的
+  for port in "$PORT" "$HOT_PORT"; do
+    p="$(listener "$port")"
+    if [ -n "$p" ] && ours "$p"; then kill "$p" 2>/dev/null || true; stopped=1; fi
+  done
+  sleep 0.5
+  [ "$stopped" = 1 ] && ok "已停止" || ok "本来就没在运行"
+}
+
+status() {
+  if up; then
+    ok "正在运行：$URL"
+    alive && info "进程：$(pid)（后台运行，日志在 $LOG）" || info "（不是用 solomcn start 启动的，可能是在某个终端里 npm start）"
+  elif [ -n "$(listener "$PORT")" ]; then
+    info "工作台开着，但热点服务没响应：$URL（可以试试 solomcn restart）"
+  else
+    info "没在运行。启动：solomcn start"
+  fi
+}
+
+update() {
+  local was_up=0
+  up && was_up=1
+  printf '更新 SoloMCN…\n'
+  git pull --ff-only || die "拉取最新代码失败：项目目录里可能有改过的文件（git status 查看）"
+  SOLOMCN_INSTALLER=1 node scripts/setup.mjs
+  if [ "$was_up" = 1 ]; then stop; start --no-open; else ok "已更新。启动：solomcn start"; fi
+}
+
+case "${1:-}" in
+  start) start "${2:-}" ;;
+  stop) stop ;;
+  restart) stop; start --no-open ;;
+  status) status ;;
+  open) up || info "（还没在运行，先 solomcn start）"; open "$URL" ;;
+  logs) [ -f "$LOG" ] || die "还没有日志"; tail -n 200 -f "$LOG" ;;
+  update) update ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
