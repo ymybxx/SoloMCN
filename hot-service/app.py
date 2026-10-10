@@ -15,11 +15,13 @@ from pydantic import BaseModel, Field
 from channels.douyin import DouyinChannel
 from channels.hotlist import HotListChannel
 from channels.x import XChannel
+from channels.youtube import YouTubeChannel
 from config import DB_PATH, FETCH_INTERVAL_MIN, HOST, PORT
 from hub import SOURCES, Hub
 from scheduler import Busy, Scheduler
 from db import connect
 from xpool import PoolError, XPool
+import youtube
 
 hub = Hub()
 xpool = XPool()
@@ -43,7 +45,7 @@ async def lifespan(_app: FastAPI):
     await xpool.start(db)
     # 抖音有自己的渠道（数据更全），其余榜单包一层复用热榜中心的抓取和缓存
     lists = [HotListChannel(hub, s) for s in SOURCES if s.id != "douyin"]
-    scheduler = Scheduler(db, [XChannel(xpool), DouyinChannel(), *lists])
+    scheduler = Scheduler(db, [XChannel(xpool), YouTubeChannel(), DouyinChannel(), *lists])
     await scheduler.load()
     tasks = [asyncio.create_task(refresh_loop()), asyncio.create_task(xpool.background()), asyncio.create_task(scheduler.loop())]
     yield
@@ -198,6 +200,63 @@ async def x_pool_add(body: AddAccounts):
 @app.delete("/x/pool/accounts/{username}")
 async def x_pool_remove(username: str):
     return await xpool.remove_account(username)
+
+
+YT_STATUS = {"no_key": 503, "bad_key": 502, "quota": 429, "bad_input": 400, "not_found": 404, "comments_disabled": 409}
+
+
+@app.exception_handler(youtube.YouTubeError)
+async def youtube_error(_req, exc: youtube.YouTubeError):
+    return JSONResponse(status_code=YT_STATUS.get(exc.code, 502), content={"error": {"code": exc.code, "message": str(exc)}})
+
+
+# ---------- YouTube（官方数据接口） ----------
+@app.get("/youtube/search")
+async def youtube_search(q: str, days: float = Query(7, ge=0, le=3650, description="只看最近多少天发布的，0 不限"),
+                         order: str = Query("viewCount", pattern="^(viewCount|relevance|date|rating)$"),
+                         limit: int = Query(20, ge=1, le=50), lang: str | None = None, region: str | None = None):
+    """按关键词搜视频（100 点额度），每条带播放、点赞、评论数和简介。q 支持 A|B、-词、"短语"。"""
+    return {"q": q, "items": await youtube.search(q, days=days or None, order=order, limit=limit, lang=lang, region=region),
+            "quota": youtube.quota()}
+
+
+@app.get("/youtube/videos")
+async def youtube_videos(ids: str = Query(..., description="逗号分隔的视频 id 或链接，最多 50 条")):
+    """视频详情：完整简介、标签、时长、播放点赞评论数（1 点额度）。"""
+    vids = [youtube.video_id(x) for x in ids.split(",")][:50]
+    if not any(vids):
+        raise youtube.YouTubeError("bad_input", "没认出视频 id，给 YouTube 视频链接或 11 位 id")
+    return {"items": await youtube.videos([v for v in vids if v]), "quota": youtube.quota()}
+
+
+@app.get("/youtube/comments")
+async def youtube_comments(video: str, limit: int = Query(20, ge=1, le=100), order: str = Query("relevance", pattern="^(relevance|time)$")):
+    """一条视频的热门（relevance）或最新（time）评论（1 点额度）。"""
+    vid = youtube.video_id(video)
+    if not vid:
+        raise youtube.YouTubeError("bad_input", "没认出视频 id，给 YouTube 视频链接或 11 位 id")
+    return {"video": vid, "items": await youtube.comments(vid, limit, order), "quota": youtube.quota()}
+
+
+class YouTubeKey(BaseModel):
+    key: str
+
+
+@app.put("/youtube/key")
+async def youtube_key_put(body: YouTubeKey):
+    """保存 API key：先用它查一条视频确认能用（1 点额度）。返回只带末 4 位。"""
+    return await youtube.set_key(body.key)
+
+
+@app.delete("/youtube/key")
+async def youtube_key_delete():
+    return youtube.clear_key()
+
+
+@app.get("/youtube/quota")
+async def youtube_quota():
+    """今天的额度用了多少、还剩多少、什么时候恢复，以及 key 有没有配置。"""
+    return youtube.quota()
 
 
 # ---------- 推特（实时查询，花号池的请求次数） ----------

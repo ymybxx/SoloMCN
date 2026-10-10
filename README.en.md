@@ -56,7 +56,7 @@ Every arrow is a Claude Code run. You watch each step live and can interject mid
 
 - **A one-person MCN.** Several channels, each with several series. Audience, tone, voice and visual style live on the series, so channels don't overlap.
 - **Research with sources.** Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures pages and official videos as footage.
-- **See what's hot overseas.** A built-in X (Twitter) source catches new AI formats before they take off in China. See "The X source" below.
+- **See what's hot overseas.** A built-in X (Twitter) source catches new AI formats before they take off in China; see "The X source" below. There's also a YouTube source: add a free YouTube Data API key under Sources → YouTube and it regularly fetches the most-viewed recent videos for your keywords, while Claude can search videos and read descriptions and top comments on its own.
 - **It actually publishes.** One click to Douyin, Xiaohongshu, Bilibili, YouTube and X using a browser you logged into yourself, with portrait and landscape covers uploaded separately. Tick "manual" for any platform to get everything ready to copy and paste.
 - **Bring your own video.** Pick a local file (not copied). Claude "watches" it (frames plus speech-to-text) and writes copy for each platform.
 - **English or Chinese UI.** Switch in Settings; Claude's progress notes follow. Content language follows each series: describe a series as English and its ideas, scripts, voice-over and copy come out in English.
@@ -171,7 +171,7 @@ server/
   publish/         Browser publishing for Douyin, Xiaohongshu, Bilibili, YouTube, X
   assets.js        Captures web pages and videos as footage during research
   watch.js         "Watches" local videos: frame sheets plus speech-to-text
-hot-service/       Trends service (Python): Douyin, Weibo, Bilibili, Zhihu, Baidu, Toutiao, Hacker News and the X account pool
+hot-service/       Trends service (Python): Douyin, Weibo, Bilibili, Zhihu, Baidu, Toutiao, Hacker News, the X account pool and YouTube
 defaults/skills/   Default job descriptions (yours live in .claude/skills/, never committed)
 data/              Your data (channels, content, logins, keys), local only, never committed
 videos/            Generated video projects, never committed

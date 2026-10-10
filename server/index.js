@@ -257,10 +257,10 @@ ${mine}`;
     if (q.get('risky') === '1') out.set('risky', 'true');
     return proxyHot(req, res, '/topics?' + out);
   }
-  // 其他热点数据接口原样转发：/api/hs/global、/api/hs/feed、/api/hs/channels、/api/hs/x/pool、/api/hs/x/search?q=...
+  // 其他热点数据接口原样转发：/api/hs/global、/api/hs/feed、/api/hs/channels、/api/hs/x/pool、/api/hs/x/search?q=...、/api/hs/youtube/search?q=...
   if (parts[0] === 'hs' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) {
     const rest = parts.slice(1).join('/');
-    if (!/^(health|sources|topics|global|feed|channels(\/[a-z0-9-]{1,30}\/(run|config))?|x\/(pool(\/check|\/accounts(\/[A-Za-z0-9_]{1,40}(\/check)?)?)?|trends|search|list\/\d+|user\/[A-Za-z0-9_]{1,15}))$/.test(rest)) {
+    if (!/^(health|sources|topics|global|feed|channels(\/[a-z0-9-]{1,30}\/(run|config))?|x\/(pool(\/check|\/accounts(\/[A-Za-z0-9_]{1,40}(\/check)?)?)?|trends|search|list\/\d+|user\/[A-Za-z0-9_]{1,15})|youtube\/(search|videos|comments|quota|key))$/.test(rest)) {
       return sendError(res, 404, 'not_found', '没有这个热点数据接口');
     }
     return proxyHot(req, res, '/' + rest + new URL(req.url, 'http://localhost').search);

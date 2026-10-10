@@ -228,7 +228,7 @@ function vHome(){
 }
 
 /* ---------- 选题雷达（第 3 步）和账号选题（第 4 步） ---------- */
-const CH_NAMES={x:'推特',douyin:'抖音',xiaohongshu:'小红书',web:'网页',weibo:'微博',bilibili:'B站',zhihu:'知乎',baidu:'百度',toutiao:'头条','bilibili-video':'B站热门视频',hackernews:'Hacker News'};
+const CH_NAMES={x:'推特',youtube:'YouTube',douyin:'抖音',xiaohongshu:'小红书',web:'网页',weibo:'微博',bilibili:'B站',zhihu:'知乎',baidu:'百度',toutiao:'头条','bilibili-video':'B站热门视频',hackernews:'Hacker News'};
 const fmtTime=ts=>{if(!ts)return '';const d=new Date(ts);return pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes())};
 const pickList=()=>Object.entries(S.picks||{}).map(([id,v])=>({id,...v})).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 const runList=()=>Object.entries(S.runs||{}).map(([id,v])=>({id,...v})).sort((a,b)=>(b.startedAt||0)-(a.startedAt||0));
@@ -634,9 +634,9 @@ const ago=t=>{if(!t)return '';const m=Math.round((Date.now()-new Date(t))/60000)
 const mmss=s=>`${Math.floor(s/60)}:${pad(s%60)}`;
 async function loadFeed(){
   if(S.feedLoading)return;S.feedLoading=true;
-  // 推特单独取：全部渠道按热度分混排取前 800 条时，推文容易被榜单挤掉
-  try{const h=S.feedHours||24;const [channels,feed,tw]=await Promise.all([api('GET','/api/hs/channels'),api('GET',`/api/hs/feed?hours=${h}&limit=800`),api('GET',`/api/hs/feed?channels=x&hours=${h}&limit=1000`)]);
-    S.feed={channels,items:[...feed.items.filter(x=>x.channel!=='x'),...tw.items]}}
+  // 推特、YouTube 单独取：全部渠道按热度分混排取前 800 条时，它们容易被榜单挤掉
+  try{const h=S.feedHours||24;const [channels,feed,tw,yt]=await Promise.all([api('GET','/api/hs/channels'),api('GET',`/api/hs/feed?hours=${h}&limit=800`),api('GET',`/api/hs/feed?channels=x&hours=${h}&limit=1000`),api('GET',`/api/hs/feed?channels=youtube&hours=${Math.max(h,168)}&limit=500`)]);
+    S.feed={channels,items:[...feed.items.filter(x=>x.channel!=='x'&&x.channel!=='youtube'),...tw.items,...yt.items]}}
   catch(e){S.feed={down:e.message||'热点数据服务没有响应'}}
   S.feedLoading=false;requestRender();
   // 热点服务刚启动时会晚几秒就绪：停在渠道、素材页时自动重试，连上了就显示
@@ -684,23 +684,46 @@ function vTweet(x,names){
     <div class="idea-actions">${url?`<a class="btn ghost" href="${esc(url)}" target="_blank" rel="noopener">打开原帖</a>`:''}<button class="btn ghost" data-act="feed-pick" data-ch="${esc(x.channel)}" data-id="${esc(x.id)}" data-title="${esc(`${x.author||''}：${x.title}`)}" data-url="${esc(url)}">送进选题雷达</button></div>
   </article>`;
 }
+// YouTube 视频：按每小时播放速度排。搜的是最近几天发布的，所以不跟着 24/48 小时筛选走
+const ytDur=s=>s==null?'':s>=3600?`${Math.floor(s/3600)}:${pad(Math.floor(s%3600/60))}:${pad(s%60)}`:mmss(s);
+function vYtVideo(x){
+  const m=x.metrics||{},e=x.extra||{},key=x.channel+':'+x.id,open=!!S.feedOpen?.has(key);const url=safeUrl(x.url);
+  return `<article class="panel feed-item">
+    <div class="feed-meta"><span class="feed-score num ${x.score>=70?'hot':x.score>=55?'warm':''}" title="热度分：每小时的播放量，涨得越快越高">${x.score}</span>${x.isNew?'<span class="emo by" title="最近一轮抓取新出现的">新</span>':''}<b>${esc(x.author||'')}</b><span class="faint">YouTube · ${ago(x.publishedAt)}</span>${(e.matched||[]).filter(g=>g.length<=8).map(g=>`<span class="emo">${esc(g)}</span>`).join('')}${e.durationSec!=null?`<span class="emo">${e.short?'Shorts ':''}${ytDur(e.durationSec)}</span>`:''}${e.captions?'<span class="emo" title="作者上传了字幕">有字幕</span>':''}</div>
+    <button class="feed-title" data-act="feed-toggle" data-id="${esc(key)}" aria-expanded="${open}">${esc(x.title)}</button>
+    <div class="feed-nums num faint">播放 ${fmtN(m.views)} · 赞 ${fmtN(m.likes)} · 评 ${fmtN(m.comments)}</div>
+    ${open&&x.text?`<div class="feed-text">${esc(x.text)}</div>`:''}
+    <div class="idea-actions">${url?`<a class="btn ghost" href="${esc(url)}" target="_blank" rel="noopener">打开视频</a>`:''}<button class="btn ghost" data-act="feed-pick" data-ch="youtube" data-id="${esc(x.id)}" data-title="${esc(`${x.author||''}：${x.title}`)}" data-url="${esc(url)}">送进选题雷达</button></div>
+  </article>`;
+}
+// 「全部」里的 YouTube 紧凑列表：前几条，和榜单放在一列
+function vYtList(items,max){
+  const shown=items.slice(0,max);
+  return `<div class="panel dy-list"><div class="blk-head"><h3>YouTube</h3><span class="faint">最近 7 天 · ${items.length} 条</span>
+      ${items.length>max?`<div class="actions"><button class="btn ghost" data-act="feed-chan" data-k="youtube">看全部 ${items.length} 条</button></div>`:''}</div>
+    ${shown.map(x=>`<div class="dy-row"><span class="num rk">${x.score}</span>
+      <span class="t">${safeUrl(x.url)?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`:esc(x.title)}<small class="faint">${esc([x.author,'播放 '+fmtN(x.metrics?.views),ago(x.publishedAt),...(x.extra?.matched||[])].filter(Boolean).join(' · '))}</small></span>
+      <span class="num faint"></span>
+      <button class="btn ghost" data-act="feed-pick" data-ch="youtube" data-id="${esc(x.id)}" data-title="${esc(`${x.author||''}：${x.title}`)}" data-url="${esc(safeUrl(x.url))}" title="送进选题雷达">送入</button></div>`).join('')||'<p class="hint">还没有数据。在「渠道 → YouTube」配好 key 后会自动抓</p>'}</div>`;
+}
 function vFeed(){
   const f=S.feed;
   if(!f)return '<div class="empty">正在读取…</div>';
   if(f.down)return `<div class="empty"><strong>热点数据服务没有响应</strong>${esc(f.down)}</div>`;
   const hours=S.feedHours||24;const ch=S.feedChan||'all';const names=Object.fromEntries(f.channels.map(c=>[c.id,c.name]));
   const by={};for(const x of f.items)(by[x.channel]??=[]).push(x);
-  const lists=f.channels.filter(c=>c.id!=='x').map(c=>c.id);const tw=by.x||[];
-  // 推特号池里没账号、也没抓到过推文时，不占地方
-  const xOn=tw.length||!chan('x')?.notReady;
+  const lists=f.channels.filter(c=>c.id!=='x'&&c.id!=='youtube').map(c=>c.id);const tw=by.x||[];const yt=(by.youtube||[]).sort((a,b)=>b.score-a.score);
+  // 推特号池里没账号、YouTube 没填 key，也没抓到过内容时，不占地方
+  const xOn=tw.length||!chan('x')?.notReady;const yOn=yt.length||!chan('youtube')?.notReady;
   // 榜单只数当前还在榜上的条数
   const nowCount=id=>{const it=by[id]||[];const last=it.reduce((m,x)=>x.lastSeen>m?x.lastSeen:m,'');return it.filter(x=>x.lastSeen===last&&!x.extra?.rising).length};
-  const chChips=[['all','全部'],...(xOn?[['x',`推特 ${tw.length}`]]:[]),...lists.map(id=>[id,`${names[id]} ${nowCount(id)}`])].map(([k,n])=>`<button class="chip" aria-pressed="${ch===k}" data-act="feed-chan" data-k="${esc(k)}">${esc(n)}</button>`).join('');
+  const chChips=[['all','全部'],...(xOn?[['x',`推特 ${tw.length}`]]:[]),...(yOn?[['youtube',`YouTube ${yt.length}`]]:[]),...lists.map(id=>[id,`${names[id]} ${nowCount(id)}`])].map(([k,n])=>`<button class="chip" aria-pressed="${ch===k}" data-act="feed-chan" data-k="${esc(k)}">${esc(n)}</button>`).join('');
   const hChips=FEED_HOURS.map(([h,n])=>`<button class="chip" aria-pressed="${hours===h}" data-act="feed-hours" data-k="${h}">${n}</button>`).join('');
   const tweets=`<div class="feed-list">${tw.map(x=>vTweet(x,names)).join('')||'<div class="empty"><strong>这段时间没有推特内容</strong>渠道会按间隔自动抓取，也可以在「渠道 → 推特」里立即抓取</div>'}</div>`;
-  const body=ch==='x'?tweets:ch!=='all'?vHotList(ch,by[ch]||[]):xOn?
-    `<div class="feed-cols"><div class="grid" style="gap:12px">${lists.map(id=>vHotList(id,by[id]||[],10)).join('')}</div><div>${tweets}</div></div>`:
-    `<div class="feed-grid">${lists.map(id=>vHotList(id,by[id]||[],10)).join('')}</div>`;
+  const ytList=yOn?vYtList(yt,10):'';
+  const body=ch==='x'?tweets:ch==='youtube'?`<div class="feed-list">${yt.map(vYtVideo).join('')||'<div class="empty"><strong>还没有 YouTube 视频</strong>渠道会按间隔自动抓，也可以在「渠道 → YouTube」里立即抓取</div>'}</div>`:ch!=='all'?vHotList(ch,by[ch]||[]):xOn?
+    `<div class="feed-cols"><div class="grid" style="gap:12px">${ytList}${lists.map(id=>vHotList(id,by[id]||[],10)).join('')}</div><div>${tweets}</div></div>`:
+    `<div class="feed-grid">${ytList}${lists.map(id=>vHotList(id,by[id]||[],10)).join('')}</div>`;
   return `<div class="section-head"><h2>素材</h2><p>各渠道定时抓到的原始内容。精选交给下一步的 Claude；看到想做的，也可以直接送进选题雷达</p></div>
     <div class="feed-filters"><div class="chips">${chChips}</div>${xOn&&(ch==='x'||ch==='all')?`<div class="chips">${hChips}</div>`:''}</div>
     ${body}`;
@@ -719,7 +742,7 @@ function vSources(){
   const nav=tabs.map(t=>{const [cls,label]=t.k==='xhs'?['','未接入']:chanState(t.k);
     return `<button class="chan-tab" role="tab" aria-selected="${sel===t.k}" data-act="chan-sel" data-k="${t.k}"><b>${t.n}</b><span class="pill ${cls}"><i></i>${label}</span></button>`}).join('');
   return `<div class="section-head"><h2>渠道</h2><p>每个渠道单独配置多久抓一次、抓什么，保存后下一轮抓取就生效</p></div>
-    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${(({x:vChanX,douyin:vChanDouyin,xhs:vChanXhs})[sel]||(()=>vChanList(sel)))()}</div></div>`;
+    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${(({x:vChanX,youtube:vChanYoutube,douyin:vChanDouyin,xhs:vChanXhs})[sel]||(()=>vChanList(sel)))()}</div></div>`;
 }
 function vChanStatus(id){
   const c=chan(id);if(!c)return '<div class="panel"><p class="hint">正在读取渠道状态…</p></div>';
@@ -769,9 +792,11 @@ function vChanX(){
 function vQTest(){
   const t=S.qTest;
   if(t.error)return `<p class="err">${esc(t.error)}</p>`;
+  if(t.ch==='youtube')return `<div class="q-test"><div class="faint">试搜：最近 ${t.days} 天播放最多的前 ${t.items.length} 条（用了 100 点额度，今天还剩 ${t.left}）</div>${t.items.map(x=>`<div class="q-hit"><span class="num faint">${fmtN(x.views)} 播放</span><b>${esc(x.channel||'')}</b> ${esc(x.title)}</div>`).join('')||'<p class="hint">没有搜到，换个关键词试试</p>'}</div>`;
   return `<div class="q-test"><div class="faint">试搜：按热门取最近两天前 ${t.items.length} 条</div>${t.items.map(x=>`<div class="q-hit"><span class="num faint">${fmtN(x.likes)} 赞</span><b>@${esc(x.user?.username||'')}</b> ${esc((x.text||'').replace(/\s+/g,' ').slice(0,120))}</div>`).join('')||'<p class="hint">没有搜到。可能门槛太高、语法有误，或者号池里的号被限制了搜索（看下面号池的状态）</p>'}</div>`;
 }
-async function qTest(i){
+async function qTest(i,ch='x'){
+  if(ch==='youtube')return ytTest(i);
   const q=draft('x').settings.queries[i];if(!q?.query.trim()){toast('先写搜索语句');return}
   const since=new Date(Date.now()-48*36e5).toISOString().slice(0,10);
   S.qTest={ch:'x',i,loading:true};render();
@@ -787,7 +812,66 @@ async function cfgSave(id){
   catch(e){S.cfgMsg={id,text:e.message||'保存失败',bad:true}}
   S.cfgSaving=false;render();
 }
+async function ytTest(i){
+  const d=draft('youtube');const q=d.settings.queries[i];if(!q?.query.trim()){toast('先写关键词');return}
+  S.qTest={ch:'youtube',i,loading:true};render();
+  try{const p=new URLSearchParams({q:q.query,days:String(d.settings.days),order:'viewCount',limit:'10'});if(q.lang)p.set('lang',q.lang);
+    const r=await api('GET','/api/hs/youtube/search?'+p);S.qTest={ch:'youtube',i,items:r.items,days:d.settings.days,left:r.quota.left};S.ytQuota=r.quota}
+  catch(e){S.qTest={ch:'youtube',i,error:e.message||'试搜失败'}}
+  render();
+}
 // API key：只在本机存，页面上只显示末 4 位
+function vYtKey(yq){
+  if(!yq)return '';
+  const edit=!yq.configured||S.ytKeyEdit;
+  return `<div class="panel grid" style="gap:8px"><div class="blk-head"><h3>API key</h3>${yq.configured?`<span class="pill ok"><i></i>已配置 ····${esc(yq.tail||'')}${yq.source==='env'?'（来自环境变量）':''}</span>`:'<span class="pill bad"><i></i>还没填</span>'}
+      ${yq.configured&&!S.ytKeyEdit?`<div class="actions"><button class="btn ghost" data-act="yt-key-edit">更换</button>${yq.source==='page'?'<button class="btn ghost danger" data-act="yt-key-del">删除</button>':''}</div>`:''}</div>
+    ${edit?`<div class="cfg-row"><input type="password" id="ytKey" autocomplete="off" spellcheck="false" placeholder="AIza…" aria-label="YouTube API key" style="flex:1;min-width:16em">
+      <button class="btn primary" data-act="yt-key-save" ${S.ytKeySaving?'disabled':''}>${S.ytKeySaving?'验证中…':'验证并保存'}</button>${S.ytKeyEdit?'<button class="btn ghost" data-act="yt-key-cancel">取消</button>':''}</div>
+      <p class="hint">在 Google Cloud 控制台开通「YouTube Data API v3」，在「凭据」里创建 API 密钥（API 限制勾 YouTube Data API v3）。保存前会用它查一条视频确认能用（1 点额度）；只存在这台电脑上，页面上只显示末 4 位。</p>`:''}</div>`;
+}
+async function ytKeySave(){
+  const v=($('#ytKey')?.value||'').trim();if(!v){toast('先粘贴 key');return}
+  S.ytKeySaving=true;render();
+  try{S.ytQuota=await api('PUT','/api/hs/youtube/key',{key:v});S.ytKeyEdit=false;toast('key 能用，已保存，开始抓一轮');await loadFeed();feedRun('youtube')}
+  catch(e){toast(e.message||'保存失败')}
+  S.ytKeySaving=false;render();
+}
+async function loadYtQuota(){try{S.ytQuota=await api('GET','/api/hs/youtube/quota')}catch{S.ytQuota=null}requestRender()}
+function vChanYoutube(){
+  const c=chan('youtube');if(!c)return vChanStatus('youtube');
+  if(S.ytQuota===undefined){S.ytQuota=null;loadYtQuota()}
+  const d=draft('youtube');const qs=d.settings.queries;const on=qs.filter(q=>q.enabled).length;const yq=S.ytQuota;
+  const perRun=on*101;const perDay=Math.round(perRun*1440/d.everyMin);
+  const rows=qs.map((q,i)=>`<div class="q-row ${q.enabled?'':'off'}">
+      <div class="q-head"><input type="text" class="q-name" data-ch="youtube" data-q="${i}" data-f="name" value="${esc(q.name)}" maxlength="8" aria-label="类别名" placeholder="类别名">
+        <label class="q-on"><input type="checkbox" data-ch="youtube" data-q="${i}" data-f="enabled" ${q.enabled?'checked':''}> 启用</label>
+        <input type="text" class="q-lang" data-ch="youtube" data-q="${i}" data-f="lang" value="${esc(q.lang||'')}" maxlength="8" placeholder="语言" title="偏向某种语言的结果，如 en、zh-Hans、ja；不填不限" aria-label="${esc(q.name)} 的语言">
+        <span class="actions"><button class="btn ghost" data-act="q-test" data-ch="youtube" data-k="${i}" ${S.qTest?.loading?'disabled':''} title="用 100 点额度">${S.qTest?.ch==='youtube'&&S.qTest?.i===i&&S.qTest.loading?'搜索中…':'试搜'}</button><button class="btn ghost danger" data-act="q-del" data-ch="youtube" data-k="${i}">删除</button></span></div>
+      <textarea class="q-text" data-ch="youtube" data-q="${i}" data-f="query" rows="2" spellcheck="false" aria-label="${esc(q.name)} 的关键词" placeholder='"AI agent"|Cursor'>${esc(q.query)}</textarea>
+      ${S.qTest?.ch==='youtube'&&S.qTest?.i===i&&!S.qTest.loading?vQTest():''}
+    </div>`).join('');
+  return `${vYtKey(yq)}
+    ${vChanStatus('youtube')}
+    <div class="panel grid" style="gap:12px">
+      ${vCfgHead('youtube','抓取设置')}
+      <div class="cfg-row">${intervalSelect('youtube')}
+        <label class="cfg-field">只看最近<select data-cfg="youtube" data-f="days">${[1,3,7,14,30].map(n=>`<option value="${n}" ${d.settings.days===n?'selected':''}>${n} 天</option>`).join('')}</select></label>
+        <label class="cfg-field">每组取多少<select data-cfg="youtube" data-f="limit">${[10,25,50].map(n=>`<option value="${n}" ${d.settings.limit===n?'selected':''}>${n} 条</option>`).join('')}</select></label>
+        <span class="faint cfg-est">每轮约 ${perRun} 点额度，每天约 ${perDay} 点${yq?`；今天已用 ${yq.used} / ${yq.limit}，${esc(yq.resetsAt.slice(11))} 恢复`:''}。定时抓取会给 Claude 临时搜索留 3000 点，不够时这轮少搜几组</span></div>
+      <div class="label">关键词 <span class="faint" style="font-weight:400">${on}/${qs.length} 组启用。按播放量取最近几天的视频，类别名会标在每条视频上，Claude 精选时按类别各取一部分</span></div>
+      ${rows}
+      <div><button class="btn" data-act="q-add" data-ch="youtube" ${qs.length>=10?'disabled':''}>添加一组</button></div>
+      <details class="syntax"><summary>关键词语法</summary><ul class="rules">
+        <li><code>A B</code> 同时相关；<code>A|B</code> 任意一个；<code>"AI agent"</code> 精确短语；<code>-crypto</code> 排除</li>
+        <li>「语言」填 <code>en</code>、<code>zh-Hans</code>、<code>ja</code> 等，结果会偏向这种语言，不填不限</li>
+        <li>每组每轮搜索用 100 点额度，Google 给每个项目每天 10000 点，太平洋时间零点恢复</li>
+        <li>改完先点「试搜」看看结果（也用 100 点），满意了再保存</li></ul></details>
+    </div>
+    <div class="panel grid" style="gap:6px"><div class="label">Claude 还能做什么</div><ul class="rules">
+      <li>精选、调研和运营时，Claude 可以随时按任意关键词搜 YouTube、读视频的完整简介和数据、读热门评论，用的是同一份额度</li>
+      <li>拿不到字幕全文和视频文件：官方接口只给视频作者本人下字幕</li></ul></div>`;
+}
 function vChanDouyin(){
   const c=chan('douyin');if(!c)return vChanStatus('douyin');
   return `${vChanStatus('douyin')}
@@ -1464,13 +1548,17 @@ document.addEventListener('click',e=>{
       store.set('picks',pid,{title:d.title.slice(0,60),why:'',angle:'',sources:[{channel:d.ch,id:d.id,title:d.title,url:safeUrl(d.url)}],accounts:[],risk:'',status:'new',by:'manual',createdAt:now,updatedAt:now});
       toast('已送进选题雷达，可以直接给账号出题');break}
     case 'feed-chan':S.feedChan=k;render();break;
-    case 'chan-sel':S.chanSel=k;S.cfgMsg=null;render();if(k==='x')loadHs();break;
+    case 'chan-sel':S.chanSel=k;S.cfgMsg=null;render();if(k==='x')loadHs();if(k==='youtube')loadYtQuota();break;
     case 'cfg-save':cfgSave(id);break;
     case 'cfg-discard':S.cfg[id]=null;S.cfgMsg=null;render();break;
     case 'cfg-reset':{const d=draft(id);d.settings=JSON.parse(JSON.stringify(chan(id).config.defaults));d.dirty=true;S.qTest=null;render();break}
-    case 'q-add':{const d=draft('x');d.settings.queries.push({name:'新类别',query:'',enabled:true});d.dirty=true;render();break}
-    case 'q-del':arm(b,'确认删除',()=>{const d=draft('x');d.settings.queries.splice(Number(k),1);d.dirty=true;S.qTest=null;render()});break;
-    case 'q-test':qTest(Number(k));break;
+    case 'q-add':{const d=draft(b.dataset.ch||'x');d.settings.queries.push({name:'新类别',query:'',enabled:true});d.dirty=true;render();break}
+    case 'q-del':arm(b,'确认删除',()=>{const d=draft(b.dataset.ch||'x');d.settings.queries.splice(Number(k),1);d.dirty=true;S.qTest=null;render()});break;
+    case 'q-test':qTest(Number(k),b.dataset.ch||'x');break;
+    case 'yt-key-edit':S.ytKeyEdit=true;render();break;
+    case 'yt-key-cancel':S.ytKeyEdit=false;render();break;
+    case 'yt-key-save':ytKeySave();break;
+    case 'yt-key-del':arm(b,'确认删除',async()=>{try{await api('DELETE','/api/hs/youtube/key');toast('已删除 key')}catch(e){toast(e.message||'删除失败')}await Promise.all([loadYtQuota(),loadFeed()])});break;
     case 'curate':agentRun('curate');break;
     case 'skill-sel':S.skillSel=k;S.skillMerged=null;S.skillCur=null;render();loadSkill(k);break;
     case 'skill-save':skillAction('save');break;
@@ -1590,8 +1678,8 @@ document.addEventListener('input',e=>{
     if(t.dataset.pub==='x'){const w=$('#pub-x-weight');if(w)w.textContent=`（连话题现在 ${tweetWeight(tweetText($('#pub-x-desc')?.value,$('#pub-x-tags')?.value))}/280，超出会从正文末尾截掉）`}
     return}
   if(t.id&&t.id.startsWith('say-')){S.say={...(S.say||{}),[t.id.slice(4)]:t.value};return}
-  if(t.dataset.q&&t.type!=='checkbox'){const d=draft('x');d.settings.queries[Number(t.dataset.q)][t.dataset.f]=t.value;
-    if(!d.dirty){d.dirty=true;S.pendingRender=true}const sv=document.querySelector('[data-act="cfg-save"][data-id="x"]');if(sv)sv.disabled=false;return}
+  if(t.dataset.q&&t.type!=='checkbox'){const ch=t.dataset.ch||'x';const d=draft(ch);d.settings.queries[Number(t.dataset.q)][t.dataset.f]=t.value;
+    if(!d.dirty){d.dirty=true;S.pendingRender=true}const sv=document.querySelector(`[data-act="cfg-save"][data-id="${ch}"]`);if(sv)sv.disabled=false;return}
   if(t.id==='poolText'){S.poolText=t.value;return}
   if(t.id==='poolUser'){S.poolUser=t.value;return}
   if(!S.open)return;
@@ -1610,7 +1698,7 @@ document.addEventListener('change',e=>{
   if(t.dataset.model){setModel(t.dataset.model,t.value);return}
   if(t.dataset.effort){const f=S.modelCfg.features.find(x=>x.key===t.dataset.effort);const cur={...(local.settings.efforts||{})};if(t.value===f?.defaultEffort)delete cur[t.dataset.effort];else cur[t.dataset.effort]=t.value;store.set('settings','efforts',cur).then(()=>{toast(`「${f?.name||''}」思考强度改成 ${t.value}，下次运行生效`);loadModels()});return}
   if(t.dataset.mode){const cur={...(local.settings.modes||{})};cur[t.dataset.mode]=t.value;store.set('settings','modes',cur);toast(`改成${t.value==='agent'?'后台 Agent':'单次调用'}，下次点按钮生效`);return}
-  if(t.dataset.q&&t.type==='checkbox'){const d=draft('x');d.settings.queries[Number(t.dataset.q)].enabled=t.checked;d.dirty=true;render();return}
+  if(t.dataset.q&&t.type==='checkbox'){const d=draft(t.dataset.ch||'x');d.settings.queries[Number(t.dataset.q)].enabled=t.checked;d.dirty=true;render();return}
   if(t.dataset.cfg){const d=draft(t.dataset.cfg);const v=Number(t.value);if(t.dataset.f==='everyMin')d.everyMin=v;else d.settings[t.dataset.f]=v;d.dirty=true;render();return}
   if(!S.open)return;const id=S.open;
   if(t.dataset?.pubsel){const sel=[...document.querySelectorAll('[data-pubsel]:checked')].map(x=>x.dataset.pubsel);store.update('items',S.open,{publish:{selected:sel}});return}

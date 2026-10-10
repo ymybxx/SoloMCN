@@ -180,6 +180,9 @@ const TOOL_NAMES = {
   x_user_tweets: '读取推特用户',
   x_list_timeline: '读取推特列表',
   x_pool_status: '查看推特号池',
+  youtube_search: '搜索 YouTube',
+  youtube_videos: '读取 YouTube 视频',
+  youtube_comments: '读取 YouTube 评论',
 };
 
 const TOOL_NAMES_EN = {
@@ -188,10 +191,11 @@ const TOOL_NAMES_EN = {
   get_item: 'Read item and profile', save_script: 'Save script', save_precheck: 'Save precheck', get_published: 'Read published stats',
   save_analysis: 'Save review', save_video: 'Save video', save_research: 'Save research', capture_source: 'Capture page',
   x_search: 'Search X', x_user_tweets: 'Read X user', x_list_timeline: 'Read X list', x_pool_status: 'Check X account pool',
+  youtube_search: 'Search YouTube', youtube_videos: 'Read YouTube videos', youtube_comments: 'Read YouTube comments',
 };
-const CHANNEL_NAMES_EN = { x: 'X', douyin: 'Douyin', weibo: 'Weibo', bilibili: 'Bilibili', zhihu: 'Zhihu', baidu: 'Baidu', toutiao: 'Toutiao', 'bilibili-video': 'Bilibili videos', hackernews: 'Hacker News' };
+const CHANNEL_NAMES_EN = { x: 'X', youtube: 'YouTube', douyin: 'Douyin', weibo: 'Weibo', bilibili: 'Bilibili', zhihu: 'Zhihu', baidu: 'Baidu', toutiao: 'Toutiao', 'bilibili-video': 'Bilibili videos', hackernews: 'Hacker News' };
 
-const CHANNEL_NAMES = { x: '推特', douyin: '抖音', weibo: '微博', bilibili: 'B站', zhihu: '知乎', baidu: '百度', toutiao: '头条', 'bilibili-video': 'B站热门视频', hackernews: 'Hacker News' };
+const CHANNEL_NAMES = { x: '推特', youtube: 'YouTube', douyin: '抖音', weibo: '微博', bilibili: 'B站', zhihu: '知乎', baidu: '百度', toutiao: '头条', 'bilibili-video': 'B站热门视频', hackernews: 'Hacker News' };
 
 function describeTool(name, input = {}, lang = 'zh') {
   if (lang === 'en') return describeToolEn(name, input);
@@ -209,7 +213,7 @@ function describeTool(name, input = {}, lang = 'zh') {
   const short = name.replace(/^mcp__workbench__/, '');
   const label = TOOL_NAMES[short] || short;
   if (short === 'get_feed' && input.channels) return `${label}（${input.channels.map((c) => CHANNEL_NAMES[c] || c).join('、')}）`;
-  if (short === 'x_search' && input.q) return `${label}：${input.q}`;
+  if ((short === 'x_search' || short === 'youtube_search') && input.q) return `${label}：${input.q}`;
   if (short === 'add_picks') return `${label} ${input.picks?.length ?? ''} 个`;
   if (short === 'add_ideas') return `${label} ${input.ideas?.length ?? ''} 条`;
   return label;
@@ -229,7 +233,7 @@ function describeToolEn(name, input = {}) {
   const short = name.replace(/^mcp__workbench__/, '');
   const label = TOOL_NAMES_EN[short] || short;
   if (short === 'get_feed' && input.channels) return `${label} (${input.channels.map((c) => CHANNEL_NAMES_EN[c] || c).join(', ')})`;
-  if (short === 'x_search' && input.q) return `${label}: ${input.q}`;
+  if ((short === 'x_search' || short === 'youtube_search') && input.q) return `${label}: ${input.q}`;
   if (short === 'add_picks') return `${label}: ${input.picks?.length ?? ''}`;
   if (short === 'add_ideas') return `${label}: ${input.ideas?.length ?? ''}`;
   return label;

@@ -41,7 +41,13 @@ X_LOCKED_GIVEUP_DAYS = float(os.getenv("X_LOCKED_GIVEUP_DAYS", "7"))  # 锁定�
 X_REQUEST_TIMEOUT = float(os.getenv("X_REQUEST_TIMEOUT", "60"))
 X_CHECK_QUERY = os.getenv("X_CHECK_QUERY", "the")  # 体检时搜的词：一定搜得到结果，搜不到就说明这个号的搜索被限制了
 
+# YouTube（官方数据接口）。API key 在工作台「渠道 → YouTube」里填，存在 data/youtube-key.json
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY") or None  # 没在页面里填时用这个
+YOUTUBE_DAILY_QUOTA = int(os.getenv("YOUTUBE_DAILY_QUOTA", "10000"))  # Google 给每个项目每天的额度
+YOUTUBE_RESERVE = int(os.getenv("YOUTUBE_RESERVE", "3000"))  # 定时抓取不动用的额度，留给 Claude 临时搜索
+
 # 定时抓取
+YOUTUBE_FEED_INTERVAL_MIN = int(os.getenv("YOUTUBE_FEED_INTERVAL_MIN", "360"))  # YouTube 渠道多久抓一次
 X_FEED_INTERVAL_MIN = int(os.getenv("X_FEED_INTERVAL_MIN", "120"))  # 推特渠道多久抓一次（花号池的请求次数）
 X_FEED_LIMIT = int(os.getenv("X_FEED_LIMIT", "60"))  # 每条搜索语句每次最多取多少条（每 20 条约一次请求）
 DOUYIN_FEED_INTERVAL_MIN = int(os.getenv("DOUYIN_FEED_INTERVAL_MIN", "30"))  # 抖音热搜多久抓一次（公开接口）
