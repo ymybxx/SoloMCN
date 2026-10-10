@@ -136,7 +136,8 @@ export function createLab({ root, store }) {
 
   const ensure = (itemId) => fs.mkdirSync(path.join(dirOf(itemId), 'media'), { recursive: true });
 
-  // 这条内容专用的临时目录：TMPDIR 指向它，沙盒只放行这里的本地通信（unix socket）。
+  // 这条内容专用的本地通信目录：沙盒只放行这里的 unix socket。沙盒会把命令行里的 TMPDIR 改掉，
+  // 所以目录写进调研参数，要通信的命令自己在前面加 TMPDIR=<这个目录>
   // 放在 /tmp 下、名字很短：macOS 的 socket 路径不能超过 104 个字符
   function sockDir(itemId) {
     const id = createHash('sha1').update(itemId).digest('hex').slice(0, 8);

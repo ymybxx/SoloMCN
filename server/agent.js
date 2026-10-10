@@ -129,7 +129,7 @@ const TASKS = {
     name: '调研',
     maxTurns: 120,
     lab: true,
-    prompt: ({ itemId, labDir, sharedDir, askAboveGB, prior }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}；共用工具箱：${sharedDir}/tools（经验本 ${sharedDir}/NOTES.md）；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
+    prompt: ({ itemId, labDir, sockDir, sharedDir, askAboveGB, prior }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}；本地通信目录：${sockDir}；共用工具箱：${sharedDir}/tools（经验本 ${sharedDir}/NOTES.md）；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
   },
   // 下面三个在「设置」里选成「后台 Agent」时走这里，选「单次调用」时走 cli.js
   script: {
@@ -358,6 +358,7 @@ export function createAgent({ store, cwd, lab }) {
     if (task === 'research') {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
       args.labDir = lab.dirOf(args.itemId);
+      args.sockDir = lab.sockDir(args.itemId);
       args.sharedDir = lab.shared;
       args.askAboveGB = lab.settings().askAboveGB;
       // 已有报告：7 天内默认在它基础上补；超过 7 天或用户选了「从头查」就全部重查
