@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FILE = path.join(ROOT, 'data', 'secrets.json');
-export const IMAGE_DEFAULTS = { baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-1' };
+export const IMAGE_DEFAULTS = { baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-2.5-sunburst' };
 
 function read() {
   try {
