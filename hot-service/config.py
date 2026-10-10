@@ -48,8 +48,8 @@ YOUTUBE_RESERVE = int(os.getenv("YOUTUBE_RESERVE", "3000"))  # 定时抓取不�
 
 # 拉 YouTube 字幕用的登录（可选）：不带登录被要求验证时，用工作台导出的 cookie 再试一次。限量保护账号
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE") or ""
-YT_LOGIN_DAILY_CAP = int(os.getenv("YT_LOGIN_DAILY_CAP", "30"))  # 每天最多用登录拉几次
-YT_LOGIN_MIN_GAP_SEC = float(os.getenv("YT_LOGIN_MIN_GAP_SEC", "20"))  # 两次用登录拉字幕至少间隔
+YT_LOGIN_DAILY_CAP = int(os.getenv("YT_LOGIN_DAILY_CAP", "100"))  # 每天最多用登录拉几次（防出错时狂刷）
+YT_LOGIN_MIN_GAP_SEC = float(os.getenv("YT_LOGIN_MIN_GAP_SEC", "5"))  # 两次用登录拉字幕至少间隔（只在被拦后用登录重试时才有）
 
 # 定时抓取
 YOUTUBE_FEED_INTERVAL_MIN = int(os.getenv("YOUTUBE_FEED_INTERVAL_MIN", "360"))  # YouTube 渠道多久抓一次

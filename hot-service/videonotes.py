@@ -136,11 +136,20 @@ def login_status() -> dict:
     st = _login_state()
     has = bool(config.YT_COOKIES_FILE) and Path(config.YT_COOKIES_FILE).exists()
     return {"cookies": has, "expired": bool(st.get("expired")) if has else False, "error": st.get("error") if has else None,
-            "okAt": st.get("okAt"), "lastAt": st.get("lastAt"), "usedToday": st.get("used", 0), "dailyCap": config.YT_LOGIN_DAILY_CAP}
+            "okAt": st.get("okAt"), "lastAt": st.get("lastAt"), "usedToday": st.get("used", 0), "dailyCap": config.YT_LOGIN_DAILY_CAP,
+            "minGapSec": config.YT_LOGIN_MIN_GAP_SEC}
+
+
+_login_lock = asyncio.Lock()  # 用登录的请求排队一个一个来，几条同时被拦时也保持间隔
 
 
 async def _extract_logged_in(video_id: str) -> dict:
     """不带登录被拦之后，用登录再试一次。限量，登录了也被拦就判定失效。"""
+    async with _login_lock:
+        return await _extract_logged_in_locked(video_id)
+
+
+async def _extract_logged_in_locked(video_id: str) -> dict:
     st = _login_state()
     if st.get("used", 0) >= config.YT_LOGIN_DAILY_CAP:
         raise NoteError("login_limited", f"今天用登录拉字幕已经 {config.YT_LOGIN_DAILY_CAP} 次了，为了保护账号先停一停，明天再试")

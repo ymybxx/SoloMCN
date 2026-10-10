@@ -202,6 +202,14 @@ class LoginFallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, "blocked")
         self.assertFalse(videonotes.login_status()["expired"])
 
+    async def test_logged_in_requests_queue_up_with_a_gap(self):
+        import asyncio
+        with mock.patch.object(config, "YT_LOGIN_MIN_GAP_SEC", 0.2), mock.patch.object(config, "YT_LOGIN_DAILY_CAP", 10):
+            t0 = time.monotonic()
+            await asyncio.gather(*(videonotes.fetch_transcript(v) for v in ("aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc")))
+            self.assertGreaterEqual(time.monotonic() - t0, 0.4)  # 三条排队，中间两个间隔
+        self.assertEqual(self.calls.count(str(self.cookies)), 3)
+
     async def test_daily_cap_protects_the_account(self):
         await videonotes.fetch_transcript("abcdefghijk")
         await videonotes.fetch_transcript("bcdefghijkl")

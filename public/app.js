@@ -900,12 +900,12 @@ function vYtLogin(){
   if(run&&run.status==='waiting')body=`<p class="hint">${esc(run.message)}</p><div><button class="btn primary" data-act="ytl-done">我已登录</button></div>`;
   else if(busy)body=`<p class="hint busy">${run.status==='done'?'登录成功，正在导出登录信息给 yt-dlp…':'正在确认登录状态…'}</p>`;
   else if(L?.cookies)body=`${expired?`<p class="err">${esc(u.error||'登录已失效')}，点「重新登录」</p>`:''}
-    <div class="kv"><span>今天用登录拉了 <b class="num">${u?.usedToday??0} / ${u?.dailyCap??30}</b> 次</span>${u?.okAt?`<span>上次成功 <b class="num">${esc(new Date(u.okAt*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}))}</b></span>`:''}</div>
+    <div class="kv"><span>今天用登录拉了 <b class="num">${u?.usedToday??0} / ${u?.dailyCap??100}</b> 次</span>${u?.okAt?`<span>上次成功 <b class="num">${esc(new Date(u.okAt*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}))}</b></span>`:''}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="ytl-start">${expired?'重新登录':'换个账号登录'}</button><button class="btn ghost" data-act="ytl-check" ${S.ytLoginChecking?'disabled':''}>${S.ytLoginChecking?'检查中…':'检查登录'}</button><button class="btn ghost danger" data-act="ytl-logout">退出登录</button></div>`;
   else body=`${run?.status==='failed'||run?.exported?.ok===false?`<p class="err">${esc(run.exported?.message||run.message)}</p>`:''}<div><button class="btn" data-act="ytl-start">登录 YouTube</button></div>`;
   return `<div class="panel grid" style="gap:10px"><div class="blk-head"><h3>拉字幕用的 YouTube 登录 <span class="faint" style="font-weight:400">可选</span></h3>${pill}</div>
     ${body}
-    <p class="hint">拆解视频要拉字幕。不登录也能拉，但 YouTube 有时会要求「登录以确认不是机器人」；登录后，被拦时会用你的账号再试一次。只在被拦时才用，每天最多 ${u?.dailyCap??30} 次、两次至少隔 20 秒。用账号跑 yt-dlp，YouTube 可能限制或封禁这个账号，建议用小号。登录信息只存在这台电脑上。</p></div>`;
+    <p class="hint">拆解视频要拉字幕。不登录也能拉，但 YouTube 有时会要求「登录以确认不是机器人」；登录后，被拦时会用你的账号再试一次。只在被拦时才用，两次至少隔 ${u?.minGapSec??5} 秒，每天最多 ${u?.dailyCap??100} 次（防出错时狂刷）。用账号跑 yt-dlp，YouTube 可能限制或封禁这个账号，建议用小号。登录信息只存在这台电脑上。</p></div>`;
 }
 async function ytLoginStart(){
   try{S.ytLoginRun=await api('POST','/api/youtube-login/start')}catch(e){toast(e.message||'打开登录窗口失败');return}
