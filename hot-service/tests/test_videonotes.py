@@ -55,6 +55,12 @@ class PickTrackTests(unittest.TestCase):
         info = {"language": "ja", "automatic_captions": {"de": fmt("a-de"), "en": fmt("a-en"), "ja-orig": fmt("a-ja")}}
         self.assertEqual(pick_track(info), ("ja-orig", "auto", "a-ja"))
 
+    def test_misheard_original_language_loses_to_the_title_language(self):
+        info = {"title": "I made an automatic stoplight", "automatic_captions": {"bn-orig": fmt("a-bn"), "en-orig": fmt("a-en-orig"), "en": fmt("a-en")}}
+        self.assertEqual(pick_track(info), ("en-orig", "auto", "a-en-orig"))
+        info = {"title": "大模型到底会不会记住你", "automatic_captions": {"bn-orig": fmt("a-bn"), "zh-Hans": fmt("a-zh")}}
+        self.assertEqual(pick_track(info), ("zh-Hans", "auto", "a-zh"))
+
     def test_manual_follows_video_language_then_english(self):
         info = {"language": "fr", "subtitles": {"de": fmt("m-de"), "en": fmt("m-en")}}
         self.assertEqual(pick_track(info), ("en", "manual", "m-en"))

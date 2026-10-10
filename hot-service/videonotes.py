@@ -72,9 +72,25 @@ def parse_vtt(text: str, every: float = 20) -> str:
     return "\n".join(out)
 
 
-def pick_track(info: dict) -> tuple[str, str, str] | None:
-    """选一份字幕，返回 (语言, manual|auto, 字幕地址)。作者上传的优先，按视频本身的语言、英文、中文的顺序选。"""
+def guess_lang(info: dict) -> str:
+    """视频的语言：信息里标明了就用；没标明就看标题是中文还是英文。"""
     lang = (info.get("language") or "").split("-")[0]
+    if lang:
+        return lang
+    title = info.get("title") or ""
+    if re.search(r"[\u4e00-\u9fff]", title):
+        return "zh"
+    letters = [c for c in title if c.isalpha()]
+    return "en" if letters and sum(c.isascii() for c in letters) / len(letters) > 0.8 else ""
+
+
+def pick_track(info: dict) -> tuple[str, str, str] | None:
+    """
+    选一份字幕，返回 (语言, manual|auto, 字幕地址)。作者上传的优先，按视频的语言、英文、中文的顺序选。
+    自动字幕里 xx-orig 是 YouTube 按它听出来的语言识别的，讲话少的视频会听错（英文短片听成孟加拉语），
+    所以 -orig 也按视频的语言挑，实在没有才用别的语言的。
+    """
+    lang = guess_lang(info)
 
     def vtt(formats):
         return next((f["url"] for f in formats or [] if f.get("ext") == "vtt" and f.get("url")), None)
@@ -82,11 +98,14 @@ def pick_track(info: dict) -> tuple[str, str, str] | None:
     def order(keys, prefer_orig):
         keys = list(keys)
         ranked = []
-        if prefer_orig:  # 自动字幕里 xx-orig 是原语言识别出来的，其余多是机器翻译
-            ranked += [k for k in keys if k.endswith("-orig")]
         for want in [lang, "en", "zh-Hans", "zh-Hant", "zh"]:
-            if want:
-                ranked += [k for k in keys if k == want or k.split("-")[0] == want]
+            if not want:
+                continue
+            same = [k for k in keys if k == want or k.split("-")[0] == want]
+            # 自动字幕里同一种语言，原语言识别的（-orig）比机器翻译的准
+            ranked += sorted(same, key=lambda k: not k.endswith("-orig")) if prefer_orig else same
+        if prefer_orig:
+            ranked += [k for k in keys if k.endswith("-orig")]
         return list(dict.fromkeys(ranked + ([] if prefer_orig else keys)))
 
     subs = {k: v for k, v in (info.get("subtitles") or {}).items() if k != "live_chat"}
