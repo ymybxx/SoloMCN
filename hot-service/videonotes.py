@@ -86,9 +86,10 @@ def guess_lang(info: dict) -> str:
 
 def pick_track(info: dict) -> tuple[str, str, str] | None:
     """
-    选一份字幕，返回 (语言, manual|auto, 字幕地址)。作者上传的优先，按视频的语言、英文、中文的顺序选。
-    自动字幕里 xx-orig 是 YouTube 按它听出来的语言识别的，讲话少的视频会听错（英文短片听成孟加拉语），
-    所以 -orig 也按视频的语言挑，实在没有才用别的语言的。
+    选一份字幕，返回 (语言, manual|auto, 字幕地址)。作者上传的优先于自动生成的。
+    语言优先英文（日语、西语等视频就用 YouTube 机翻的英文，人能直接看懂）；中文视频例外，用中文原文，
+    不然拿到的是中文机翻成英文。同一种语言里，原语言识别的（-orig）比机翻的准。
+    xx-orig 是 YouTube 按它听出来的语言识别的，讲话少的视频会听错（英文短片听成孟加拉语），所以不盲目优先 -orig。
     """
     lang = guess_lang(info)
 
@@ -98,7 +99,8 @@ def pick_track(info: dict) -> tuple[str, str, str] | None:
     def order(keys, prefer_orig):
         keys = list(keys)
         ranked = []
-        for want in [lang, "en", "zh-Hans", "zh-Hant", "zh"]:
+        wants = (["zh-Hans", "zh-Hant", "zh"] if lang == "zh" else []) + ["en", "zh-Hans", "zh-Hant", "zh", lang]
+        for want in wants:
             if not want:
                 continue
             same = [k for k in keys if k == want or k.split("-")[0] == want]

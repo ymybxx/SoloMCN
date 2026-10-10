@@ -51,9 +51,15 @@ class PickTrackTests(unittest.TestCase):
         info = {"language": "en", "subtitles": {"en": fmt("m-en")}, "automatic_captions": {"en-orig": fmt("a-en")}}
         self.assertEqual(pick_track(info), ("en", "manual", "m-en"))
 
-    def test_auto_prefers_original_language_over_translations(self):
+    def test_auto_prefers_english_even_when_machine_translated(self):
         info = {"language": "ja", "automatic_captions": {"de": fmt("a-de"), "en": fmt("a-en"), "ja-orig": fmt("a-ja")}}
+        self.assertEqual(pick_track(info), ("en", "auto", "a-en"))
+        info = {"language": "ja", "automatic_captions": {"de": fmt("a-de"), "ja-orig": fmt("a-ja")}}
         self.assertEqual(pick_track(info), ("ja-orig", "auto", "a-ja"))
+
+    def test_chinese_videos_keep_chinese(self):
+        info = {"language": "zh-CN", "automatic_captions": {"en": fmt("a-en"), "zh-Hans": fmt("a-zh")}}
+        self.assertEqual(pick_track(info), ("zh-Hans", "auto", "a-zh"))
 
     def test_misheard_original_language_loses_to_the_title_language(self):
         info = {"title": "I made an automatic stoplight", "automatic_captions": {"bn-orig": fmt("a-bn"), "en-orig": fmt("a-en-orig"), "en": fmt("a-en")}}
@@ -61,11 +67,13 @@ class PickTrackTests(unittest.TestCase):
         info = {"title": "大模型到底会不会记住你", "automatic_captions": {"bn-orig": fmt("a-bn"), "zh-Hans": fmt("a-zh")}}
         self.assertEqual(pick_track(info), ("zh-Hans", "auto", "a-zh"))
 
-    def test_manual_follows_video_language_then_english(self):
+    def test_manual_prefers_english_then_the_video_language(self):
         info = {"language": "fr", "subtitles": {"de": fmt("m-de"), "en": fmt("m-en")}}
         self.assertEqual(pick_track(info), ("en", "manual", "m-en"))
         info = {"language": "fr", "subtitles": {"fr-FR": fmt("m-fr"), "en": fmt("m-en")}}
-        self.assertEqual(pick_track(info), ("fr-FR", "manual", "m-fr"))
+        self.assertEqual(pick_track(info), ("en", "manual", "m-en"))
+        info = {"language": "fr", "subtitles": {"fr-FR": fmt("m-fr")}, "automatic_captions": {"en": fmt("a-en")}}
+        self.assertEqual(pick_track(info), ("fr-FR", "manual", "m-fr"))  # 作者上传的优先于自动生成的
 
     def test_live_chat_and_missing_vtt_are_ignored(self):
         info = {"subtitles": {"live_chat": [{"ext": "json", "url": "x"}], "en": [{"ext": "json3", "url": "j"}]}}
