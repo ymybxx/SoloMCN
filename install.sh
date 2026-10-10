@@ -65,9 +65,14 @@ SOLOMCN_INSTALLER=1 node scripts/setup.mjs
 say "检查 Claude Code 登录"
 if claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
   ok "已登录"
+elif [ -t 0 ]; then
+  # 直接运行脚本（bash install.sh）时输入就是终端，可以当场登录
+  printf '  还没登录 Claude Code：现在打开登录，用你的 Claude 订阅账号登录，登录好后输入 /exit 退出，安装会接着进行。\n'
+  claude || true
 else
-  printf '  还没登录 Claude Code：现在会打开登录，用你的 Claude 订阅账号登录，登录好后输入 /exit 退出，安装会接着进行。\n'
-  claude </dev/tty || true
+  # 通过 curl … | bash 运行时输入是管道，Claude Code 的登录界面在这里打不开（改从 /dev/tty 读也不行，macOS 上会报 kqueue 错误）
+  printf '  还没登录 Claude Code。装完后新开一个终端窗口运行 claude，用你的 Claude 订阅账号登录一次（登录好输入 /exit 退出）；\n'
+  printf '  工作台总览页顶部也会一直提醒，登录好后点「重新检查」。\n'
 fi
 
 say "启动"
