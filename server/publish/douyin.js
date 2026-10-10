@@ -56,7 +56,8 @@ export function createDouyin({ dataDir }) {
       await page.keyboard.press('Backspace');
       await insertChecked(page, desc, String((hasTitle ? info.desc : `${title}\n${info.desc}`) || ''), '描述');
       for (const raw of (info.tags || []).slice(0, 5)) {
-        const tag = String(raw).replace(/^#/, '').trim();
+        // 抖音话题里不能有空格：打出空格就把话题结束了（「Claude Code」会变成 #Claude 加普通文字 Code）
+        const tag = String(raw).replace(/^#/, '').replace(/\s+/g, '');
         if (!tag) continue;
         // 话题联想要靠键盘事件触发，话题词逐字输入；确认已经打进框里、等联想出来（最多 3 秒），再用空格确认
         await page.keyboard.type(` #${tag}`);
