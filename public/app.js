@@ -13,7 +13,7 @@ const CHECKS=[
 const SCORE_KEYS=[{k:'hook',n:'钩子'},{k:'emotion',n:'情绪'},{k:'relate',n:'代入'},{k:'social',n:'转发'}];
 // 主流程五步按顺序走，其他页面放在右边
 const STEPS=[{k:'sources',n:'渠道'},{k:'feed',n:'素材'},{k:'radar',n:'选题雷达'},{k:'ideas',n:'账号选题'},{k:'pipeline',n:'流水线'}];
-const MORE=[{k:'home',n:'总览'},{k:'calendar',n:'日历'},{k:'data',n:'数据复盘'},{k:'accounts',n:'账号矩阵'},{k:'settings',n:'设置'}];
+const MORE=[{k:'home',n:'总览'},{k:'calendar',n:'日历'},{k:'data',n:'数据复盘'},{k:'accounts',n:'账号矩阵'},{k:'skills',n:'技能'},{k:'settings',n:'设置'}];
 const TABS=[...STEPS,...MORE];
 const STAGE_IDX=Object.fromEntries(STAGES.map((s,i)=>[s.k,i]));
 
@@ -130,7 +130,7 @@ function requestRender(){const a=document.activeElement;const v=$('#view');if(a&
 $('#view').addEventListener('focusout',()=>{if(S.pendingRender)setTimeout(()=>{const a=document.activeElement;if(!(a&&$('#view').contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))){S.pendingRender=false;render()}},180)});
 
 function render(){renderStatus();renderTabs();renderBanner();
-  const v={home:vHome,radar:vRadar,ideas:vIdeas,feed:vFeed,settings:vSettings,pipeline:vPipeline,calendar:vCalendar,accounts:vAccounts,data:vData,sources:vSources}[S.tab];
+  const v={home:vHome,radar:vRadar,ideas:vIdeas,feed:vFeed,settings:vSettings,pipeline:vPipeline,calendar:vCalendar,accounts:vAccounts,data:vData,sources:vSources,skills:vSkills}[S.tab];
   const html=v();keepLogScroll($('#view'),()=>{$('#view').innerHTML=html});
 
 }
@@ -1008,6 +1008,55 @@ function vConnect(){
         <button class="btn" data-act="conf-image-save">保存</button>${im.configured?'<button class="btn ghost danger" data-act="conf-image-del">删除</button>':''}</div></div>
   </div>`;
 }
+/* ---------- 技能：每个环节的岗位说明，是你的本地数据 ---------- */
+async function loadSkills(){
+  try{S.skills=await api('GET','/api/skills');if(!S.skillSel&&S.skills.length)S.skillSel=S.skills[0].name;if(S.skillSel)await loadSkill(S.skillSel)}
+  catch(e){S.skills={down:e.message||'读取失败'}}
+  requestRender();
+}
+async function loadSkill(name){try{S.skillCur=await api('GET','/api/skills/'+encodeURIComponent(name))}catch(e){S.skillCur={err:e.message||'读取失败'}}requestRender()}
+const skillPill=x=>x.origin==='custom'?'<span class="pill"><i></i>自己加的</span>':x.update?'<span class="pill warn"><i></i>出厂说明有更新</span>':x.modified?'<span class="pill ok"><i></i>改过</span>':'<span class="pill"><i></i>出厂</span>';
+function vSkills(){
+  const L=S.skills;
+  if(!L)return '<div class="empty">正在读取…</div>';
+  if(L.down)return `<div class="empty"><strong>读取技能失败</strong>${esc(L.down)}</div>`;
+  const cur=S.skillCur&&S.skillCur.name===S.skillSel?S.skillCur:null;
+  const nav=L.map(x=>`<button class="chan-tab" role="tab" aria-selected="${S.skillSel===x.name}" data-act="skill-sel" data-k="${esc(x.name)}"><b class="no-tr">${esc(x.name)}</b>${skillPill(x)}</button>`).join('');
+  const text=cur?(S.skillDraft?.[cur.name]??cur.content):'';
+  const dirty=cur&&S.skillDraft?.[cur.name]!=null&&S.skillDraft[cur.name]!==cur.content;
+  const upd=cur?.update?`<div class="panel grid" style="gap:8px;border-color:var(--warn)"><div class="label">出厂说明有新版本</div>
+      <p class="hint">这个技能你改过，所以没有自动更新。可以让 Claude 把新版的改进合进你的版本（结果会先填进下面给你看），也可以直接用新版覆盖，或者保留你的版本。</p>
+      <div class="actions"><button class="btn primary" data-act="skill-merge" ${S.skillBusy?'disabled':''}>${S.skillBusy==='merge'?'Claude 合并中…':'让 Claude 合并'}</button>
+        <button class="btn ghost" data-act="skill-take-new">用新版覆盖</button><button class="btn ghost" data-act="skill-keep">保留我的版本</button></div>
+      <details><summary class="faint">看新的出厂版本</summary><pre class="skill-pre no-tr">${esc(cur.defaultContent||'')}</pre></details></div>`:'';
+  const merged=S.skillMerged&&cur&&S.skillMerged.name===cur.name?`<div class="panel" style="border-color:var(--ok)"><p class="hint">下面是 Claude 合并后的版本，检查一下，满意了点「采用合并结果」。</p><div class="actions"><button class="btn primary" data-act="skill-accept-merged">采用合并结果</button><button class="btn ghost" data-act="skill-merge-cancel">放弃</button></div></div>`:'';
+  const hist=cur?.history?.length?`<details class="vhist"><summary>历史版本（${cur.history.length}）</summary>${cur.history.map(at=>`<div class="row-s"><span class="num faint">${esc(fmtTime(at))}</span><button class="btn ghost" data-act="skill-hist" data-k="${at}">载入这一版</button></div>`).join('')}</details>`:'';
+  const editor=!cur?'<div class="panel"><p class="hint">正在读取…</p></div>':cur.err?`<div class="panel"><p class="err">${esc(cur.err)}</p></div>`:`
+    ${upd}${merged}
+    <div class="panel grid" style="gap:10px">
+      <div class="blk-head"><h3 class="no-tr">${esc(cur.name)}</h3>${skillPill(cur)}${dirty?'<span class="pill warn"><i></i>有改动没保存</span>':''}
+        <div class="actions">${cur.origin==='default'?'<button class="btn ghost" data-act="skill-reset">恢复出厂</button>':''}${dirty?'<button class="btn ghost" data-act="skill-discard">放弃改动</button>':''}<button class="btn primary" data-act="skill-save" ${dirty?'':'disabled'}>保存</button></div></div>
+      <p class="hint">${esc(cur.description)}</p>
+      <textarea id="skillText" class="skill-text no-tr" rows="28" spellcheck="false">${esc(text)}</textarea>
+      ${cur.files.length>1?`<p class="hint">这个技能目录里还有：${cur.files.filter(f=>f!=='SKILL.md').map(f=>`<code class="no-tr">${esc(f)}</code>`).join('、')}（在 <code>.claude/skills/${esc(cur.name)}/</code> 里，可以用编辑器改）</p>`:''}
+      ${hist}
+    </div>`;
+  return `<div class="section-head"><h2>技能</h2><p>每个环节怎么做，都写在这里的岗位说明里。改这里就是改流程，不用碰代码。这些是你的本地数据，不会提交到代码仓库；在 Claude Code 里直接跑这些技能，用的也是同一份。</p></div>
+    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${editor}</div></div>`;
+}
+async function skillAction(k,b){
+  const cur=S.skillCur;if(!cur)return;const name=cur.name;const url='/api/skills/'+encodeURIComponent(name);
+  const done=async(msg)=>{if(S.skillDraft)delete S.skillDraft[name];S.skillMerged=null;toast(msg);await loadSkills()};
+  try{
+    if(k==='save'){await api('PUT',url,{content:S.skillDraft?.[name]??cur.content});await done('已保存，下次运行这个技能就用新的说明')}
+    else if(k==='reset'){await api('POST',url+'/reset');await done('已恢复成出厂说明，原来的版本存进了历史')}
+    else if(k==='take-new'){await api('POST',url+'/accept',{content:cur.defaultContent});await done('已换成新的出厂说明，原来的版本存进了历史')}
+    else if(k==='keep'){await api('POST',url+'/accept',{content:cur.content});await done('保留了你的版本，这次出厂更新不再提示')}
+    else if(k==='merge'){S.skillBusy='merge';render();const r=await api('POST',url+'/merge');S.skillDraft={...(S.skillDraft||{}),[name]:r.content};S.skillMerged={name};toast('合并好了，检查一下')}
+    else if(k==='accept-merged'){await api('POST',url+'/accept',{content:S.skillDraft?.[name]??cur.content});await done('已采用合并结果')}
+  }catch(e){toast(e.message||'操作失败')}
+  S.skillBusy=null;render();
+}
 function vSettings(){
   const c=S.modelCfg;
   if(!c)return '<div class="empty">正在读取…</div>';
@@ -1235,7 +1284,7 @@ document.addEventListener('click',e=>{
   const b=e.target.closest('[data-act]');if(!b)return;const act=b.dataset.act,id=b.dataset.id,k=b.dataset.k;
   if(act==='modal-bg'&&e.target!==b)return;
   switch(act){
-    case 'tab':S.tab=k;try{localStorage.setItem('wb.tab',k)}catch(_){};history.replaceState(null,'','#'+k);render();window.scrollTo(0,0);if(k==='sources'){loadHs();loadFeed()}if(k==='feed')loadFeed();if(k==='settings')loadModels();break;
+    case 'tab':S.tab=k;try{localStorage.setItem('wb.tab',k)}catch(_){};history.replaceState(null,'','#'+k);render();window.scrollTo(0,0);if(k==='sources'){loadHs();loadFeed()}if(k==='feed')loadFeed();if(k==='settings')loadModels();if(k==='skills')loadSkills();break;
     case 'goto-stage':S.tab='pipeline';S.filter='all';render();setTimeout(()=>$('#col-'+k)?.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'}),30);break;
     case 'hs-refresh':S.hs=null;render();loadHs();break;
     case 'feed-run':feedRun(id);break;
@@ -1249,6 +1298,16 @@ document.addEventListener('click',e=>{
     case 'cfg-discard':S.cfg[id]=null;S.cfgMsg=null;render();break;
     case 'cfg-reset':{const d=draft(id);d.settings=JSON.parse(JSON.stringify(chan(id).config.defaults));d.dirty=true;render();break}
     case 'curate':agentRun('curate');break;
+    case 'skill-sel':S.skillSel=k;S.skillMerged=null;S.skillCur=null;render();loadSkill(k);break;
+    case 'skill-save':skillAction('save');break;
+    case 'skill-reset':arm(b,'确认恢复',()=>skillAction('reset'));break;
+    case 'skill-take-new':arm(b,'确认覆盖',()=>skillAction('take-new'));break;
+    case 'skill-keep':skillAction('keep');break;
+    case 'skill-merge':skillAction('merge');break;
+    case 'skill-accept-merged':skillAction('accept-merged');break;
+    case 'skill-merge-cancel':if(S.skillDraft&&S.skillCur)delete S.skillDraft[S.skillCur.name];S.skillMerged=null;render();break;
+    case 'skill-discard':if(S.skillDraft&&S.skillCur)delete S.skillDraft[S.skillCur.name];render();break;
+    case 'skill-hist':api('GET','/api/skills/'+encodeURIComponent(S.skillCur.name)+'/history/'+k).then(r=>{S.skillDraft={...(S.skillDraft||{}),[S.skillCur.name]:r.content};render();toast('已载入这一版，点保存才生效')}).catch(e=>toast(e.message||'读取失败'));break;
     case 'conf-claude-save':{const v=($('#confClaude')?.value||'').trim();if(!v){toast('先粘贴令牌');break}
       api('PUT','/api/config/claude',{token:v}).then(r=>{S.conf=r;toast('已保存，下次运行 Claude 时生效');render()}).catch(e=>toast(e.message||'保存失败'));break}
     case 'conf-claude-del':arm(b,'确认删除',()=>api('DELETE','/api/config/claude').then(r=>{S.conf=r;toast('已删除，改用本机 claude 的登录');render()}));break;
@@ -1346,6 +1405,7 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('input',e=>{
   const t=e.target;
+  if(t.id==='skillText'&&S.skillCur){S.skillDraft={...(S.skillDraft||{}),[S.skillCur.name]:t.value};const sv=document.querySelector('[data-act="skill-save"]');if(sv)sv.disabled=t.value===S.skillCur.content;return}
   if(t.id==='videoFb'){S.videoFb={...(S.videoFb||{}),[S.open]:t.value};return}
   if(t.id==='accQ'){S.accQ=t.value;const q=t.value.trim().toLowerCase();document.querySelectorAll('.acc-row').forEach(r=>{r.hidden=!!q&&!r.dataset.search.includes(q)});return}
   if(t.id==='localPath'){S.localPath={...(S.localPath||{}),[S.open]:t.value};return}
@@ -1393,6 +1453,7 @@ loadConf();
 loadPubAcc();
 loadFeed();setInterval(loadFeed,120000);
 if(S.tab==='settings')loadModels();
+if(S.tab==='skills')loadSkills();
 // 数据变化（包括 Claude 通过 MCP 写入）时自动刷新
 let reloadT;
 // 工作台重启时连接会断，浏览器自动重连；重连后重新读一遍数据，补上断开期间漏掉的变化

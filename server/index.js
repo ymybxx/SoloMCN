@@ -11,7 +11,9 @@ import { SEED_ACCOUNTS } from './seed.js';
 import { generateIdeas, appendIdeas, appendPicks, writeScript, precheck, analyze } from './tasks.js';
 import { createAgent } from './agent.js';
 import { createPublisher } from './publish/index.js';
-import { modelSettings } from './models.js';
+import { modelSettings, modelFor, effortFor } from './models.js';
+import { createSkills } from './skills.js';
+import { runClaude } from './cli.js';
 import { captureSource } from './assets.js';
 import { watchVideo, probe } from './watch.js';
 import { publicConfig, setImage, clearImage, setClaudeToken, clearClaudeToken } from './secrets.js';
@@ -39,6 +41,13 @@ const notifyChange = () => {
 const store = await createStore(path.join(root, 'data', 'db.json'), { onChange: notifyChange });
 const agent = createAgent({ store, cwd: root });
 const publisher = createPublisher({ store, root });
+// 技能是本地数据：启动时装上新的出厂技能，没改过的跟着出厂说明更新
+const skills = createSkills({ root });
+{
+  const r = skills.sync();
+  if (r.installed.length) console.log(`已装上出厂技能：${r.installed.join('、')}`);
+  if (r.updated.length) console.log(`技能已跟着出厂说明更新：${r.updated.join('、')}`);
+}
 
 // 让 Claude 能“看”一条视频：截帧拼成缩略图 + 语音转文字，结果存在 video.watch，生成发布信息时用
 const watching = new Set();
@@ -192,6 +201,31 @@ async function handleApi(req, res, parts) {
     return sendJson(res, 200, JSON.parse(await fs.readFile(path.join(root, 'tools', 'voices.json'), 'utf8')));
   }
   // 连接设置（图片生成的接口地址、key、模型，Claude 长期令牌）：只返回末 4 位
+  // 技能：列表、查看、保存、恢复出厂、出厂更新的合并
+  if (parts[0] === 'skills') {
+    if (parts.length === 1 && method === 'GET') return sendJson(res, 200, skills.list());
+    const name = parts[1];
+    if (parts.length === 2 && method === 'GET') return sendJson(res, 200, skills.get(name));
+    if (parts.length === 2 && method === 'PUT') return sendJson(res, 200, skills.save(name, (await readBody(req)).content));
+    if (parts[2] === 'reset' && method === 'POST') return sendJson(res, 200, skills.reset(name));
+    if (parts[2] === 'accept' && method === 'POST') return sendJson(res, 200, skills.acceptUpdate(name, (await readBody(req)).content));
+    if (parts[2] === 'history' && /^\d+$/.test(parts[3] || '') && method === 'GET') return sendJson(res, 200, { content: skills.historyContent(name, parts[3]) });
+    // 让 Claude 把新版出厂说明的改进合进你改过的版本：只返回合并结果，你看过再保存
+    if (parts[2] === 'merge' && method === 'POST') {
+      const { base, next, mine } = skills.mergeInputs(name);
+      const prompt = `下面是一个 Claude Code 技能（SKILL.md）的三个版本。用户在旧的出厂版本上改过，现在出厂版本更新了。
+请输出合并后的完整 SKILL.md：保留用户的所有改动和口味，同时把新出厂版本里的改进（新增的规则、步骤、修正）合进来；两边冲突时以用户的改动为准。只输出合并后的文件内容，不要任何解释。
+
+===== 旧的出厂版本 =====
+${base}
+===== 新的出厂版本 =====
+${next}
+===== 用户现在的版本 =====
+${mine}`;
+      const { text } = await runClaude(prompt, { model: modelFor(store, 'series'), effort: effortFor(store, 'series') });
+      return sendJson(res, 200, { content: String(text || '').replace(/^```(?:markdown|md)?\n|\n```\s*$/g, '').trim() + '\n' });
+    }
+  }
   if (parts[0] === 'config') {
     if (parts.length === 1 && method === 'GET') return sendJson(res, 200, publicConfig());
     if (parts[1] === 'image' && method === 'PUT') return sendJson(res, 200, setImage(await readBody(req)));

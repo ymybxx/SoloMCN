@@ -101,7 +101,7 @@ Voice-over needs no key: hosted voices after logging in to HyperFrames, otherwis
 
 ## Changing the process = editing a paragraph
 
-Each step is a job description under `.claude/skills/`:
+Each step is a job description (a Claude Code skill) that you view and edit on the Skills page:
 
 | Skill | Responsible for |
 |---|---|
@@ -113,7 +113,9 @@ Each step is a job description under `.claude/skills/`:
 | `make-video` / `revise-video` | Making the video, revising it from feedback |
 | `review-data` | Analytics review |
 
-Want sharper topics, shorter scripts or a different visual style? Edit the skill. No code involved. You can also run skills by hand in Claude Code: open the project and type `/curate-topics` and so on.
+Want sharper topics, shorter scripts or a different visual style? Edit the skill. No code involved.
+
+Skills are your local data: the repo only ships defaults (`defaults/skills/`), copied to `.claude/skills/` on first start, and your edits are never committed. When a default improves, skills you haven't touched update automatically; edited ones show a notice and Claude can merge the improvements into your version. Running `/curate-topics` and friends directly in Claude Code uses the same files.
 
 Pick the model and effort for each step in Settings (Opus, Sonnet, Haiku…). New model versions are used automatically: **when Claude gets better, SoloMCN gets better.**
 
@@ -128,7 +130,7 @@ server/
   assets.js        Captures web pages and videos as footage during research
   watch.js         "Watches" local videos: frame sheets plus speech-to-text
 hot-service/       Trends service (Python): Douyin, Weibo, Bilibili, Zhihu, Baidu, Toutiao and Hacker News
-.claude/skills/    The job description for each step
+defaults/skills/   Default job descriptions (yours live in .claude/skills/, never committed)
 data/              Your data (channels, content, logins, keys), local only, never committed
 videos/            Generated video projects, never committed
 ```

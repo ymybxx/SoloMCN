@@ -574,3 +574,6 @@ a.pick-src:hover{color:var(--blue)}
 .ms-tip{font-size:11.5px}
 .btn.sm{padding:3px 10px;font-size:12px}
 .manual-foot{display:flex;gap:8px}
+/* 技能页：岗位说明编辑器 */
+.skill-text{width:100%;font:13px/1.6 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);resize:vertical;min-height:360px}
+.skill-pre{white-space:pre-wrap;max-height:420px;overflow:auto;font:12.5px/1.55 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);background:var(--bg2,rgba(127,127,127,.08));padding:10px;border-radius:8px}

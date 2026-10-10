@@ -14,3 +14,8 @@ videos/
 data/voice-previews/
 data/uploads/
 data/publish/
+
+# 在用的技能是你的本地数据：首次启动时从 defaults/skills 复制，之后在工作台「技能」页里改
+.claude/skills/
+data/skills/
+.claude/settings.local.json

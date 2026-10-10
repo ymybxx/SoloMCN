@@ -98,7 +98,7 @@ npm start
 
 ## 改流程 = 改一段文字
 
-每个环节是 `.claude/skills/` 下的一份中文岗位说明：
+每个环节是一份中文岗位说明（Claude Code 技能），在工作台的「技能」页里查看和修改：
 
 | 技能 | 负责 |
 |---|---|
@@ -110,7 +110,9 @@ npm start
 | `make-video` / `revise-video` | 做成片、按意见改片 |
 | `review-data` | 看数据复盘 |
 
-想让选题更毒舌、脚本更短、视频换一种画风，直接改对应的技能文件，不用碰代码。这些技能也能在 Claude Code 里手动跑：在项目目录打开 Claude Code，输入 `/curate-topics` 之类。
+想让选题更毒舌、脚本更短、视频换一种画风，直接改对应的技能，不用碰代码。
+
+技能是你的本地数据：仓库里只有出厂说明（`defaults/skills/`），第一次启动时复制到 `.claude/skills/`，之后你怎么改都不会进代码仓库。出厂说明更新时，没改过的技能自动跟着更新；改过的会提示你，可以让 Claude 把新版的改进合进你的版本。在 Claude Code 里直接输入 `/curate-topics` 之类手动跑，用的也是同一份。
 
 每个环节用什么模型、想多深，在「设置」里选（Opus、Sonnet、Haiku 等系列和思考强度）。新模型发布后自动用上最新版：**Claude 变强，SoloMCN 就变强。**
 
@@ -125,7 +127,7 @@ server/
   assets.js        调研时截网页、存视频素材
   watch.js         「看」本机视频：抽帧拼图、语音转文字
 hot-service/       热点数据服务（Python）：抖音、微博、B站、知乎、百度、头条热榜和 Hacker News
-.claude/skills/    每个环节的岗位说明
+defaults/skills/   每个环节的出厂岗位说明（在用的在 .claude/skills/，不进 git）
 data/              你的数据（账号、内容、登录状态、密钥），只在本机，不进 git
 videos/            生成的视频项目，不进 git
 ```

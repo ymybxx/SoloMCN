@@ -251,6 +251,19 @@
     '只根据卡片里的内容直接回答，不上网；更快，文字逐段出来，可以和后台 Agent 同时跑': 'Answers only from the card, no web; faster, streams text, can run alongside the agent',
     '图片生成（可选）': 'Image generation (optional)', '粘贴新令牌可替换': 'Paste a new token to replace it', '不改 key 就留空': 'Leave empty to keep the current key',
     'sk-ant-oat…（可选）': 'sk-ant-oat… (optional)',
+
+    // ---- 技能页 ----
+    '技能': 'Skills', '自己加的': 'Custom', '出厂说明有更新': 'Update available', '改过': 'Modified', '出厂': 'Default',
+    '读取技能失败': 'Couldn\'t load skills', '出厂说明有新版本': 'A new default version is available',
+    '这个技能你改过，所以没有自动更新。可以让 Claude 把新版的改进合进你的版本（结果会先填进下面给你看），也可以直接用新版覆盖，或者保留你的版本。': 'You\'ve edited this skill, so it wasn\'t updated automatically. Let Claude merge the new improvements into your version (you\'ll review it below first), replace it with the new default, or keep yours.',
+    '让 Claude 合并': 'Let Claude merge', 'Claude 合并中…': 'Claude is merging…', '用新版覆盖': 'Use the new default', '保留我的版本': 'Keep my version',
+    '看新的出厂版本': 'View the new default', '下面是 Claude 合并后的版本，检查一下，满意了点「采用合并结果」。': 'Below is Claude\'s merged version. Review it, then click "Use merged version".',
+    '采用合并结果': 'Use merged version', '放弃': 'Discard', '恢复出厂': 'Reset to default', '确认恢复': 'Confirm reset', '确认覆盖': 'Confirm replace',
+    '载入这一版': 'Load this version',
+    '每个环节怎么做，都写在这里的岗位说明里。改这里就是改流程，不用碰代码。这些是你的本地数据，不会提交到代码仓库；在 Claude Code 里直接跑这些技能，用的也是同一份。': 'How each step works lives in these job descriptions. Editing them changes the process, no code needed. They\'re your local data and never committed; running these skills directly in Claude Code uses the same files.',
+    '已保存，下次运行这个技能就用新的说明': 'Saved. The next run of this skill uses it', '已恢复成出厂说明，原来的版本存进了历史': 'Reset to default; your version is in the history',
+    '已换成新的出厂说明，原来的版本存进了历史': 'Replaced with the new default; your version is in the history', '保留了你的版本，这次出厂更新不再提示': 'Kept your version; this update won\'t be shown again',
+    '合并好了，检查一下': 'Merged. Please review', '已采用合并结果': 'Merged version saved', '已载入这一版，点保存才生效': 'Version loaded; click Save to apply',
     // ---- 发布过程的步骤 ----
     '打开抖音创作者中心的上传页': 'Open the Douyin creator upload page', '打开小红书创作服务平台的上传页': 'Open the Xiaohongshu upload page',
     '打开 B站创作中心的投稿页': 'Open the Bilibili upload page', '打开 YouTube Studio': 'Open YouTube Studio', '上传视频文件': 'Upload the video file',
@@ -288,7 +301,7 @@
     [/^自动发要先在「账号矩阵」绑定(.+)，或者勾右边的「手动发」$/, (m, p) => `Bind ${tr(p)} under Channels to publish automatically, or tick "Manual"`],
     [/^(.+)改成手动发，这个账号以后默认都手动$/, (m, p) => `${tr(p)} set to manual for this channel`],
     [/^Claude (.+)中$/, (m, p) => `Claude: ${tr(p)}`], [/^Claude 正在写，已经 (\d+) 秒$/, 'Claude is writing, $1 s so far'],
-    [/^查看过程（(\d+) 步）$/, 'Show process ($1 steps)'], [/^调研报告 · (\d+) 个来源 · (.+)$/, 'Research report · $1 sources · $2'],
+    [/^查看过程（(\d+) 步）$/, 'Show process ($1 steps)'], [/^历史版本（(\d+)）$/, 'History ($1)'], [/^调研报告 · (\d+) 个来源 · (.+)$/, 'Research report · $1 sources · $2'],
     [/^收集的素材 · (\d+) 张截图(.*)$/, (m, n, rest) => `Collected footage · ${n} screenshots${rest.replace(/ · (\d+) 段视频/, ' · $1 videos')}`],
     [/^第 (\d+) 版 · ([\d.]+) 秒$/, 'Version $1 · $2 s'], [/^([\d.]+) 秒$/, '$1 s'], [/^旧版本（(\d+)）$/, 'Old versions ($1)'],
     [/^保存过 (\d+) 个旧版本$/, '$1 older versions saved'], [/^播放 (.+)$/, 'Views $1'], [/^已配置 ····(.+)$/, 'Configured ····$1'],
