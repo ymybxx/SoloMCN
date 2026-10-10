@@ -1,4 +1,3 @@
 fastapi>=0.142
 uvicorn[standard]>=0.35
 httpx>=0.28
-asyncpg>=0.30

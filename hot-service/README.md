@@ -13,12 +13,11 @@ python3 -m venv .venv
 .venv/bin/python app.py
 ```
 
-需要本机的 Postgres（`brew install postgresql@18 && brew services start postgresql@18`）。默认连本机的 `solomcn` 库，没有会自动创建，表在启动时自动建好。
+数据存在本地的 SQLite 文件 `data/hot.db` 里，不用另外安装数据库，表在启动时自动建好。
 
-测试（用单独的测试库，每次会清空其中的 `hot` schema）：
+测试（每个测试用一个临时的 SQLite 文件，不碰正式数据）：
 
 ```bash
-createdb solomcn_test
 .venv/bin/python -m unittest discover -s tests
 ```
 
@@ -55,7 +54,7 @@ createdb solomcn_test
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `DATABASE_URL` | `postgresql:///solomcn` | Postgres 连接地址 |
+| `HOT_DB_PATH` | `data/hot.db` | SQLite 数据文件 |
 | `HOT_PORT` | 5179 | 端口（由工作台启动时自动设成工作台端口 + 1） |
 | `HOT_FETCH_INTERVAL_MIN` | 20 | 后台拍热榜快照的间隔（分钟） |
 | `DOUYIN_FEED_INTERVAL_MIN` | 30 | 抖音热搜多久抓一次（分钟），页面上也能改 |

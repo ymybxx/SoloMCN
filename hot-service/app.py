@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from channels.douyin import DouyinChannel
 from channels.hotlist import HotListChannel
-from config import DATABASE_URL, FETCH_INTERVAL_MIN, HOST, PORT
+from config import DB_PATH, FETCH_INTERVAL_MIN, HOST, PORT
 from hub import SOURCES, Hub
 from scheduler import Busy, Scheduler
 from db import connect
@@ -35,7 +35,7 @@ async def refresh_loop():
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global scheduler
-    db = await connect(DATABASE_URL)
+    db = await connect(DB_PATH)
     # 抖音有自己的渠道（数据更全），其余榜单包一层复用热榜中心的抓取和缓存
     lists = [HotListChannel(hub, s) for s in SOURCES if s.id != "douyin"]
     scheduler = Scheduler(db, [DouyinChannel(), *lists])

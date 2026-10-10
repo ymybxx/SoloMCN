@@ -67,24 +67,34 @@ SoloMCN 反过来：**零搭建工作流，直接操纵 Claude。**
 
 ## 快速开始
 
-只需要一个 Claude 订阅。需要 macOS，并装好：
+只需要一台 Mac 和一个 Claude 订阅。打开终端，运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ymybxx/SoloMCN/main/install.sh | bash
+```
+
+它会装好缺的软件（Homebrew、Node、Python、ffmpeg、Chrome、Claude Code），下载 SoloMCN 到 `~/SoloMCN`，装好依赖，没登录 Claude Code 的话带你登录一次，最后启动并打开工作台。已经装好的都会跳过，可以放心重复运行。以后启动：`cd ~/SoloMCN && npm start`。
+
+<details><summary>想自己一步步装</summary>
+
+需要：
 
 | 需要 | 安装 |
 |---|---|
 | [Claude Code](https://claude.com/claude-code) | 装好后在终端运行 `claude` 登录一次 |
 | Node.js 22.9+ | `brew install node` |
-| Python 3.11+ | macOS 自带，或 `brew install python` |
-| Postgres | `brew install postgresql@18 && brew services start postgresql@18`（数据库会自动建好） |
+| Python 3.11+ | `brew install python`（macOS 自带的 3.9 太旧） |
 | ffmpeg | `brew install ffmpeg` |
 | Google Chrome | 发布时用 |
 
 ```bash
 git clone https://github.com/ymybxx/SoloMCN.git
 cd SoloMCN
-npm run setup     # 装 Node 依赖和热点服务的 Python 环境
-npx hyperframes skills update faceless-explainer   # 做视频用的 HyperFrames 技能
+npm run setup     # 装 Node 依赖、热点服务的 Python 环境和做视频用的 HyperFrames 技能
 npm start
 ```
+
+</details>
 
 打开 http://127.0.0.1:5178 ，剩下的都在页面里：
 

@@ -159,9 +159,20 @@ function renderTabs(){
 function renderBanner(){$('#banner').innerHTML=S.mode==='offline'?'<div class="banner">连不上本地服务。在项目目录运行 <b>npm start</b>，然后刷新页面。</div>':''}
 
 /* ---------- 总览 ---------- */
+// 首次打开时的环境检查：只列没通过的，全部通过就不显示
+async function loadSetup(force){try{S.setup=await api('GET','/api/setup-check'+(force?'?force=1':''))}catch{S.setup=null}requestRender()}
+function vSetup(){
+  const c=S.setup;if(!c||c.ok)return '';
+  const bad=c.items.filter(x=>!x.ok);
+  return `<div class="panel grid setup-check" style="gap:10px;margin-bottom:16px;border-color:var(--warn)"><div class="blk-head"><h3>还差这几步就能用了</h3>
+      <div class="actions"><button class="btn ghost" data-act="setup-recheck">重新检查</button></div></div>
+    ${bad.map(x=>`<div class="setup-row"><b>${esc(x.title)}</b><p class="hint">${esc(x.fix||'')}</p></div>`).join('')}
+    <p class="hint">处理好以后点「重新检查」。已经通过的：${esc(c.items.filter(x=>x.ok).map(x=>x.title).join('、')||'无')}</p></div>`;
+}
 function vHome(){
+  const setup=vSetup();
   const accs=accList();const its=itemList();
-  if(S.mode==='synced'&&!accs.length&&!its.length)return `<div class="empty"><strong>还没有账号</strong>先去「账号矩阵」建好你的账号和人设，选题和脚本都会按人设来生成。<div style="margin-top:12px"><button class="btn primary" data-act="tab" data-k="accounts">添加第一个账号</button></div></div>`;
+  if(S.mode==='synced'&&!accs.length&&!its.length)return `${setup}<div class="empty"><strong>还没有账号</strong>先去「账号矩阵」建好你的账号和人设，选题和脚本都会按人设来生成。<div style="margin-top:12px"><button class="btn primary" data-act="tab" data-k="accounts">添加第一个账号</button></div></div>`;
   const week=Date.now()-7*864e5;
   const cards=accs.map(a=>{const mine=its.filter(i=>i.accountId===a.id);
     const n=k=>mine.filter(i=>i.stage===k).length;
@@ -186,7 +197,7 @@ function vHome(){
   its.filter(i=>i.stage==='published'&&!views(i)).forEach(i=>todo.push({i,why:'还没填数据'}));
   const ideas=(S.radar?.ideas||[]).length;
   const todoHtml=todo.length||ideas?`<div class="list">${ideas?`<button class="row" data-act="tab" data-k="ideas"><i class="sd s-idea"></i><span class="t">「账号选题」里有 ${ideas} 个选题等你挑</span><span class="meta">去挑选</span></button>`:''}${todo.slice(0,12).map(x=>`<button class="row" data-act="open" data-id="${x.i.id}"><i class="sd s-${x.i.stage}"></i>${accTag(x.i.accountId)}<span class="t">${esc(x.i.title)}</span><span class="meta">${esc(x.why)}</span></button>`).join('')}</div>`:'<div class="empty">今天没有待办。去「选题雷达」生成一批新选题吧。</div>';
-  return `<div class="home-grid">
+  return `${setup}<div class="home-grid">
     <div class="grid">
       <div class="section-head"><h2>账号矩阵</h2><p>按人群分号，每个号的人设和内容都不一样</p></div>
       <div class="grid cols-acc">${cards||'<div class="empty">账号加载中…</div>'}</div>
@@ -1308,6 +1319,7 @@ document.addEventListener('click',e=>{
     case 'skill-merge-cancel':if(S.skillDraft&&S.skillCur)delete S.skillDraft[S.skillCur.name];S.skillMerged=null;render();break;
     case 'skill-discard':if(S.skillDraft&&S.skillCur)delete S.skillDraft[S.skillCur.name];render();break;
     case 'skill-hist':api('GET','/api/skills/'+encodeURIComponent(S.skillCur.name)+'/history/'+k).then(r=>{S.skillDraft={...(S.skillDraft||{}),[S.skillCur.name]:r.content};render();toast('已载入这一版，点保存才生效')}).catch(e=>toast(e.message||'读取失败'));break;
+    case 'setup-recheck':S.setup=null;render();loadSetup(true);break;
     case 'conf-claude-save':{const v=($('#confClaude')?.value||'').trim();if(!v){toast('先粘贴令牌');break}
       api('PUT','/api/config/claude',{token:v}).then(r=>{S.conf=r;toast('已保存，下次运行 Claude 时生效');render()}).catch(e=>toast(e.message||'保存失败'));break}
     case 'conf-claude-del':arm(b,'确认删除',()=>api('DELETE','/api/config/claude').then(r=>{S.conf=r;toast('已删除，改用本机 claude 的登录');render()}));break;
@@ -1450,6 +1462,7 @@ loadState();
 loadHs();setInterval(loadHs,120000);
 api('GET','/api/voices').then(v=>{S.voices=v}).catch(()=>{});
 loadConf();
+loadSetup();
 loadPubAcc();
 loadFeed();setInterval(loadFeed,120000);
 if(S.tab==='settings')loadModels();

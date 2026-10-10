@@ -70,24 +70,34 @@ Every arrow is a Claude Code run. You watch each step live and can interject mid
 
 ## Quick start
 
-All you need is a Claude subscription. macOS, plus:
+All you need is a Mac and a Claude subscription. Open Terminal and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ymybxx/SoloMCN/main/install.sh | bash
+```
+
+It installs whatever is missing (Homebrew, Node, Python, ffmpeg, Chrome, Claude Code), downloads SoloMCN to `~/SoloMCN`, installs dependencies, walks you through logging in to Claude Code if needed, then starts the app and opens it. Anything already installed is skipped, so it's safe to run again. To start later: `cd ~/SoloMCN && npm start`.
+
+<details><summary>Prefer to install step by step?</summary>
+
+You need:
 
 | Need | Install |
 |---|---|
 | [Claude Code](https://claude.com/claude-code) | Install it and run `claude` once to log in |
 | Node.js 22.9+ | `brew install node` |
-| Python 3.11+ | Comes with macOS, or `brew install python` |
-| Postgres | `brew install postgresql@18 && brew services start postgresql@18` (the database is created for you) |
+| Python 3.11+ | `brew install python` (the macOS system 3.9 is too old) |
 | ffmpeg | `brew install ffmpeg` |
 | Google Chrome | Used for publishing |
 
 ```bash
 git clone https://github.com/ymybxx/SoloMCN.git
 cd SoloMCN
-npm run setup     # Node dependencies and the Python env for the trends service
-npx hyperframes skills update faceless-explainer   # HyperFrames skill used to make videos
+npm run setup     # Node dependencies, the Python env for the trends service, and the HyperFrames video skill
 npm start
 ```
+
+</details>
 
 Open http://127.0.0.1:5178 and do the rest in the app:
 

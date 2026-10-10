@@ -1,6 +1,5 @@
 """配置：全部可以用环境变量或 hot-service/.env 覆盖。"""
 import os
-import pwd
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -22,8 +21,8 @@ _load_env_file(ROOT / ".env")
 HOST = os.getenv("HOT_HOST", "127.0.0.1")
 PORT = int(os.getenv("HOT_PORT", "5179"))
 DATA_DIR = Path(os.getenv("HOT_DATA_DIR", ROOT / "data"))
-# 默认连本机 Postgres。用户名取进程的系统账号而不是 $USER：从别的工具启动时 $USER 可能不对（比如 root）
-DATABASE_URL = os.getenv("DATABASE_URL") or f"postgresql:///solomcn?user={pwd.getpwuid(os.getuid()).pw_name}"
+# 本地数据库：SQLite 文件，不用另外安装数据库
+DB_PATH = Path(os.getenv("HOT_DB_PATH", DATA_DIR / "hot.db"))
 
 # 热榜
 CACHE_SECONDS = int(os.getenv("HOT_CACHE_SECONDS", "600"))  # 同一来源 10 分钟内不重复请求

@@ -1,21 +1,16 @@
-"""调度器和各热榜渠道的测试。不访问外网。用到数据库的测试连 TEST_DATABASE_URL（默认本机 solomcn_test）。"""
+"""调度器和各热榜渠道的测试。不访问外网。用到数据库的测试各自用一个临时的 SQLite 文件。"""
 
 import asyncio
-import os
-import pwd
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-import asyncpg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from db import connect
 from scheduler import Busy, Entry, Scheduler
-
-TEST_DSN = os.getenv("TEST_DATABASE_URL") or f"postgresql:///solomcn_test?user={pwd.getpwuid(os.getuid()).pw_name}"
 
 
 def now() -> datetime:
@@ -38,11 +33,9 @@ class FakeChannel:
 
 class SchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.assertIn("test", TEST_DSN.rsplit("/", 1)[-1], "TEST_DATABASE_URL 必须指向测试库")
-        conn = await asyncpg.connect(TEST_DSN)
-        await conn.execute("drop schema if exists hot cascade; drop table if exists public.hot_service_migrations")
-        await conn.close()
-        self.db = await connect(TEST_DSN)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.db = await connect(Path(tmp.name) / "test.db")
         self.addAsyncCleanup(self.db.close)
 
     async def test_run_saves_entries_and_records_run(self):
@@ -62,14 +55,14 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         ch = FakeChannel(entries=[Entry("1", "旧", metrics={"likes": 5}, score=10)])
         s = Scheduler(self.db, [ch])
         await s.run("fake")
-        first = await self.db.fetchrow("select first_seen, last_seen from hot.entries")
+        first = await self.db.fetchrow("select first_seen, last_seen from entries")
         ch.entries = [Entry("1", "新", metrics={"likes": 50}, score=30)]
         await s.run("fake")
 
-        row = await self.db.fetchrow("select * from hot.entries")
+        row = await self.db.fetchrow("select * from entries")
         self.assertEqual((row["title"], row["score"], row["first_seen"]), ("新", 30, first["first_seen"]))
         self.assertGreater(row["last_seen"], first["last_seen"])
-        self.assertEqual(await self.db.fetchval("select count(*) from hot.entries"), 1)
+        self.assertEqual(await self.db.fetchval("select count(*) from entries"), 1)
 
     async def test_failure_is_recorded_and_does_not_raise(self):
         s = Scheduler(self.db, [FakeChannel(error=RuntimeError("上游挂了"))])
@@ -110,7 +103,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
             await s.set_config("c", 10, {"words": ["x"]})
         with self.assertRaisesRegex(ValueError, "至少一个词"):
             await s.set_config("c", 60, {"words": []})
-        self.assertEqual(await self.db.fetchval("select count(*) from hot.channel_config"), 0)
+        self.assertEqual(await self.db.fetchval("select count(*) from channel_config"), 0)
 
         cfg = await s.set_config("c", 90, {"words": ["新"]})
         self.assertEqual((cfg["everyMin"], cfg["settings"], cfg["defaults"]), (90, {"words": ["新"]}, {"words": ["默认"]}))
@@ -122,7 +115,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_due_uses_last_run_time(self):
         s = Scheduler(self.db, [FakeChannel("a", every_min=60), FakeChannel("b", every_min=60), FakeChannel("c", every_min=60)])
-        await self.db.execute("insert into hot.runs (channel, started_at) values ('a', now() - interval '30 minutes'), ('b', now() - interval '61 minutes')")
+        await self.db.execute("insert into runs (channel, started_at) values ('a', strftime('%s', 'now') - 1800), ('b', strftime('%s', 'now') - 3660)")
         self.assertEqual(sorted(await s.due()), ["b", "c"])
 
     async def test_feed_filters_by_channel_and_age_and_sorts_by_score(self):
@@ -145,13 +138,13 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([x["isNew"] for x in await s.feed()], [False])
 
         # 模拟第一次抓取发生在一小时前
-        await self.db.execute("update hot.runs set started_at = now() - interval '1 hour'")
-        await self.db.execute("update hot.entries set first_seen = now() - interval '1 hour'")
+        await self.db.execute("update runs set started_at = strftime('%s', 'now') - 3600")
+        await self.db.execute("update entries set first_seen = strftime('%s', 'now') - 3600")
         ch.entries = [Entry("老", "第一次抓就在"), Entry("新", "后来上榜")]
         await s.run("hot")
         self.assertEqual({x["title"]: x["isNew"] for x in await s.feed()}, {"第一次抓就在": False, "后来上榜": True})
 
-        await self.db.execute("update hot.entries set first_seen = now() - interval '4 hours' where item_id = '新'")
+        await self.db.execute("update entries set first_seen = strftime('%s', 'now') - 14400 where item_id = '新'")
         self.assertFalse(next(x for x in await s.feed() if x["id"] == "新")["isNew"])
 
     async def test_not_new_after_the_channel_was_down_for_a_while(self):
@@ -159,8 +152,8 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         s = Scheduler(self.db, [ch])
         await s.run("hot")
         # 服务停了 8 小时，期间上榜的词在重启后第一次被看到，不能算新上榜
-        await self.db.execute("update hot.runs set started_at = now() - interval '8 hours'")
-        await self.db.execute("update hot.entries set first_seen = now() - interval '8 hours'")
+        await self.db.execute("update runs set started_at = strftime('%s', 'now') - 28800")
+        await self.db.execute("update entries set first_seen = strftime('%s', 'now') - 28800")
         ch.entries = [Entry("老", "老词"), Entry("停机期间上榜", "停机期间上榜")]
         await s.run("hot")
         self.assertEqual({x["title"]: x["isNew"] for x in await s.feed()}, {"老词": False, "停机期间上榜": False})
@@ -168,9 +161,9 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def test_hot_list_entries_without_publish_time_stay_while_still_on_the_list(self):
         s = Scheduler(self.db, [FakeChannel("hot", entries=[Entry("词", "还在榜上", score=50)])])
         await s.run("hot")
-        await self.db.execute("update hot.entries set first_seen = now() - interval '3 days'")
+        await self.db.execute("update entries set first_seen = strftime('%s', 'now') - 259200")
         self.assertEqual([x["title"] for x in await s.feed(hours=24)], ["还在榜上"])
-        await self.db.execute("update hot.entries set last_seen = now() - interval '2 days'")
+        await self.db.execute("update entries set last_seen = strftime('%s', 'now') - 172800")
         self.assertEqual(await s.feed(hours=24), [])
 
 

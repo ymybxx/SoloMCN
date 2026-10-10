@@ -13,6 +13,7 @@ import { createAgent } from './agent.js';
 import { createPublisher } from './publish/index.js';
 import { modelSettings, modelFor, effortFor } from './models.js';
 import { createSkills, voicesFile } from './skills.js';
+import { createSetupCheck } from './setupcheck.js';
 import { runClaude } from './cli.js';
 import { captureSource } from './assets.js';
 import { watchVideo, probe } from './watch.js';
@@ -43,6 +44,7 @@ const agent = createAgent({ store, cwd: root });
 const publisher = createPublisher({ store, root });
 // 技能是本地数据：启动时装上新的出厂技能，没改过的跟着出厂说明更新
 const skills = createSkills({ root });
+const setupCheck = createSetupCheck({ hotUrl: HOT_URL });
 {
   const r = skills.sync();
   if (r.installed.length) console.log(`已装上出厂技能：${r.installed.join('、')}`);
@@ -201,6 +203,8 @@ async function handleApi(req, res, parts) {
     return sendJson(res, 200, JSON.parse(await fs.readFile(voicesFile(root), 'utf8')));
   }
   // 连接设置（图片生成的接口地址、key、模型，Claude 长期令牌）：只返回末 4 位
+  // 环境检查：首次打开时提示还差什么（Claude Code 登录、ffmpeg、Chrome、HyperFrames 技能、热点服务）
+  if (parts[0] === 'setup-check' && method === 'GET') return sendJson(res, 200, await setupCheck.check(new URL(req.url, 'http://localhost').searchParams.has('force')));
   // 技能：列表、查看、保存、恢复出厂、出厂更新的合并
   if (parts[0] === 'skills') {
     if (parts.length === 1 && method === 'GET') return sendJson(res, 200, skills.list());

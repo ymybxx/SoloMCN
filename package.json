@@ -8,7 +8,7 @@
     "node": ">=22.9"
   },
   "scripts": {
-    "setup": "python3 -m venv hot-service/.venv && hot-service/.venv/bin/pip install -q -r hot-service/requirements.txt && npm install",
+    "setup": "node scripts/setup.mjs",
     "start": "node server/index.js",
     "dev": "node --watch server/index.js"
   },

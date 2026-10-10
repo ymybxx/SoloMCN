@@ -264,6 +264,19 @@
     '已保存，下次运行这个技能就用新的说明': 'Saved. The next run of this skill uses it', '已恢复成出厂说明，原来的版本存进了历史': 'Reset to default; your version is in the history',
     '已换成新的出厂说明，原来的版本存进了历史': 'Replaced with the new default; your version is in the history', '保留了你的版本，这次出厂更新不再提示': 'Kept your version; this update won\'t be shown again',
     '合并好了，检查一下': 'Merged. Please review', '已采用合并结果': 'Merged version saved', '已载入这一版，点保存才生效': 'Version loaded; click Save to apply',
+
+    // ---- 环境检查 ----
+    '还差这几步就能用了': 'A few steps left before you can start', '重新检查': 'Check again',
+    'Claude Code 没装': 'Claude Code isn\'t installed', 'Claude Code 没登录': 'Claude Code isn\'t logged in', 'Claude Code 已登录': 'Claude Code logged in',
+    'Claude Code（长期令牌）': 'Claude Code (long-lived token)', '缺 ffmpeg': 'ffmpeg is missing', '缺 Google Chrome': 'Google Chrome is missing',
+    '缺做视频用的 HyperFrames 技能': 'The HyperFrames video skill is missing', '热点数据服务没启动': 'The trends service isn\'t running',
+    'HyperFrames 技能': 'HyperFrames skill', 'ffmpeg': 'ffmpeg', 'Google Chrome': 'Google Chrome',
+    '所有 AI 环节都靠它。在终端运行：curl -fsSL https://claude.ai/install.sh | bash': 'Every AI step relies on it. In a terminal, run: curl -fsSL https://claude.ai/install.sh | bash',
+    '在终端运行 claude，按提示用你的 Claude 订阅账号登录；想更稳，运行 claude setup-token，把令牌粘贴到「设置 → 连接」': 'Run claude in a terminal and log in with your Claude subscription. For more reliable runs, run claude setup-token and paste the token under Settings → Connections.',
+    '做视频、裁封面都要用。在终端运行：brew install ffmpeg': 'Needed for videos and covers. In a terminal, run: brew install ffmpeg',
+    '发布到各平台时要用。在终端运行：brew install --cask google-chrome': 'Needed for publishing. In a terminal, run: brew install --cask google-chrome',
+    '在项目目录运行：npx hyperframes skills update faceless-explainer': 'In the project folder, run: npx hyperframes skills update faceless-explainer',
+    '在项目目录运行 npm run setup 装好 Python 环境，再重新 npm start': 'In the project folder, run npm run setup to install the Python environment, then npm start again',
     // ---- 发布过程的步骤 ----
     '打开抖音创作者中心的上传页': 'Open the Douyin creator upload page', '打开小红书创作服务平台的上传页': 'Open the Xiaohongshu upload page',
     '打开 B站创作中心的投稿页': 'Open the Bilibili upload page', '打开 YouTube Studio': 'Open YouTube Studio', '上传视频文件': 'Upload the video file',
@@ -301,6 +314,7 @@
     [/^自动发要先在「账号矩阵」绑定(.+)，或者勾右边的「手动发」$/, (m, p) => `Bind ${tr(p)} under Channels to publish automatically, or tick "Manual"`],
     [/^(.+)改成手动发，这个账号以后默认都手动$/, (m, p) => `${tr(p)} set to manual for this channel`],
     [/^Claude (.+)中$/, (m, p) => `Claude: ${tr(p)}`], [/^Claude 正在写，已经 (\d+) 秒$/, 'Claude is writing, $1 s so far'],
+    [/^处理好以后点「重新检查」。已经通过的：(.+)$/, (m, a) => `Click "Check again" when done. Already OK: ${a.split('、').map(tr).join(', ')}`],
     [/^查看过程（(\d+) 步）$/, 'Show process ($1 steps)'], [/^历史版本（(\d+)）$/, 'History ($1)'], [/^调研报告 · (\d+) 个来源 · (.+)$/, 'Research report · $1 sources · $2'],
     [/^收集的素材 · (\d+) 张截图(.*)$/, (m, n, rest) => `Collected footage · ${n} screenshots${rest.replace(/ · (\d+) 段视频/, ' · $1 videos')}`],
     [/^第 (\d+) 版 · ([\d.]+) 秒$/, 'Version $1 · $2 s'], [/^([\d.]+) 秒$/, '$1 s'], [/^旧版本（(\d+)）$/, 'Old versions ($1)'],
