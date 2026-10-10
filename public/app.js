@@ -430,7 +430,11 @@ function researchActions(id,it){
   const run=itemRun('research',id);
   if(run?.status==='running')return `<button class="btn" data-act="agent-stop" data-id="${esc(run.id)}">停止</button><button class="btn" disabled>调研中…</button>`;
   const other=runningRun();
-  return `<button class="btn ${it.research?'':'primary'}" data-act="ai-research" ${!aiReady()||other?'disabled':''} title="${other?'Claude 正在跑「'+esc(other.name)+'」，等它结束再点':''}">${other?'Claude 正忙':it.research?'重新调研':'AI 调研'}</button>`;
+  const dis=!aiReady()||other?'disabled':'',busy=other?'Claude 正在跑「'+esc(other.name)+'」，等它结束再点':'';
+  if(other||!it.research)return `<button class="btn ${it.research?'':'primary'}" data-act="ai-research" ${dis} title="${busy}">${other?'Claude 正忙':'AI 调研'}</button>`;
+  // 报告 7 天内（和 server/agent.js 的 REUSE_DAYS 一致）可以选在原有基础上补，还是从头查；过了 7 天只能从头查
+  if(Date.now()-(it.research.at||0)>7*86400000)return `<button class="btn" data-act="ai-research" data-fresh="1" ${dis} title="报告已超过 7 天，会从头重新查">重新调研</button>`;
+  return `<button class="btn" data-act="ai-research" ${dis} title="沿用现有报告，只补缺的和新的">补充调研</button><button class="btn" data-act="ai-research" data-fresh="1" ${dis} title="不沿用现有报告，全部重新查">从头调研</button>`;
 }
 function vResearch(r,open){
   const src=r.sources||[];
@@ -1630,11 +1634,11 @@ function setStage(k){
   flushSaves();store.update('items',id,patch).then(()=>{if(S.open===id)setTimeout(renderDrawer,60)});
 }
 // 后台 Agent 方式：先把详情里还没存的修改存好，Agent 读到的才是最新的
-async function agentItemTask(task){
+async function agentItemTask(task,extra={}){
   const id=S.open;if(!id)return;flushSaves();
   try{
     await store.update('items',id,{title:S.draft.title,hook:S.draft.hook,angle:S.draft.angle,script:S.draft.script,updatedAt:Date.now()});
-    await api('POST','/api/agent/run',{task,itemId:id});
+    await api('POST','/api/agent/run',{task,itemId:id,...extra});
     toast(task==='research'?'Claude 开始调研，一般 3–10 分钟，报告会存到这张卡片上':task==='script'?'Claude 开始写脚本，写完会自动存回，可以先去做别的':task==='video'?'Claude 开始生成视频，一般要 20–60 分钟，可以先去做别的':'Claude 开始预审');
   }catch(e){toast(e.message||'启动失败')}
 }
@@ -1793,7 +1797,7 @@ document.addEventListener('click',e=>{
     case 'stage':setStage(k);break;
     case 'ai-script':if(S.draft?.script&&!armed.get(b)){arm(b,'确认覆盖现有脚本？',aiScript)}else{armed.delete(b);aiScript()}break;
     case 'ai-check':aiCheck();break;
-    case 'ai-research':if(local.items[S.open]?.research&&!armed.get(b)){arm(b,'确认重新调研？',()=>agentItemTask('research'))}else{armed.delete(b);agentItemTask('research')}break;
+    case 'ai-research':{const go=()=>agentItemTask('research',b.dataset.fresh?{fresh:true}:{});if(local.items[S.open]?.research&&!armed.get(b)){arm(b,b.dataset.fresh?'确认从头调研？':'确认补充调研？',go)}else{armed.delete(b);go()}break}
     case 'ai-video':if(local.items[S.open]?.video&&!armed.get(b)){arm(b,'确认重新生成？',()=>agentItemTask('video'))}else{armed.delete(b);agentItemTask('video')}break;
     case 'ai-analysis':aiAnalysis();break;
     case 'del-item':arm(b,'再点一次确认删除',async()=>{const i=S.open;flushSaves();S.open=null;$('#drawerRoot').innerHTML='';await store.del('items',i);toast('已删除')});break;

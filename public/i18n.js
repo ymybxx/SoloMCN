@@ -86,7 +86,7 @@
     '有成片': 'Has video', '新选题': 'New idea', '还没排期': 'Not scheduled', '排期已过，发了吗？': 'Past schedule. Published?',
     // ---- 内容详情 ----
     '前 3 秒钩子': 'First-3-seconds hook', '内容概要': 'Summary', '调研': 'Research', '后台 Agent · 上网查资料': 'Background agent · web research',
-    'AI 调研': 'AI research', '重新调研': 'Research again', '调研中…': 'Researching…', '确认重新调研？': 'Research again?',
+    'AI 调研': 'AI research', '重新调研': 'Research again', '调研中…': 'Researching…', '确认重新调研？': 'Research again?', '补充调研': 'Add to research', '从头调研': 'Research from scratch', '确认补充调研？': 'Add to research?', '确认从头调研？': 'Start over?', '沿用现有报告，只补缺的和新的': 'Keep the current report and fill in what is missing or new', '不沿用现有报告，全部重新查': 'Ignore the current report and research everything again', '报告已超过 7 天，会从头重新查': 'The report is over 7 days old, so research starts over',
     'Claude 开始调研，一般 3–10 分钟，报告会存到这张卡片上': 'Claude started researching (3–10 minutes); the report will be saved on this card',
     '写脚本之前先调研：上网查真实的价格、工具能力、操作步骤和反方观点，写成每条都有出处的报告；同时把能当画面的网页截图和官方视频收集成素材，做视频时直接用。写脚本时会以它为依据，台词里的数字都能追溯来源。一般 3–10 分钟。': 'Research before scripting: real prices, capabilities, steps and counter-arguments from the web, each with a source, plus web captures and official videos collected as footage. The script is based on it, so every number traces back to a source. Usually 3–10 minutes.',
     '分镜脚本': 'Storyboard script', 'AI 写脚本': 'AI script', '写脚本': 'Write script', '脚本会自动保存。': 'The script saves automatically.',

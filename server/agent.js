@@ -18,6 +18,8 @@ import { CONTENT_OUTPUT_POLICY } from './prompts.js';
 
 // 后台运行没人点确认：内置工具只提供上网查资料和加载技能、工具这几个，命令行、读写文件压根不提供，
 // 网页里就算藏着指令也碰不到本机；只放行 workbench 的 MCP 工具。禁止列表是第二道保险
+// 已有调研报告在这个天数内，重新调研时默认在它基础上补
+export const REUSE_DAYS = 7;
 const BUILTIN_TOOLS = ['WebSearch', 'WebFetch', 'Skill', 'ToolSearch'];
 const ALLOWED_TOOLS = ['mcp__workbench__*', ...BUILTIN_TOOLS];
 const DENIED_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'NotebookEdit', 'Glob', 'Grep'];
@@ -127,7 +129,7 @@ const TASKS = {
     name: '调研',
     maxTurns: 120,
     lab: true,
-    prompt: ({ itemId, labDir, sharedDir, askAboveGB }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}；共用工具箱：${sharedDir}/tools（经验本 ${sharedDir}/NOTES.md）；单个下载超过 ${askAboveGB} GB 先问用户`,
+    prompt: ({ itemId, labDir, sharedDir, askAboveGB, prior }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}；共用工具箱：${sharedDir}/tools（经验本 ${sharedDir}/NOTES.md）；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
   },
   // 下面三个在「设置」里选成「后台 Agent」时走这里，选「单次调用」时走 cli.js
   script: {
@@ -358,6 +360,12 @@ export function createAgent({ store, cwd, lab }) {
       args.labDir = lab.dirOf(args.itemId);
       args.sharedDir = lab.shared;
       args.askAboveGB = lab.settings().askAboveGB;
+      // 已有报告：7 天内默认在它基础上补；超过 7 天或用户选了「从头查」就全部重查
+      const at = store.get('items', args.itemId).research?.at;
+      const days = at ? Math.floor((Date.now() - at) / 86_400_000) : null;
+      const fresh = !!args.fresh;
+      delete args.fresh;
+      args.prior = days === null ? '' : fresh ? `已有 ${days} 天前的调研报告，用户要求从头查` : days > REUSE_DAYS ? `已有 ${days} 天前的调研报告，已超过 ${REUSE_DAYS} 天，从头查` : `已有 ${days} 天前的调研报告，在它基础上补`;
     }
     if (task === 'script' || task === 'check') {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
