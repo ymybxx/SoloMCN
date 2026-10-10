@@ -254,7 +254,8 @@ function describeToolEn(name, input = {}) {
 }
 
 // 实践时沙盒只放行这些网站：装 Python、Node 依赖，拉 GitHub 上的代码，下载公开的模型和前端库
-const LAB_DOMAINS = ['pypi.org', 'files.pythonhosted.org', 'registry.npmjs.org', 'github.com', 'codeload.github.com', '*.githubusercontent.com',
+const LAB_DOMAINS = ['pypi.org', 'files.pythonhosted.org', 'registry.npmjs.org', 'github.com', 'api.github.com', 'codeload.github.com', '*.githubusercontent.com',
+  'api.adoptium.net',
   'cdn.jsdelivr.net', 'unpkg.com', 'huggingface.co', '*.hf.co', 'crates.io', 'static.crates.io', 'index.crates.io', 'proxy.golang.org'];
 
 export function createAgent({ store, cwd, lab }) {
