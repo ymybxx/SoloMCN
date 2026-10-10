@@ -9,6 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import config
 import videonotes
 from db import connect
 from videonotes import NoteError, VideoNotes, parse_vtt, pick_track
@@ -134,6 +135,80 @@ class NotesTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(s["aaaaaaaaaaa"]["teardownAt"])
         self.assertFalse(s["bbbbbbbbbbb"]["transcript"])
         self.assertIsNotNone(s["bbbbbbbbbbb"]["teardownAt"])
+
+
+BOT = Exception("ERROR: [youtube] x: Sign in to confirm you're not a bot. Use --cookies-from-browser")
+
+
+class FakeRes:
+    status_code = 200
+    text = VTT
+
+
+class FakeClient:
+    async def get(self, url):
+        return FakeRes()
+
+
+class LoginFallbackTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.cookies = Path(tmp.name) / "youtube-cookies.txt"
+        self.cookies.write_text("# Netscape HTTP Cookie File\n")
+        self.calls = []
+        self.with_cookies = {"language": "en", "subtitles": {"en": fmt("m-en")}, "title": "标题"}
+
+        def extract(vid, cookiefile=None):
+            self.calls.append(cookiefile)
+            if cookiefile is None:
+                raise BOT
+            if isinstance(self.with_cookies, Exception):
+                raise self.with_cookies
+            return self.with_cookies
+
+        patches = [mock.patch.object(config, "DATA_DIR", Path(tmp.name)), mock.patch.object(config, "YT_COOKIES_FILE", str(self.cookies)),
+                   mock.patch.object(config, "YT_LOGIN_MIN_GAP_SEC", 0), mock.patch.object(config, "YT_LOGIN_DAILY_CAP", 2),
+                   mock.patch.object(videonotes, "_extract", extract), mock.patch.object(videonotes, "client", lambda: FakeClient())]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    async def test_without_login_the_block_is_reported(self):
+        self.cookies.unlink()
+        with self.assertRaises(NoteError) as raised:
+            await videonotes.fetch_transcript("abcdefghijk")
+        self.assertEqual((raised.exception.code, self.calls), ("blocked", [None]))
+
+    async def test_blocked_request_is_retried_once_with_the_login(self):
+        got = await videonotes.fetch_transcript("abcdefghijk")
+        self.assertEqual(self.calls, [None, str(self.cookies)])
+        self.assertEqual((got["source"], got["title"]), ("manual", "标题"))
+        st = videonotes.login_status()
+        self.assertEqual((st["cookies"], st["expired"], st["usedToday"]), (True, False, 1))
+        self.assertIsNotNone(st["okAt"])
+
+    async def test_still_blocked_with_login_marks_it_expired(self):
+        self.with_cookies = BOT
+        with self.assertRaises(NoteError) as raised:
+            await videonotes.fetch_transcript("abcdefghijk")
+        self.assertEqual(raised.exception.code, "login_expired")
+        self.assertTrue(videonotes.login_status()["expired"])
+
+    async def test_rate_limit_with_login_is_not_expiry(self):
+        self.with_cookies = Exception("HTTP Error 429: Too Many Requests")
+        with self.assertRaises(NoteError) as raised:
+            await videonotes.fetch_transcript("abcdefghijk")
+        self.assertEqual(raised.exception.code, "blocked")
+        self.assertFalse(videonotes.login_status()["expired"])
+
+    async def test_daily_cap_protects_the_account(self):
+        await videonotes.fetch_transcript("abcdefghijk")
+        await videonotes.fetch_transcript("bcdefghijkl")
+        with self.assertRaises(NoteError) as raised:
+            await videonotes.fetch_transcript("cdefghijklm")
+        self.assertEqual(raised.exception.code, "login_limited")
+        self.assertEqual(self.calls.count(str(self.cookies)), 2)
 
 
 if __name__ == "__main__":

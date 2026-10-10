@@ -356,6 +356,14 @@
     'YouTube 要求验证不是机器人，这次拿不到字幕（不去绕过它的检测），稍后再试': 'YouTube asked to verify this isn\'t a bot, so no captions this time (we don\'t work around its checks); try again later',
     'YouTube 说请求太频繁，这次拿不到字幕，稍后再试': 'YouTube says there are too many requests, so no captions this time; try again later',
     '这条视频没有字幕，也没有自动生成的字幕': 'This video has no captions, not even auto-generated ones',
+    // ---- 拉字幕用的 YouTube 登录 ----
+    '拉字幕用的 YouTube 登录': 'YouTube login for captions', '可选': 'optional', '登录已失效': 'Login expired', '已登录': 'Logged in', '没登录': 'Not logged in',
+    '登录 YouTube': 'Log in to YouTube', '换个账号登录': 'Log in with another account', '重新登录': 'Log in again', '检查登录': 'Check login', '退出登录': 'Log out',
+    '确认退出': 'Confirm logout', '我已登录': 'I\'ve logged in', '正在确认登录状态…': 'Checking the login…', '登录成功，正在导出登录信息给 yt-dlp…': 'Logged in; exporting the session for yt-dlp…',
+    'YouTube 登录好了': 'YouTube login ready', '已退出 YouTube 登录': 'Logged out of YouTube', '登录有效，已更新登录信息': 'Login is valid; session updated', '登录已失效，重新登录一次': 'Login expired; log in again',
+    '拉字幕用的 YouTube 登录已失效，去「渠道 → YouTube」重新登录': 'The YouTube login used for captions has expired; log in again under Sources → YouTube',
+    'YouTube 登录已失效（用登录也被要求验证），去「渠道 → YouTube」重新登录': 'YouTube login expired (still asked to verify while logged in); log in again under Sources → YouTube',
+    '用登录拉字幕也被 YouTube 要求验证，登录可能失效了': 'YouTube still asked for verification while logged in; the login may have expired',
   };
 
   // 带数字、名字的句式：(.+?) 抓到的部分会再翻译一遍
@@ -421,6 +429,8 @@
     [/^YouTube 拒绝了这个 API key：(.+)$/, 'YouTube rejected this API key: $1'], [/^今天的 YouTube 额度只剩 (\d+) 点，留给 Claude 临时搜索，这轮没搜$/, 'Only $1 YouTube units left today, kept for Claude\'s searches; skipped this run'],
     [/^(.+) 拆解$/, (m, a) => `Torn down ${a}`], [/^没拿到字幕：(.+)$/, (m, a) => `No captions: ${tr(a)}`],
     [/^字幕：(作者上传的|自动生成的)（(.*)），(.+) 拉取$/, (m, a, b, c) => `Captions: ${a === '作者上传的' ? 'uploaded by the creator' : 'auto-generated'} (${b}), fetched ${c}`],
+    [/^拆解视频要拉字幕。不登录也能拉，但 YouTube 有时会要求「登录以确认不是机器人」；登录后，被拦时会用你的账号再试一次。只在被拦时才用，每天最多 (\d+) 次、两次至少隔 20 秒。用账号跑 yt-dlp，YouTube 可能限制或封禁这个账号，建议用小号。登录信息只存在这台电脑上。$/, 'Teardowns need captions. They can be fetched without logging in, but YouTube sometimes asks to "sign in to confirm you\'re not a bot"; once logged in, a blocked request is retried with your account. It\'s only used when blocked, at most $1 times a day and 20 s apart. Running yt-dlp with an account may get it limited or banned by YouTube, so a spare account is recommended. The session stays on this computer.'],
+    [/^今天用登录拉了 (\d+) \/ (\d+) 次$/, 'Used the login $1 / $2 times today'], [/^今天用登录拉字幕已经 (\d+) 次了，为了保护账号先停一停，明天再试$/, 'The login has been used $1 times today; pausing to protect the account until tomorrow'],
     [/^(\d+) 分 (\d+) 秒$/, '$1 m $2 s'], [/^(\d+) 轮$/, '$1 turns'], [/^(\d+)\/(\d+) 平台已连$/, '$1/$2 platforms bound'],
   ];
 

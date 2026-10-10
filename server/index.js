@@ -14,6 +14,7 @@ import { createPublisher } from './publish/index.js';
 import { modelSettings, modelFor, effortFor } from './models.js';
 import { createSkills, voicesFile } from './skills.js';
 import { createSetupCheck } from './setupcheck.js';
+import { createYtLogin } from './ytlogin.js';
 import { runClaude } from './cli.js';
 import { captureSource } from './assets.js';
 import { watchVideo, probe } from './watch.js';
@@ -45,6 +46,8 @@ const publisher = createPublisher({ store, root });
 // 技能是本地数据：启动时装上新的出厂技能，没改过的跟着出厂说明更新
 const skills = createSkills({ root });
 const setupCheck = createSetupCheck({ hotUrl: HOT_URL });
+// 拉 YouTube 字幕用的登录（可选），cookie 导出到 data/youtube-cookies.txt 给热点服务的 yt-dlp 用
+const ytLogin = createYtLogin({ root });
 {
   const r = skills.sync();
   if (r.installed.length) console.log(`已装上出厂技能：${r.installed.join('、')}`);
@@ -256,6 +259,21 @@ ${mine}`;
     if (q.get('force') === '1') out.set('refresh', 'true');
     if (q.get('risky') === '1') out.set('risky', 'true');
     return proxyHot(req, res, '/topics?' + out);
+  }
+  // 拉 YouTube 字幕用的登录：登录、确认、检查、退出；状态里合并热点服务记的用量和是否失效
+  if (parts[0] === 'youtube-login') {
+    if (parts.length === 1 && method === 'GET') {
+      const hot = await fetch(HOT_URL + '/youtube/login', { signal: AbortSignal.timeout(5000) }).then((r) => r.json()).catch(() => null);
+      return sendJson(res, 200, { ...ytLogin.status(), usage: hot });
+    }
+    if (parts[1] === 'start' && method === 'POST') return sendJson(res, 200, ytLogin.start());
+    if (parts[1] === 'done' && method === 'POST') return sendJson(res, 200, { ok: await ytLogin.finish() });
+    if (parts[1] === 'progress' && parts[2] && method === 'GET') {
+      const st = ytLogin.progress(parts[2]);
+      return st ? sendJson(res, 200, st) : sendError(res, 404, 'not_found', '没有这次登录');
+    }
+    if (parts[1] === 'check' && method === 'POST') return sendJson(res, 200, await ytLogin.check());
+    if (parts[1] === 'logout' && method === 'POST') return sendJson(res, 200, ytLogin.logout());
   }
   // 其他热点数据接口原样转发：/api/hs/global、/api/hs/feed、/api/hs/channels、/api/hs/x/pool、/api/hs/x/search?q=...、/api/hs/youtube/search?q=...
   if (parts[0] === 'hs' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) {
@@ -544,7 +562,7 @@ const hotPython = path.join(root, 'hot-service', '.venv', 'bin', 'python');
 if (!process.env.HOT_SERVICE_URL && existsSync(hotPython)) {
   const running = await fetch(HOT_URL + '/health', { signal: AbortSignal.timeout(1000) }).then((r) => r.ok).catch(() => false);
   if (!running) {
-    hotProc = spawn(hotPython, ['app.py'], { cwd: path.join(root, 'hot-service'), env: { ...process.env, HOT_PORT: String(HOT_PORT) }, stdio: ['ignore', 'inherit', 'inherit'] });
+    hotProc = spawn(hotPython, ['app.py'], { cwd: path.join(root, 'hot-service'), env: { ...process.env, HOT_PORT: String(HOT_PORT), YT_COOKIES_FILE: ytLogin.cookieFile }, stdio: ['ignore', 'inherit', 'inherit'] });
     hotProc.on('exit', (code) => code && console.log(`热点数据服务退出（${code}）`));
     console.log(`已启动热点数据服务：${HOT_URL}`);
   }

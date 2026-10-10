@@ -21,7 +21,7 @@ from hub import SOURCES, Hub
 from scheduler import Busy, Scheduler
 from db import connect
 from xpool import PoolError, XPool
-from videonotes import NoteError, VideoNotes
+from videonotes import NoteError, VideoNotes, login_status
 import youtube
 
 hub = Hub()
@@ -256,7 +256,7 @@ async def youtube_key_delete():
     return youtube.clear_key()
 
 
-NOTE_STATUS = {"blocked": 503, "no_subtitles": 404, "unavailable": 404, "failed": 502}
+NOTE_STATUS = {"blocked": 503, "login_expired": 401, "login_limited": 429, "no_subtitles": 404, "unavailable": 404, "failed": 502}
 
 
 @app.exception_handler(NoteError)
@@ -292,6 +292,12 @@ class Teardown(BaseModel):
 async def youtube_teardown_put(video: str, body: Teardown):
     """保存（覆盖）拆解报告。"""
     return await notes.save_teardown(_vid(video), body.text, body.title)
+
+
+@app.get("/youtube/login")
+async def youtube_login():
+    """拉字幕用的登录：有没有 cookie、是否失效、今天用了几次（不返回 cookie 本身）。"""
+    return login_status()
 
 
 @app.get("/youtube/notes")

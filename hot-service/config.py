@@ -46,6 +46,11 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY") or None  # 没在页面里填时�
 YOUTUBE_DAILY_QUOTA = int(os.getenv("YOUTUBE_DAILY_QUOTA", "10000"))  # Google 给每个项目每天的额度
 YOUTUBE_RESERVE = int(os.getenv("YOUTUBE_RESERVE", "3000"))  # 定时抓取不动用的额度，留给 Claude 临时搜索
 
+# 拉 YouTube 字幕用的登录（可选）：不带登录被要求验证时，用工作台导出的 cookie 再试一次。限量保护账号
+YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE") or ""
+YT_LOGIN_DAILY_CAP = int(os.getenv("YT_LOGIN_DAILY_CAP", "30"))  # 每天最多用登录拉几次
+YT_LOGIN_MIN_GAP_SEC = float(os.getenv("YT_LOGIN_MIN_GAP_SEC", "20"))  # 两次用登录拉字幕至少间隔
+
 # 定时抓取
 YOUTUBE_FEED_INTERVAL_MIN = int(os.getenv("YOUTUBE_FEED_INTERVAL_MIN", "360"))  # YouTube 渠道多久抓一次
 X_FEED_INTERVAL_MIN = int(os.getenv("X_FEED_INTERVAL_MIN", "120"))  # 推特渠道多久抓一次（花号池的请求次数）
