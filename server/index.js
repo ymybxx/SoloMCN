@@ -372,6 +372,7 @@ ${mine}`;
     try {
       if (parts[3] === 'record') return sendJson(res, 200, await lab.record(id, body));
       if (parts[3] === 'media') return sendJson(res, 200, await lab.addMedia(id, body));
+      if (parts[3] === 'media-remove') return sendJson(res, 200, await lab.removeMedia(id, body));
       if (parts[3] === 'browser') return sendJson(res, 200, await lab.browse(id, body));
       if (parts[3] === 'ask') return sendJson(res, 200, await lab.ask(id, body));
       if (parts[3] === 'answer') return sendJson(res, 200, await lab.answer(id, String(body.id || ''), String(body.result || '')));
@@ -426,6 +427,14 @@ ${mine}`;
       const { text } = await readBody(req);
       try {
         return sendJson(res, 200, { ok: agent.say(parts[2], text) });
+      } catch (err) {
+        if (!err.status) throw err;
+        return sendError(res, err.status, err.status === 409 ? 'busy' : 'bad_request', err.message);
+      }
+    }
+    if (parts[1] === 'runs' && ID_RE.test(parts[2] || '') && parts[3] === 'followup') {
+      try {
+        return sendJson(res, 200, await agent.followUp(parts[2], (await readBody(req)).text));
       } catch (err) {
         if (!err.status) throw err;
         return sendError(res, err.status, err.status === 409 ? 'busy' : 'bad_request', err.message);

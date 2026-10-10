@@ -418,6 +418,27 @@ export function createAgent({ store, cwd, lab }) {
     return { id, ...run };
   }
 
+  // 跑完的任务追加要求：接上原来的会话（Claude 记得做过什么，实验目录里的文件也都在），只做补充的部分
+  const FOLLOWUP_PROMPT = (text) => `用户看了你这次的结果，追加了一个要求：\n「${text}」\n在原来的基础上补做这一点，已经做好的不要重做。` +
+    '做完把调研报告更新完整（重新调用 save_research 保存全文，补上新做的部分），新的素材照常存，最后两三句话汇报这次补了什么。';
+  async function followUp(id, text) {
+    const saved = store.get('agentRuns', id);
+    if (!saved) throw Object.assign(new Error('找不到这次运行'), { status: 404 });
+    if (saved.status === 'running') throw Object.assign(new Error('这次运行还在进行中，可以直接插话'), { status: 409 });
+    if (!saved.sessionId) throw Object.assign(new Error('这次运行没有留下会话，只能重新开始'), { status: 400 });
+    text = String(text || '').trim().slice(0, 1500);
+    if (!text) throw Object.assign(new Error('先写要追加的要求'), { status: 400 });
+    const t = TASKS[saved.task];
+    if (!t) throw Object.assign(new Error('没有这个任务'), { status: 400 });
+    const lane = laneOf(saved.task);
+    if (current[lane]) throw Object.assign(new Error(busyMsg(lane)), { status: 409 });
+    const run = { ...saved, status: 'running', error: null, finishedAt: null, steps: [...(saved.steps || [])], followUps: [...(saved.followUps || []), { at: Date.now(), text }] };
+    run.steps.push({ at: Date.now(), kind: 'text', text: `追加要求：${text}` });
+    await store.update('agentRuns', id, { status: 'running', error: null, finishedAt: null, steps: run.steps, followUps: run.followUps });
+    launch({ id, run, task: saved.task, t, lane, prompt: FOLLOWUP_PROMPT(text), resumeSession: saved.sessionId });
+    return { id, ...run };
+  }
+
   function launch({ id, run, task, t, lane, prompt, resumeSession = null, autoResumes = 0 }) {
     const lb = t.lab && lab ? labLaunch(run.args.itemId) : null;
     const env = { ...cliEnv(), ...(lb?.env || {}) };
@@ -589,5 +610,5 @@ export function createAgent({ store, cwd, lab }) {
     return true;
   }
 
-  return { start, resume, say, stop, running: () => current.main?.id || null };
+  return { start, resume, followUp, say, stop, running: () => current.main?.id || null };
 }

@@ -169,6 +169,16 @@ function renderBanner(){
 }
 // 实践中 Claude 在等人处理：登录、付款（人在弹出的窗口里自己弄）、花钱确认、其他
 const ASK_TEXT={login:['要登录','已经弹出这个网站的 Chrome 窗口，在里面登录，弄好后点「登录好了」'],payment:['要付款或绑卡','已经弹出这个网站的 Chrome 窗口，在里面自己完成付款或绑卡（银行卡、密码这些不经过 Claude），弄好后点「付好了」'],spend:['要花钱','同意的话 Claude 接着做这一步；不同意它会跳过，在实践记录里写明'],other:['需要你做一件事','做完点「好了」']};
+// 跑完的调研追加要求：接上原来的会话补做，不用整个重跑
+function vFollowUp(run){
+  if(!run||run.status==='running'||!run.sessionId)return '';
+  const done=(run.followUps||[]).slice(-3).map(f=>`<li>${esc(f.text)} <span class="faint num">${fmtTime(f.at)}</span></li>`).join('');
+  return `<details class="followup"${S.fuOpen===run.id?' open':''}><summary data-act="fu-toggle" data-id="${esc(run.id)}">追加要求</summary>
+    <p class="hint">在这次调研的基础上补做一点：Claude 接着原来的会话做，记得之前做过的一切，实验目录里的文件也都在，只做补充的部分。</p>
+    ${done?`<ul class="rules">${done}</ul>`:''}
+    <textarea id="fu-${esc(run.id)}" rows="3" placeholder="比如：把小游戏做成看得见的画面，录原版和还原版同步运行的对比">${esc(S.fuText?.[run.id]||'')}</textarea>
+    <div><button class="btn primary" data-act="run-followup" data-id="${esc(run.id)}">让 Claude 接着做</button></div></details>`;
+}
 function vLabAsk(it,id){
   const q=it.labAsk;if(!q||q.status!=='waiting')return '';
   const [title,hint]=ASK_TEXT[q.kind]||ASK_TEXT.other;
@@ -1571,6 +1581,7 @@ function renderDrawer(){
         <div class="blk-head"><h3>调研</h3><span class="faint" style="font-size:12px">后台 Agent · 上网查资料</span><div class="actions">${researchActions(id,it)}</div></div>
         ${vLabAsk(it,id)}
         <div id="researchRun">${vRunMini(itemRun('research',id))}</div>
+        ${vFollowUp(itemRun('research',id))}
         ${vSay(itemRun('research',id))}
         ${vAssets(it)}
         ${it.research?vResearch(it.research,!d.script):'<p class="hint">写脚本之前先调研：上网查真实的价格、工具能力、操作步骤和反方观点，写成每条都有出处的报告；同时把能当画面的网页截图和官方视频收集成素材，做视频时直接用。写脚本时会以它为依据，台词里的数字都能追溯来源。一般 3–10 分钟。</p>'}
@@ -1798,6 +1809,9 @@ document.addEventListener('click',e=>{
     case 'lab-notes':api('GET','/api/lab/notes').then(r=>{S.labNotes=r.text;render()},e=>toast(e.message||'读取失败'));break;
     case 'lab-notes-save':api('PUT','/api/lab/notes',{text:$('#labNotes')?.value??S.labNotes}).then(()=>toast('经验本已保存'),e=>toast(e.message||'保存失败'));break;
     case 'lab-notes-close':S.labNotes=undefined;render();break;
+    case 'fu-toggle':e.preventDefault();S.fuOpen=S.fuOpen===id?null:id;render();break;
+    case 'run-followup':{const text=($('#fu-'+id)?.value||'').trim();if(!text){toast('先写要追加的要求');break}b.disabled=true;
+      api('POST',`/api/agent/runs/${encodeURIComponent(id)}/followup`,{text}).then(()=>{S.fuText={...(S.fuText||{}),[id]:''};S.fuOpen=null;toast('Claude 接着做了')},e=>{b.disabled=false;toast(e.message||'启动失败')});break}
     case 'yt-td':ytTeardown(id);break;
     case 'yt-td-view':ytTdOpen(id);break;
     case 'yt-td-redo':if(S.tdView?.teardown)arm(b,'确认重新拆解',()=>ytTeardown(id,true));else ytTeardown(id);break;
@@ -1830,6 +1844,7 @@ document.addEventListener('input',e=>{
     if(!d.dirty){d.dirty=true;S.pendingRender=true}const sv=document.querySelector(`[data-act="cfg-save"][data-id="${ch}"]`);if(sv)sv.disabled=false;return}
   if(t.id==='poolText'){S.poolText=t.value;return}
   if(t.id==='labNotes'){S.labNotes=t.value;return}
+  if(t.id&&t.id.startsWith('fu-')){S.fuText={...(S.fuText||{}),[t.id.slice(3)]:t.value};return}
   if(t.id==='poolUser'){S.poolUser=t.value;return}
   if(!S.open)return;
   const map={dTitle:'title',dHook:'hook',dAngle:'angle',dScript:'script',dNotes:'notes'};

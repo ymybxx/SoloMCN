@@ -595,3 +595,8 @@ a.pick-src:hover{color:var(--blue)}
 .lab-ask{border:1.5px solid var(--warn);display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
 .lab-ask h3{font-size:14px}
 .asset-kind.prac{right:6px;left:auto;background:var(--accent,#ff5c38);color:#fff}
+
+/* 调研追加要求 */
+.followup{border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;margin:8px 0}
+.followup summary{cursor:pointer;font-weight:600;font-size:13px}
+.followup textarea{width:100%;margin:6px 0}

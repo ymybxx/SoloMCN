@@ -801,6 +801,20 @@ server.registerTool(
 );
 
 server.registerTool(
+  'lab_remove_media',
+  {
+    title: '删除实践素材',
+    description: '删掉自己存的实践素材（录坏了、截图是空白、被新版替代的），文件和内容卡片上的记录一起删。不要只删文件不删记录。',
+    inputSchema: {
+      item_id: ITEM_ID,
+      ids: z.array(z.string()).optional().describe('素材 id（lab_record、lab_add_media 返回的 id）'),
+      files: z.array(z.string()).optional().describe('或者素材文件，相对实验目录，比如 media/rec-xxx.mp4'),
+    },
+  },
+  tool(async ({ item_id, ...body }) => call('POST', `/api/items/${item_id}/lab/media-remove`, body)),
+);
+
+server.registerTool(
   'lab_browser',
   {
     title: '实践浏览器',

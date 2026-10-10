@@ -199,6 +199,30 @@ export function createLab({ root, store }) {
     return { assets: await addAssets(itemId, [{ kind, file: rel(abs), part: kind === 'video' ? '实践视频' : '实践图片', title: path.basename(abs), note }]) };
   }
 
+  // Claude 删掉自己存的实践素材（比如录坏了重录）：文件和卡片上的记录一起删
+  async function removeMedia(itemId, { ids = [], files = [] }) {
+    const it = item(itemId);
+    const want = new Set([...ids, ...files.map((f) => path.relative(root, path.resolve(dirOf(itemId), f)))]);
+    const gone = (it.assets || []).filter((a) => a.source === 'practice' && (want.has(a.id) || want.has(a.file)));
+    for (const a of gone) {
+      const abs = path.resolve(root, a.file);
+      if (abs.startsWith(dirOf(itemId) + path.sep)) fs.rmSync(abs, { force: true });
+    }
+    const ids2 = new Set(gone.map((a) => a.id));
+    await store.update('items', itemId, { assets: (it.assets || []).filter((a) => !ids2.has(a.id)), updatedAt: Date.now() });
+    return { removed: gone.length };
+  }
+
+  // 文件已经不在了的素材记录（被删掉的录屏、截图）从卡片上去掉
+  async function pruneMissing(itemId) {
+    const it = store.get('items', itemId);
+    if (!it?.assets?.length) return 0;
+    const keep = it.assets.filter((a) => !a.file || fs.existsSync(path.resolve(root, a.file)));
+    if (keep.length === it.assets.length) return 0;
+    await store.update('items', itemId, { assets: keep });
+    return it.assets.length - keep.length;
+  }
+
   // ---------- 实践浏览器：每个网站一份登录状态，后台无界面运行 ----------
   const sessions = new Map(); // 网站 -> { ctx, page, timer }
   const windows = new Map(); // 网站 -> 给人登录、付款用的 Chrome 窗口进程
@@ -524,6 +548,7 @@ export function createLab({ root, store }) {
 
   // 每次调研结束：清掉下载缓存、解压过的安装包（实验目录和工具箱里的）
   function afterRun(itemId) {
+    pruneMissing(itemId).catch(() => {});
     let freed = 0;
     const drop = (p) => { if (fs.existsSync(p)) { freed += sizeOf(p); fs.rmSync(p, { recursive: true, force: true }); } };
     drop(path.join(dirOf(itemId), '.cache'));
@@ -561,6 +586,7 @@ export function createLab({ root, store }) {
       }
     }
     const items = store.all().items || {};
+    for (const id of Object.keys(items)) pruneMissing(id).catch(() => {});
     for (const l of st.labs) {
       if (l.slimmed) continue;
       const it = items[l.itemId];
@@ -572,6 +598,6 @@ export function createLab({ root, store }) {
     return { done };
   }
 
-  return { dirOf, prepare, record, addMedia, browse, ask, answer, clearStale, files,
+  return { dirOf, prepare, record, addMedia, removeMedia, pruneMissing, browse, ask, answer, clearStale, files,
     shared, toolsDir, settings, setSettings, toolbox, readNotes, writeNotes, appendNotes, storage, removeTool, slimLab, removeLab, afterRun, cleanup };
 }
