@@ -265,6 +265,7 @@
     '已换成新的出厂说明，原来的版本存进了历史': 'Replaced with the new default; your version is in the history', '保留了你的版本，这次出厂更新不再提示': 'Kept your version; this update won\'t be shown again',
     '合并好了，检查一下': 'Merged. Please review', '已采用合并结果': 'Merged version saved', '已载入这一版，点保存才生效': 'Version loaded; click Save to apply',
 
+    '热点数据服务还没响应：刚启动的话等几秒会自动连上；一直这样的话，在项目目录运行 npm run setup，再重新 npm start': 'The trends service isn\'t responding yet. If it just started, it will connect in a few seconds; if this persists, run npm run setup in the project folder and npm start again.',
     // ---- 环境检查 ----
     '还差这几步就能用了': 'A few steps left before you can start', '重新检查': 'Check again',
     'Claude Code 没装': 'Claude Code isn\'t installed', 'Claude Code 没登录': 'Claude Code isn\'t logged in', 'Claude Code 已登录': 'Claude Code logged in',

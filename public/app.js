@@ -605,7 +605,7 @@ function vIdeas(){
     <div class="idea-grid">${ideas.map(ideaCard).join('')||'<div class="empty"><strong>没有待挑的选题</strong>在「选题雷达」里给精选主题点「给账号出题」</div>'}</div>`;
 }
 // 热点数据服务：各榜单来源最近一次抓取的状态
-async function loadHs(){try{S.hs={sources:await api('GET','/api/hs/sources')}}catch(e){S.hs={down:e.message||'热点数据服务没有响应'}}requestRender()}
+async function loadHs(){try{S.hs={sources:await api('GET','/api/hs/sources')}}catch(e){S.hs={down:e.message||'热点数据服务没有响应'};if(!S.hsRetry)S.hsRetry=setTimeout(()=>{S.hsRetry=null;loadHs()},5000)}requestRender()}
 function vDataService(){
   const h=S.hs;
   if(!h)return `<div class="panel grid" style="gap:8px"><div class="label">热点数据服务</div><p class="hint">检查中…</p></div>`;
@@ -624,6 +624,8 @@ async function loadFeed(){
     S.feed={channels,items:feed.items}}
   catch(e){S.feed={down:e.message||'热点数据服务没有响应'}}
   S.feedLoading=false;requestRender();
+  // 热点服务刚启动时会晚几秒就绪：停在渠道、素材页时自动重试，连上了就显示
+  if(S.feed.down&&!S.feedRetry){S.feedRetry=setTimeout(()=>{S.feedRetry=null;if(['sources','feed'].includes(S.tab))loadFeed()},4000)}
 }
 async function feedRun(id){
   S.feedRunning=id;render();

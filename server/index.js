@@ -440,7 +440,7 @@ async function proxyHot(req, res, pathAndQuery) {
       signal: AbortSignal.timeout(req.method === 'POST' ? 15 * 60e3 : 3 * 60e3),
     });
   } catch {
-    return sendError(res, 503, 'hot_service_down', '热点数据服务没有响应。npm start 会自动启动它；第一次用需要先按 hot-service/README.md 安装。');
+    return sendError(res, 503, 'hot_service_down', '热点数据服务还没响应：刚启动的话等几秒会自动连上；一直这样的话，在项目目录运行 npm run setup，再重新 npm start');
   }
   res.writeHead(r.status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(await r.text());

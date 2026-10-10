@@ -77,5 +77,6 @@ fi
 
 say "启动"
 printf '  工作台地址：http://127.0.0.1:%s（以后启动：cd %s && npm start）\n' "$PORT" "$DIR"
-[ -n "${SOLOMCN_NO_OPEN:-}" ] || (sleep 4 && open "http://127.0.0.1:$PORT") >/dev/null 2>&1 &
+# 等工作台和热点服务都就绪了再打开浏览器（第一次启动热点服务要先建库、抓一遍热榜，会慢几秒）
+[ -n "${SOLOMCN_NO_OPEN:-}" ] || (for _ in $(seq 1 60); do curl -fs "http://127.0.0.1:$PORT/api/hs/health" >/dev/null 2>&1 && break; sleep 1; done; open "http://127.0.0.1:$PORT") >/dev/null 2>&1 &
 exec npm start
