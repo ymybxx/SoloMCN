@@ -740,6 +740,8 @@ async function ytSubRefresh(vid){
   catch(e){S.tdView={...S.tdView,subBusy:false,subError:e.message||'拉字幕失败'}}
   renderTdView();loadYtNotes();
 }
+// 拆解报告：在 mdLite 基础上，把 ## 小标题和 > 引用显示出来
+const tdMd=t=>mdLite(t).replace(/^#{1,4} (.+)$/gm,'<span class="td-h">$1</span>').replace(/^&gt; ?(.+)$/gm,'<span class="td-q">$1</span>');
 function renderTdView(){
   const v=S.tdView;const m=$('#modalRoot');if(!v){m.innerHTML='';return}
   const running=tdRun(v.vid);
@@ -748,7 +750,7 @@ function renderTdView(){
   m.innerHTML=`<div class="modal" data-act="modal-bg"><div class="modal-box td-box" role="dialog" aria-label="拆解报告">
     <div class="blk-head"><h3>${esc(v.title||'拆解报告')}</h3><div class="actions"><a class="btn ghost" href="https://www.youtube.com/watch?v=${esc(v.vid)}" target="_blank" rel="noopener">打开视频</a><button class="btn ghost" data-act="modal-close">关闭</button></div></div>
     ${v.loading?'<p class="hint">正在读取…</p>':''}
-    ${v.teardown?`<p class="faint">${esc(when(v.teardownAt))} 拆解</p><div class="td-text">${mdLite(v.teardown)}</div>`:!v.loading?'<p class="hint">还没拆解</p>':''}
+    ${v.teardown?`<p class="faint">${esc(when(v.teardownAt))} 拆解</p><div class="td-text">${tdMd(v.teardown)}</div>`:!v.loading?'<p class="hint">还没拆解</p>':''}
     <div class="td-sub"><span class="faint">${sub}</span>
       <div class="actions"><button class="btn ghost" data-act="yt-sub-refresh" data-id="${esc(v.vid)}" ${v.subBusy?'disabled':''}>${v.subBusy?'拉取中…':'重新拉字幕'}</button>
         <button class="btn" data-act="yt-td-redo" data-id="${esc(v.vid)}" ${running?'disabled':''}>${running?'拆解中…':v.teardown?'重新拆解':'拆解'}</button></div></div>
