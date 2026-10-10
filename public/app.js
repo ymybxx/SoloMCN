@@ -741,7 +741,8 @@ async function ytSubRefresh(vid){
   renderTdView();loadYtNotes();
 }
 // 拆解报告：在 mdLite 基础上，把 ## 小标题和 > 引用显示出来
-const tdMd=t=>mdLite(t).replace(/^#{1,4} (.+)$/gm,'<span class="td-h">$1</span>').replace(/^&gt; ?(.+)$/gm,'<span class="td-q">$1</span>');
+// 小标题、引用本身就占一行，后面的空行去掉，不然标题和正文之间会空一大块
+const tdMd=t=>mdLite(String(t).replace(/\n{3,}/g,'\n\n')).replace(/^#{1,4} (.+)\n*/gm,'<span class="td-h">$1</span>').replace(/^&gt; ?(.+)\n*/gm,'<span class="td-q">$1</span>').replace(/`([^`\n]+)`/g,'<code>$1</code>');
 function renderTdView(){
   const v=S.tdView;const m=$('#modalRoot');if(!v){m.innerHTML='';return}
   const running=tdRun(v.vid);
