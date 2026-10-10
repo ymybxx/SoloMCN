@@ -1,4 +1,4 @@
-"""调度器和各热榜渠道的测试。不访问外网。用到数据库的测试各自用一个临时的 SQLite 文件。"""
+"""调度器、各热榜渠道和推特渠道的测试。不访问外网：推特渠道用假的号池和假推文对象。用到数据库的测试各自用一个临时的 SQLite 文件。"""
 
 import asyncio
 import sys
@@ -6,9 +6,11 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from channels.x import XChannel, heat, to_entry
 from db import connect
 from scheduler import Busy, Entry, Scheduler
 
@@ -218,6 +220,141 @@ class HotListTests(unittest.IsolatedAsyncioTestCase):
         hub.entry = {**hub.entry, "stale": True, "error": "超时"}
         with self.assertRaisesRegex(RuntimeError, "超时"):
             await ch.collect()
+
+
+def link(short, full):
+    return NS(tcourl=short, url=full, text=None)
+
+
+def tweet(id_="1", text="Sora 2 is out\nsecond line https://t.co/abc", hours_ago=2, likes=1000, retweets=100,
+          quoted=None, retweeted=None, reply_to=None, videos=None, links=None, username="alice"):
+    return NS(
+        id_str=id_, url=f"https://x.com/{username}/status/{id_}", date=now() - timedelta(hours=hours_ago), lang="en",
+        rawContent=text, likeCount=likes, retweetCount=retweets, replyCount=10, quoteCount=5, viewCount=50000,
+        user=NS(username=username, followersCount=1234),
+        links=links if links is not None else [link("https://t.co/abc", "https://openai.com/sora")],
+        media=NS(photos=[], videos=videos or []), quotedTweet=quoted, retweetedTweet=retweeted, inReplyToTweetId=reply_to,
+    )
+
+
+class XEntryTests(unittest.TestCase):
+    def test_entry_keeps_full_text_with_expanded_links(self):
+        e = to_entry(tweet(), "AI", now())
+        self.assertEqual(e.title, "Sora 2 is out")
+        self.assertEqual(e.text, "Sora 2 is out\nsecond line https://openai.com/sora")
+        self.assertEqual(e.links, ["https://openai.com/sora"])
+        self.assertEqual((e.author, e.item_id, e.metrics["likes"], e.metrics["views"]), ("@alice", "1", 1000, 50000))
+        self.assertEqual(e.extra["matched"], ["AI"])
+
+    def test_html_entities_are_unescaped(self):
+        e = to_entry(tweet(text="&gt;Pope declares AI cringe &amp; more", links=[]), "AI", now())
+        self.assertEqual((e.title, e.text), (">Pope declares AI cringe & more", ">Pope declares AI cringe & more"))
+
+    def test_link_only_tweet_gets_a_readable_title(self):
+        t = tweet(text="https://t.co/xyz", links=[], videos=[NS(duration=12500)])
+        e = to_entry(t, "AI", now())
+        self.assertEqual(e.title, "@alice 发布的视频")
+        self.assertEqual((e.extra["hasVideo"], e.extra["videoSec"]), (True, 12))
+
+    def test_quoted_tweet_text_is_kept(self):
+        q = tweet("9", text="the real content https://t.co/abc", username="bob")
+        e = to_entry(tweet(text="wow", quoted=q), "AI", now())
+        self.assertEqual(e.extra["quoted"], {"author": "@bob", "text": "the real content https://openai.com/sora", "url": q.url})
+
+    def test_long_title_is_truncated(self):
+        self.assertEqual(len(to_entry(tweet(text="x" * 200), "AI", now()).title), 80)
+
+    def test_heat_prefers_fast_rising_posts(self):
+        t = now()
+        fresh = heat(tweet(hours_ago=1, likes=2000, retweets=0), t)
+        old = heat(tweet(hours_ago=40, likes=20000, retweets=0), t)
+        self.assertGreater(fresh, old)
+        self.assertLessEqual(heat(tweet(hours_ago=1, likes=10**9), t), 100)
+        silent = tweet(likes=0, retweets=0)
+        silent.replyCount = silent.quoteCount = 0
+        self.assertEqual(heat(silent, t), 0)
+
+
+class FakePool:
+    def __init__(self, results):
+        self.results, self.queries = results, []
+
+    async def search_tweets(self, q, limit, product):
+        self.queries.append((q, limit, product))
+        value = self.results[q.split(" since:")[0]]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def q(name, enabled=True):
+    return {"name": name, "query": name, "enabled": enabled}
+
+
+class XChannelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_collect_filters_and_merges_queries(self):
+        shared = tweet("1")
+        pool = FakePool({
+            "AI": [shared, tweet("2", retweeted=tweet("8")), tweet("3", reply_to=7), tweet("4", hours_ago=50)],
+            "Sora": [shared, tweet("5")],
+        })
+        entries = await XChannel(pool, [q("AI"), q("Sora"), q("关掉的", enabled=False)]).collect()
+
+        self.assertEqual(sorted(e.item_id for e in entries), ["1", "5"])
+        self.assertEqual(next(e for e in entries if e.item_id == "1").extra["matched"], ["AI", "Sora"])
+        since = (now() - timedelta(hours=48)).date().isoformat()
+        self.assertEqual(pool.queries[0][0], f"AI since:{since}")
+        self.assertEqual(pool.queries[0][2], "Top")
+        self.assertEqual(len(pool.queries), 2)  # 停用的语句不跑
+
+    def test_validate_cleans_and_rejects_bad_settings(self):
+        ch = XChannel(FakePool({}))
+        ok = ch.validate({"queries": [{"name": " 生活 ", "query": "AI   kids\nmin_faves:100", "enabled": True}], "limit": "40"})
+        self.assertEqual(ok, {"queries": [{"name": "生活", "query": "AI kids min_faves:100", "enabled": True}], "limit": 40})
+        bad = [
+            ({"queries": []}, "1–10"),
+            ({"queries": [q("A"), q("a")]}, "重复"),
+            ({"queries": [{"name": "A", "query": ""}]}, "不能为空"),
+            ({"queries": [{"name": "A", "query": "AI since:2026-01-01"}]}, "since"),
+            ({"queries": [q("A", enabled=False)]}, "至少要启用"),
+            ({"queries": [q("A")], "limit": 500}, "20–100"),
+            ({"queries": [{"name": "这个类别名字太长了超过", "query": "AI"}]}, "1–8"),
+        ]
+        for settings, msg in bad:
+            with self.subTest(msg=msg), self.assertRaisesRegex(ValueError, msg):
+                ch.validate(settings)
+
+    async def test_one_failing_query_does_not_fail_the_run(self):
+        entries = await XChannel(FakePool({"AI": RuntimeError("限流"), "Sora": [tweet("5")]}), [q("AI"), q("Sora")]).collect()
+        self.assertEqual([e.item_id for e in entries], ["5"])
+
+    async def test_all_queries_failing_raises(self):
+        with self.assertRaisesRegex(RuntimeError, "限流"):
+            await XChannel(FakePool({"AI": RuntimeError("限流")}), [q("AI")]).collect()
+
+
+class NotReadyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_channel_that_is_not_ready_is_skipped_without_a_failed_run(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = await connect(Path(tmp.name) / "test.db")
+        self.addAsyncCleanup(db.close)
+        ch = FakeChannel("x")
+        reason = "号池里还没有推特账号"
+
+        async def not_ready():
+            return reason
+        ch.not_ready = not_ready
+        s = Scheduler(db, [ch])
+
+        self.assertEqual(await s.due(), [])
+        self.assertEqual(await s.run("x"), {"channel": "x", "count": 0, "error": reason})
+        self.assertEqual(await db.fetchval("select count(*) from runs"), 0)
+        self.assertEqual((await s.status())[0]["notReady"], reason)
+
+        reason = None
+        self.assertEqual(await s.due(), ["x"])
+        self.assertIsNone((await s.status())[0]["notReady"])
 
 
 if __name__ == "__main__":

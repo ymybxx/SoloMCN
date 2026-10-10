@@ -38,6 +38,14 @@ class Channel(Protocol):
 
     async def collect(self) -> list[Entry]: ...
 
+    # 可选：还没准备好时（比如推特号池里没有账号）返回原因，这时不定时抓、也不记失败
+    # async def not_ready(self) -> str | None: ...
+
+
+async def not_ready(ch) -> str | None:
+    check = getattr(ch, "not_ready", None)
+    return await check() if check else None
+
 
 class Busy(Exception):
     pass
@@ -104,6 +112,9 @@ class Scheduler:
         ch = self.channels[channel_id]
         if channel_id in self.running:
             raise Busy(f"{ch.name}正在抓取")
+        reason = await not_ready(ch)
+        if reason:
+            return {"channel": channel_id, "count": 0, "error": reason}
         self.running.add(channel_id)
         run_id = await self.db.execute("insert into runs (channel, started_at) values (?, ?)", channel_id, time.time())
         try:
@@ -142,7 +153,7 @@ class Scheduler:
         now = time.time()
         return [
             cid for cid, ch in self.channels.items()
-            if cid not in self.running and (cid not in last or now - last[cid] >= ch.every_min * 60)
+            if cid not in self.running and (cid not in last or now - last[cid] >= ch.every_min * 60) and not await not_ready(ch)
         ]
 
     async def loop(self) -> None:
@@ -162,7 +173,7 @@ class Scheduler:
             out.append({
                 "id": cid, "name": ch.name, "description": getattr(ch, "description", ""),
                 "everyMin": ch.every_min, "running": cid in self.running, "total": total,
-                "config": channel_config(ch),
+                "config": channel_config(ch), "notReady": await not_ready(ch),
                 "lastRun": last and {"startedAt": fmt(last["started_at"]), "finishedAt": fmt(last["finished_at"]),
                                      "count": last["count"], "error": last["error"]},
                 "nextRun": fmt(last["started_at"] + ch.every_min * 60) if last else None,

@@ -56,7 +56,8 @@ Every arrow is a Claude Code run. You watch each step live and can interject mid
 
 - **A one-person MCN.** Several channels, each with several series. Audience, tone, voice and visual style live on the series, so channels don't overlap.
 - **Research with sources.** Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures pages and official videos as footage.
-- **It actually publishes.** One click to Douyin, Xiaohongshu, Bilibili and YouTube using a browser you logged into yourself, with portrait and landscape covers uploaded separately. Tick "manual" for any platform to get everything ready to copy and paste.
+- **See what's hot overseas.** An optional X (Twitter) source: paste the cookies of a few spare accounts under Sources → X to form a pool, and it fetches high-engagement posts for the search queries you write. Claude reads them when curating and can search X on demand. Without accounts it stays off.
+- **It actually publishes.** One click to Douyin, Xiaohongshu, Bilibili, YouTube and X using a browser you logged into yourself, with portrait and landscape covers uploaded separately. Tick "manual" for any platform to get everything ready to copy and paste.
 - **Bring your own video.** Pick a local file (not copied). Claude "watches" it (frames plus speech-to-text) and writes copy for each platform.
 - **English or Chinese UI.** Switch in Settings; Claude's progress notes follow. Content language follows each series: describe a series as English and its ideas, scripts, voice-over and copy come out in English.
 
@@ -150,10 +151,10 @@ public/            UI (plain HTML/CSS/JS, no build step)
 server/
   agent.js         Runs Claude Code (claude -p) skills in the background and streams each step
   mcp.js           Tools handed to Claude: channels and trends, picks, scripts, page capture…
-  publish/         Browser publishing for Douyin, Xiaohongshu, Bilibili, YouTube
+  publish/         Browser publishing for Douyin, Xiaohongshu, Bilibili, YouTube, X
   assets.js        Captures web pages and videos as footage during research
   watch.js         "Watches" local videos: frame sheets plus speech-to-text
-hot-service/       Trends service (Python): Douyin, Weibo, Bilibili, Zhihu, Baidu, Toutiao and Hacker News
+hot-service/       Trends service (Python): Douyin, Weibo, Bilibili, Zhihu, Baidu, Toutiao, Hacker News and the X account pool
 defaults/skills/   Default job descriptions (yours live in .claude/skills/, never committed)
 data/              Your data (channels, content, logins, keys), local only, never committed
 videos/            Generated video projects, never committed
@@ -162,6 +163,7 @@ videos/            Generated video projects, never committed
 ## Before you use it
 
 - Publishing drives your own logged-in browser. Platform rules change; you are responsible for your accounts. Use "manual" for accounts you care about most.
+- The X account pool searches X with the accounts' login cookies, which is against X's terms; accounts may be rate-limited or banned. Use spare accounts, not your main one.
 - The skills keep one hard rule: never fabricate facts, numbers or quotes from real people. Everything else is your call.
 - You are responsible for rights to footage, screenshots and music, and for each platform's content rules.
 

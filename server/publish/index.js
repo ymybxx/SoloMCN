@@ -11,6 +11,7 @@ import { generateImage } from '../../tools/img.mjs';
 import { imageConfig } from '../secrets.js';
 import { createBili } from './bili.js';
 import { createYt } from './yt.js';
+import { createX } from './x.js';
 import { seriesOf } from '../series.js';
 import { creativeBlock } from '../prompts.js';
 
@@ -57,6 +58,7 @@ export const PUBLISH_PLATFORMS = [
   { k: 'bilibili', n: 'B站', ready: true },
   { k: 'xhs', n: '小红书', ready: true },
   { k: 'youtube', n: 'YouTube', ready: true },
+  { k: 'x', n: '推特', ready: true },
 ];
 
 const PLATFORM_INFO = { type: 'object', required: ['title', 'desc', 'tags'], properties: { title: { type: 'string' }, desc: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } } };
@@ -65,6 +67,7 @@ const PLATFORM_RULES = {
   douyin: 'douyin：title 不超过 30 字，前几个字就要有钩子；desc 一到三句，最后一句引导评论；tags 3–5 个，和内容相关、大家会搜的词，不带 #',
   bilibili: 'bilibili：title 不超过 80 字，可以更完整；desc 写清楚这期讲了什么，有调研来源就列出主要来源；tags 5–10 个',
   youtube: 'youtube：和视频同一种语言；title 不超过 100 字，可以带一两个英文关键词方便搜索；desc 写清楚这期讲了什么，有调研来源就列出主要来源；tags 5–10 个，可以中英文混合',
+  x: 'x（推特）：desc 就是推文正文。中文视频写中英双语：先一段中文、空一行、再一段英文，意思一致；其他语言的视频只用那一种语言。按推特的算法中文每个字算 2、英文字母和空格算 1，正文合计不超过 240（中英双语大约中文 60 字加英文 100 个字母）；不放链接；title 写一句短标题，只在工作台里看，不会发出去；tags 1–3 个，不带 #',
   xhs: 'xhs：title 不超过 20 字；desc 写成小红书笔记的口吻，100–300 字，分段；tags 5–8 个',
 };
 const PUBLISH_KEYS = Object.keys(PLATFORM_RULES);
@@ -98,7 +101,7 @@ ${withCover && imageReady() ? '- cover_prompt：竖版封面图的生成提示�
 
 export function createPublisher({ store, root }) {
   // 走浏览器自动化、需要扫码绑定的平台
-  const browsers = { douyin: createDouyin({ dataDir: path.join(root, 'data') }), xhs: createXhs({ dataDir: path.join(root, 'data') }), bilibili: createBili({ dataDir: path.join(root, 'data') }), youtube: createYt({ dataDir: path.join(root, 'data') }) };
+  const browsers = { douyin: createDouyin({ dataDir: path.join(root, 'data') }), xhs: createXhs({ dataDir: path.join(root, 'data') }), bilibili: createBili({ dataDir: path.join(root, 'data') }), youtube: createYt({ dataDir: path.join(root, 'data') }), x: createX({ dataDir: path.join(root, 'data') }) };
   const abs = (rel) => path.resolve(root, rel);
   // 没有脚本的现成视频：把“看”过的画面缩略图交给 Claude
   const watchImages = (it) => (!it.script && it.video?.watch?.status === 'done' ? (it.video.watch.sheets || []).map(abs) : []);
@@ -183,6 +186,7 @@ export function createPublisher({ store, root }) {
     xhs: 'https://creator.xiaohongshu.com/publish/publish?source=official&from=tab_switch&target=video',
     bilibili: 'https://member.bilibili.com/platform/upload/video/frame',
     youtube: 'https://studio.youtube.com/',
+    x: 'https://x.com/compose/post',
   };
   const stamp = () => {
     const d = new Date();

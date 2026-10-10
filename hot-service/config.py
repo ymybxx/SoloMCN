@@ -29,7 +29,21 @@ CACHE_SECONDS = int(os.getenv("HOT_CACHE_SECONDS", "600"))  # 同一来源 10 �
 FETCH_INTERVAL_MIN = int(os.getenv("HOT_FETCH_INTERVAL_MIN", "20"))  # 后台定时抓取间隔
 REQUEST_TIMEOUT = float(os.getenv("HOT_REQUEST_TIMEOUT", "10"))
 
+# 推特号池。账号在工作台「渠道 → 推特」里添加，网络跟系统的代理设置走；下面是号池的使用规则，一般不用改
+X_POOL_MIN = int(os.getenv("X_POOL_MIN", "2"))  # 可用账号少于这个数就提醒补充
+X_DAILY_REQ_PER_ACCOUNT = int(os.getenv("X_DAILY_REQ_PER_ACCOUNT", "150"))  # 每个账号每天最多请求次数
+X_MIN_INTERVAL_SEC = float(os.getenv("X_MIN_INTERVAL_SEC", "3"))  # 两次请求之间至少间隔
+X_CHECK_INTERVAL_H = float(os.getenv("X_CHECK_INTERVAL_H", "6"))  # 可用账号的体检间隔
+X_COOLDOWN_STEPS_H = [float(x) for x in os.getenv("X_COOLDOWN_STEPS_H", "1,4,12,24").split(",")]  # 冷却账号的重测间隔，依次递增，之后一直用最后一个
+X_COOLDOWN_GIVEUP_DAYS = float(os.getenv("X_COOLDOWN_GIVEUP_DAYS", "3"))  # 冷却超过这么多天仍失败就判定失效
+X_LOCKED_RECHECK_H = float(os.getenv("X_LOCKED_RECHECK_H", "12"))  # 被锁账号的重测间隔
+X_LOCKED_GIVEUP_DAYS = float(os.getenv("X_LOCKED_GIVEUP_DAYS", "7"))  # 锁定超过这么多天没解锁就判定失效
+X_REQUEST_TIMEOUT = float(os.getenv("X_REQUEST_TIMEOUT", "60"))
+X_CHECK_TARGET = os.getenv("X_CHECK_TARGET", "XDevelopers")  # 体检时查询的公开账号
+
 # 定时抓取
+X_FEED_INTERVAL_MIN = int(os.getenv("X_FEED_INTERVAL_MIN", "120"))  # 推特渠道多久抓一次（花号池的请求次数）
+X_FEED_LIMIT = int(os.getenv("X_FEED_LIMIT", "60"))  # 每条搜索语句每次最多取多少条（每 20 条约一次请求）
 DOUYIN_FEED_INTERVAL_MIN = int(os.getenv("DOUYIN_FEED_INTERVAL_MIN", "30"))  # 抖音热搜多久抓一次（公开接口）
 HOTLIST_FEED_INTERVAL_MIN = int(os.getenv("HOTLIST_FEED_INTERVAL_MIN", "30"))  # 微博、B站、知乎等公开榜单多久抓一次
 

@@ -125,6 +125,7 @@ function sourceUrl(s) {
   const id = String(s?.id || '');
   if (!id) return '';
   if (s.channel === 'douyin') return 'https://www.douyin.com/search/' + encodeURIComponent(id);
+  if (s.channel === 'x' && /^\d+$/.test(id)) return 'https://x.com/i/status/' + id;
   return '';
 }
 

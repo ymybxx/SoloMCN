@@ -20,6 +20,7 @@ class DB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("pragma journal_mode = wal")
         self.conn.execute("pragma busy_timeout = 5000")
+        self.conn.execute("pragma foreign_keys = on")
         self.lock = asyncio.Lock()
 
     async def _run(self, fn):
@@ -50,6 +51,20 @@ class DB:
                 self.conn.execute("rollback")
                 raise
         await self._run(go)
+
+    async def tx(self, fn):
+        """在一个事务里执行 fn(conn)（普通函数，放到线程里跑），返回它的结果；出错整体回滚。
+        所有读写共用一把锁，事务里的“先查再改”不会被别的请求插进来。"""
+        def go():
+            self.conn.execute("begin immediate")
+            try:
+                out = fn(self.conn)
+            except BaseException:
+                self.conn.execute("rollback")
+                raise
+            self.conn.execute("commit")
+            return out
+        return await self._run(go)
 
     async def close(self) -> None:
         await self._run(self.conn.close)

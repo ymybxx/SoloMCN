@@ -14,12 +14,15 @@ from pydantic import BaseModel, Field
 
 from channels.douyin import DouyinChannel
 from channels.hotlist import HotListChannel
+from channels.x import XChannel
 from config import DB_PATH, FETCH_INTERVAL_MIN, HOST, PORT
 from hub import SOURCES, Hub
 from scheduler import Busy, Scheduler
 from db import connect
+from xpool import PoolError, XPool
 
 hub = Hub()
+xpool = XPool()
 scheduler: Scheduler | None = None
 
 
@@ -37,11 +40,12 @@ async def refresh_loop():
 async def lifespan(_app: FastAPI):
     global scheduler
     db = await connect(DB_PATH)
+    await xpool.start(db)
     # 抖音有自己的渠道（数据更全），其余榜单包一层复用热榜中心的抓取和缓存
     lists = [HotListChannel(hub, s) for s in SOURCES if s.id != "douyin"]
-    scheduler = Scheduler(db, [DouyinChannel(), *lists])
+    scheduler = Scheduler(db, [XChannel(xpool), DouyinChannel(), *lists])
     await scheduler.load()
-    tasks = [asyncio.create_task(refresh_loop()), asyncio.create_task(scheduler.loop())]
+    tasks = [asyncio.create_task(refresh_loop()), asyncio.create_task(xpool.background()), asyncio.create_task(scheduler.loop())]
     yield
     for t in tasks:
         t.cancel()
@@ -67,6 +71,14 @@ async def only_from_self(request: Request, call_next):
     if not allowed:
         return JSONResponse(status_code=403, content={"error": {"code": "forbidden", "message": "只接受本机发来的请求"}})
     return await call_next(request)
+
+POOL_STATUS = {"no_accounts": 503, "quota": 429, "timeout": 504, "busy": 409, "not_found": 404, "bad_input": 400}
+
+
+@app.exception_handler(PoolError)
+async def pool_error(_req, exc: PoolError):
+    return JSONResponse(status_code=POOL_STATUS.get(exc.code, 502), content={"error": {"code": exc.code, "message": str(exc)}})
+
 
 @app.exception_handler(Exception)
 async def any_error(_req, exc: Exception):
@@ -152,6 +164,63 @@ async def feed(
     """各渠道抓到的内容，按热度分排序。只读数据库，不会触发抓取。"""
     ids = [c for c in (channels or "").split(",") if c]
     return {"items": await scheduler.feed(ids or None, hours, limit)}
+
+
+# ---------- 推特号池 ----------
+@app.get("/x/pool")
+async def x_pool():
+    return await xpool.status()
+
+
+@app.post("/x/pool/check")
+async def x_pool_check():
+    """立即检测所有没失效的账号（会对每个账号发一次请求）。"""
+    return await xpool.check_all()
+
+
+@app.post("/x/pool/accounts/{username}/check")
+async def x_pool_check_one(username: str):
+    """立即检测一个账号，已失效的也可以，成功就恢复可用。"""
+    return await xpool.check_one(username)
+
+
+class AddAccounts(BaseModel):
+    text: str = Field(..., max_length=200_000, description="多行 用户名:密码:邮箱:auth_token:ct0、用户名 Cookie、纯 Cookie，或 Cookie-Editor JSON")
+    username: str | None = Field(None, description="只粘贴一份 Cookie 时可以单独填用户名")
+
+
+@app.post("/x/pool/accounts")
+async def x_pool_add(body: AddAccounts):
+    """提取 Cookie、批内及存量去重，返回新增、更新、重复和无效数量。"""
+    return await xpool.add_accounts(body.text, body.username)
+
+
+@app.delete("/x/pool/accounts/{username}")
+async def x_pool_remove(username: str):
+    return await xpool.remove_account(username)
+
+
+# ---------- 推特（实时查询，花号池的请求次数） ----------
+@app.get("/x/trends")
+async def x_trends(category: str = Query("trending", description="trending / news / sport / entertainment"), limit: int = Query(30, ge=1, le=50)):
+    return {"category": category, "items": await xpool.trends(category, limit)}
+
+
+@app.get("/x/search")
+async def x_search(q: str, limit: int = Query(20, ge=1, le=100), product: str = Query("Top", pattern="^(Top|Latest|Media)$")):
+    """搜索推文。q 支持 X 的高级搜索语法，比如 `AI video min_faves:1000 lang:en`。"""
+    return {"q": q, "items": await xpool.search(q, limit, product)}
+
+
+@app.get("/x/list/{list_id}")
+async def x_list(list_id: int, limit: int = Query(20, ge=1, le=100)):
+    """X 列表的最新推文。把要关注的博主拉进一个列表，用这个接口一次拿到。"""
+    return {"listId": list_id, "items": await xpool.list_timeline(list_id, limit)}
+
+
+@app.get("/x/user/{username}")
+async def x_user(username: str, limit: int = Query(20, ge=1, le=100)):
+    return {"username": username, "items": await xpool.user_tweets(username.lstrip("@"), limit)}
 
 
 if __name__ == "__main__":

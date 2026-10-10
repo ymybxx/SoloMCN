@@ -96,30 +96,46 @@ server.registerTool(
   {
     title: '获取定时抓取的内容',
     description:
-      '读取各渠道定时抓取、已经存下来的内容，按热度分（0–100）排序。只读数据库。渠道：' +
+      '读取各渠道定时抓取、已经存下来的内容，按热度分（0–100）排序。只读数据库，不消耗推特号池的请求次数。渠道：' +
+      'x = 推特，按工作台「渠道 → 推特」里配置的几类搜索定时抓（号池里有账号才有数据），带全文、引用推文、是否有视频，group 是类别；' +
       'douyin = 抖音热搜榜 50 条加实时上升热点（rising），每 30 分钟一次，有热搜词、热度、排名、since（开始上榜的时间）、maxRank（最高排名）、相关视频数，没有单条视频数据；risk 是自动识别的风险。' +
       'weibo、bilibili、zhihu、baidu、toutiao = 各平台热榜，bilibili-video = B站热门视频（带播放和点赞），hackernews = HN 首页。榜单条目只给排名、标题、热度、上榜时长、是否新上榜和风险，标题就是它的 id。' +
-      '各渠道的分数口径不同，只在同一渠道内比较。跨平台合并看 get_hot_topics。',
+      '各渠道的分数口径不同，只在同一渠道内比较。跨平台合并看 get_hot_topics。' +
+      '只借鉴话题和信息，不搬运原视频或原文。',
     inputSchema: {
-      channels: z.array(z.string()).optional().describe('渠道 id：douyin、weibo、bilibili、zhihu、baidu、toutiao、bilibili-video、hackernews；不填就是全部'),
+      channels: z.array(z.string()).optional().describe('渠道 id：x、douyin、weibo、bilibili、zhihu、baidu、toutiao、bilibili-video、hackernews；不填就是全部'),
       hours: z.number().positive().max(720).optional().describe('最近多少小时内发布的，默认 24'),
       limit: z.number().int().min(1).max(100).optional().describe('默认 30'),
-      per_group: z.number().int().min(1).max(50).optional().describe('每个渠道各取前几条；不填就按总分取前 limit 条'),
+      per_group: z.number().int().min(1).max(50).optional().describe('每组各取前几条：榜单按渠道分组，推特按类别（工作台里配置的搜索类别）分组；不填就按总分取前 limit 条'),
     },
     annotations: { readOnlyHint: true },
   },
   tool(async ({ channels, hours = 24, limit = 30, per_group }) => {
     const q = new URLSearchParams({ hours: String(hours), limit: String(per_group ? 1000 : limit) });
     if (channels?.length) q.set('channels', channels.join(','));
-    let { items } = await call('GET', `/api/hs/feed?${q}`);
-    const group = (x) => x.channel;
+    let [{ items }, chans] = await Promise.all([call('GET', `/api/hs/feed?${q}`), call('GET', '/api/hs/channels')]);
+    // 推特按页面上配置的类别分组；类别改名或删掉以后，以前抓到的归到“其他”
+    const xNames = new Set((chans.find((c) => c.id === 'x')?.config.settings.queries || []).map((s) => s.name));
+    const group = (x) => (x.channel === 'x' ? (xNames.has(x.extra.matched?.[0]) ? x.extra.matched[0] : '其他') : x.channel);
     if (per_group) {
       const n = {};
       items = items.filter((x) => (n[group(x)] = (n[group(x)] || 0) + 1) <= per_group);
     }
     // 榜单条目只给判断需要的字段，链接很长又用不上，写入精选时工作台会自动补
     const hoursAgo = (t) => Math.max(0, Math.round((Date.now() - Date.parse(t)) / 36e5));
-    return items.map((x) => ({
+    return items.map((x) => (x.channel === 'x' ? {
+      channel: x.channel,
+      group: group(x),
+      id: x.id,
+      score: x.score,
+      author: x.author || undefined,
+      text: x.text || x.title,
+      quoted: x.extra.quoted ? `${x.extra.quoted.author}：${x.extra.quoted.text}` : undefined,
+      metrics: x.metrics,
+      hasVideo: x.extra.hasVideo,
+      publishedAt: x.publishedAt || undefined,
+      url: x.url,
+    } : {
       channel: x.channel,
       rank: x.metrics.rank ?? undefined,
       title: x.title,
@@ -145,16 +161,104 @@ server.registerTool(
   {
     title: '获取国外热点',
     description:
-      '返回 Hacker News 首页（科技、AI 圈的一手热点，带分数和评论数）。用来发现国内还没人做的新东西。' +
-      '想看推特、YouTube 等海外平台在聊什么，直接用网页搜索。',
+      '返回 Hacker News 首页（科技、AI 圈的一手热点，带分数和评论数），以及推特趋势榜（号池里有可用账号才有，没有就跳过）。' +
+      '用来发现国内还没人做的新东西。YouTube 等其他海外平台在聊什么，直接用网页搜索。只借鉴话题和信息，不搬运原视频或原文。',
     inputSchema: {
-      limit: z.number().int().min(5).max(50).optional().describe('最多返回多少条，默认 20'),
+      limit: z.number().int().min(5).max(50).optional().describe('每个来源最多返回多少条，默认 20'),
+      include_x_trends: z.boolean().optional().describe('是否同时拉推特趋势榜，默认 true；会消耗号池请求次数'),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
-  tool(async ({ limit = 20 }) => {
+  tool(async ({ limit = 20, include_x_trends = true }) => {
     const g = await call('GET', `/api/hs/global?limit=${limit}`);
-    return { hackerNews: (g.items.hackernews || []).map((x) => `${x.title}｜${x.points} 分 ${x.comments} 评论｜${x.url}`) };
+    const out = {
+      hackerNews: (g.items.hackernews || []).map((x) => `${x.title}｜${x.points} 分 ${x.comments} 评论｜${x.url}`),
+      xTrends: null,
+    };
+    if (include_x_trends) {
+      try {
+        const t = await call('GET', `/api/hs/x/trends?category=trending&limit=${Math.min(limit, 30)}`);
+        out.xTrends = t.items.map((x) => x.name ?? x.trend ?? JSON.stringify(x).slice(0, 120));
+      } catch (err) {
+        out.xTrends = `推特趋势暂不可用：${err.message}`;
+      }
+    }
+    return out;
+  }),
+);
+
+// ---------- 推特（实时查询，通过号池，每次调用都消耗请求次数） ----------
+const tweetLine = (t) => ({
+  author: `@${t.user?.username}（${t.user?.followers ?? '?'} 粉）`,
+  text: t.text,
+  likes: t.likes,
+  retweets: t.retweets,
+  views: t.views,
+  hasVideo: (t.media?.videos?.length || 0) > 0,
+  date: t.date,
+  url: t.url,
+});
+
+server.registerTool(
+  'x_search',
+  {
+    title: '搜索推特',
+    description:
+      '通过号池搜索推文，支持 X 高级搜索语法，例如 `AI video min_faves:1000 lang:en`（只要点赞过千的英文推文）。' +
+      '每次调用都消耗号池请求次数，按需使用；号池里没有账号时会报错，改用网页搜索。只借鉴话题和信息，不搬运原视频或原文。',
+    inputSchema: {
+      q: z.string().min(1).describe('搜索语句'),
+      limit: z.number().int().min(1).max(50).optional().describe('默认 20'),
+      product: z.enum(['Top', 'Latest', 'Media']).optional().describe('Top 热门（默认）/ Latest 最新 / Media 带图或视频'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ q, limit = 20, product = 'Top' }) => {
+    const r = await call('GET', `/api/hs/x/search?${new URLSearchParams({ q, limit: String(limit), product })}`);
+    return r.items.map(tweetLine);
+  }),
+);
+
+server.registerTool(
+  'x_list_timeline',
+  {
+    title: '读取推特列表',
+    description: '读取一个 X 列表（List）里所有账号的最新推文。把要关注的博主拉进一个列表，用列表 ID 调用。消耗号池请求次数。',
+    inputSchema: {
+      list_id: z.string().regex(/^\d+$/).describe('列表 ID，列表网址里 /lists/ 后面的数字'),
+      limit: z.number().int().min(1).max(50).optional().describe('默认 20'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ list_id, limit = 20 }) => (await call('GET', `/api/hs/x/list/${list_id}?limit=${limit}`)).items.map(tweetLine)),
+);
+
+server.registerTool(
+  'x_user_tweets',
+  {
+    title: '读取推特用户的推文',
+    description: '读取某个推特用户最近的推文。消耗号池请求次数。',
+    inputSchema: {
+      username: z.string().regex(/^@?[A-Za-z0-9_]{1,15}$/).describe('用户名，不带或带 @ 都可以'),
+      limit: z.number().int().min(1).max(50).optional().describe('默认 20'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ username, limit = 20 }) => (await call('GET', `/api/hs/x/user/${username.replace(/^@/, '')}?limit=${limit}`)).items.map(tweetLine)),
+);
+
+server.registerTool(
+  'x_pool_status',
+  {
+    title: '推特号池状态',
+    description: '查看推特号池：各状态账号数（可用、冷却中、待解锁、已失效）、今天用了多少次、最近的状态变化和原因、是否需要补充账号、是否疑似网络问题。',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  tool(async () => {
+    const p = await call('GET', '/api/hs/x/pool');
+    const { accounts, ...rest } = p;
+    return { ...rest, accounts: accounts.map(({ username, status, reason, nextCheckAt, requestsToday }) => ({ username, status, reason, nextCheckAt, requestsToday })) };
   }),
 );
 
@@ -249,9 +353,9 @@ const PickSchema = z.object({
   angle: z.string().describe('建议的切入方向：按账号风格做成解说、演示或剧情，不强制虚构化，80 字以内'),
   sources: z.array(z.object({
     channel: z.string().describe('x、douyin、hackernews（get_feed）；weibo、bilibili、zhihu、baidu、toutiao（get_hot_topics 的平台）；xiaohongshu、web（网页搜索）'),
-    id: z.string().default('').describe('榜单条目填它的 title，网页来源不填'),
+    id: z.string().default('').describe('推特填 get_feed 里的 id，榜单条目填它的 title，网页来源不填'),
     title: z.string().describe('素材原标题或一句话摘要'),
-    url: z.string().default('').describe('网页来源填链接；榜单条目不用填，工作台会自动补'),
+    url: z.string().default('').describe('推特和网页来源填链接；榜单条目不用填，工作台会自动补'),
   })).min(1).max(8).describe('依据的素材，跨渠道的都列上'),
   accounts: z.array(z.string()).default([]).describe('适合的账号代号，如 ["B","C"]'),
   risk: z.string().default('').describe('仅供后台审阅的备注，没有就不填；不要要求往脚本或画面里加声明'),
@@ -290,7 +394,7 @@ server.registerTool(
   },
   tool(async ({ picks }) => {
     // 榜单条目没给链接的，按渠道和标题从素材里找回原链接
-    const need = [...new Set(picks.flatMap((p) => p.sources.filter((x) => !x.url && x.id && !['web', 'xiaohongshu'].includes(x.channel)).map((x) => x.channel)))];
+    const need = [...new Set(picks.flatMap((p) => p.sources.filter((x) => !x.url && x.id && !['x', 'web', 'xiaohongshu'].includes(x.channel)).map((x) => x.channel)))];
     if (need.length) {
       const { items } = await call('GET', `/api/hs/feed?${new URLSearchParams({ channels: need.join(','), hours: '72', limit: '1000' })}`);
       const urls = new Map(items.map((x) => [`${x.channel}|${x.id}`, x.url]));

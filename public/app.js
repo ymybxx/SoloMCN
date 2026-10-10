@@ -132,6 +132,7 @@ $('#view').addEventListener('focusout',()=>{if(S.pendingRender)setTimeout(()=>{c
 function render(){renderStatus();renderTabs();renderBanner();
   const v={home:vHome,radar:vRadar,ideas:vIdeas,feed:vFeed,settings:vSettings,pipeline:vPipeline,calendar:vCalendar,accounts:vAccounts,data:vData,sources:vSources,skills:vSkills}[S.tab];
   const html=v();keepLogScroll($('#view'),()=>{$('#view').innerHTML=html});
+  if(S.tab==='sources'){const t=$('#poolText');if(t)t.value=S.poolText||'';const u=$('#poolUser');if(u)u.value=S.poolUser||''}
 
 }
 function renderStatus(){
@@ -227,7 +228,7 @@ function vHome(){
 }
 
 /* ---------- 选题雷达（第 3 步）和账号选题（第 4 步） ---------- */
-const CH_NAMES={douyin:'抖音',xiaohongshu:'小红书',web:'网页',weibo:'微博',bilibili:'B站',zhihu:'知乎',baidu:'百度',toutiao:'头条','bilibili-video':'B站热门视频',hackernews:'Hacker News'};
+const CH_NAMES={x:'推特',douyin:'抖音',xiaohongshu:'小红书',web:'网页',weibo:'微博',bilibili:'B站',zhihu:'知乎',baidu:'百度',toutiao:'头条','bilibili-video':'B站热门视频',hackernews:'Hacker News'};
 const fmtTime=ts=>{if(!ts)return '';const d=new Date(ts);return pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes())};
 const pickList=()=>Object.entries(S.picks||{}).map(([id,v])=>({id,...v})).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 const runList=()=>Object.entries(S.runs||{}).map(([id,v])=>({id,...v})).sort((a,b)=>(b.startedAt||0)-(a.startedAt||0));
@@ -417,11 +418,11 @@ function vAssets(it){
     <figcaption><span title="${esc(a.note||'')}">${esc(a.note||a.title||a.part||'')}</span>${safeUrl(a.url)?` <a class="faint" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(new URL(a.url).hostname.replace(/^www\./,''))}</a>`:''} <button class="btn ghost danger" data-act="asset-del" data-id="${esc(a.id)}" aria-label="删除这个素材">删除</button></figcaption></figure>`).join('')}</div></details>`;
 }
 /* ---------- 发布 ---------- */
-const PUB_PLATFORMS=[{k:'douyin',n:'抖音',ready:true},{k:'bilibili',n:'B站',ready:true},{k:'xhs',n:'小红书',ready:true},{k:'youtube',n:'YouTube',ready:true}];
-const PUB_LIMITS={douyin:{title:30},bilibili:{title:80},xhs:{title:20},youtube:{title:100}};
+const PUB_PLATFORMS=[{k:'douyin',n:'抖音',ready:true},{k:'bilibili',n:'B站',ready:true},{k:'xhs',n:'小红书',ready:true},{k:'youtube',n:'YouTube',ready:true},{k:'x',n:'推特',ready:true}];
+const PUB_LIMITS={douyin:{title:30},bilibili:{title:80},xhs:{title:20},youtube:{title:100},x:{weight:280}};
 async function loadPubAcc(){try{S.pubAcc=await api('GET','/api/publish/accounts');requestRender();if(S.open)renderDrawer()}catch{}}
 // 账号卡片上的抖音绑定状态
-const BIND_PLATS=[{k:'douyin',n:'抖音'},{k:'xhs',n:'小红书'},{k:'bilibili',n:'B站'},{k:'youtube',n:'YouTube'}];
+const BIND_PLATS=[{k:'douyin',n:'抖音'},{k:'xhs',n:'小红书'},{k:'bilibili',n:'B站'},{k:'youtube',n:'YouTube'},{k:'x',n:'推特'}];
 function vBind(accId,plat){
   const key=`${plat}:${accId}`;const pn=BIND_PLATS.find(x=>x.k===plat)?.n||plat;
   const st=S.pubAcc?.[accId]?.[plat];const lg=S.logins?.[key];
@@ -432,6 +433,9 @@ function vBind(accId,plat){
     ?`<span class="pill ${res?.ok===false?'bad':'ok'}"><i></i>${res?esc(res.message):'已绑定'}</span> <button class="btn ghost" data-act="bind-check" data-id="${accId}" data-k="${plat}">检查</button><button class="btn ghost" data-act="bind-login" data-id="${accId}" data-k="${plat}">重新登录</button><button class="btn ghost danger" data-act="bind-off" data-id="${accId}" data-k="${plat}">解绑</button>`
     :`<span class="faint">未绑定</span> <button class="btn" data-act="bind-login" data-id="${accId}" data-k="${plat}">扫码绑定${esc(pn)}</button>${lg?.status==='failed'?` <span class="err">${esc(lg.message)}</span>`:''}`;
 }
+// 推特的长度算法：中日韩文字和 emoji 算 2，其他算 1，链接算 23；推文 = 正文 + 空行 + 最多 3 个话题（和服务端 x.js 一致）
+const tweetWeight=t=>{let n=0;const s=String(t).replace(/https?:\/\/\S+/g,()=>(n+=23,''));for(const ch of s){const c=ch.codePointAt(0);n+=(c<=0x10ff||(c>=0x2000&&c<=0x200d)||(c>=0x2010&&c<=0x201f)||(c>=0x2032&&c<=0x2037))?1:2}return n};
+const tweetText=(desc,tags)=>{const tg=(Array.isArray(tags)?tags:String(tags||'').split(/[\s,，#]+/)).map(x=>String(x).replace(/^#/,'').trim()).filter(Boolean).slice(0,3).map(x=>'#'+x).join(' ');return tg?`${String(desc||'').trim()}\n\n${tg}`:String(desc||'').trim()};
 function pubActions(it,id){
   if(!it.video)return '';
   const g=it.publish?.gen;
@@ -460,11 +464,11 @@ function vManualCard(it,p,r){
   const steps=[
     row('1 打开发布页',r.url?`<span class="faint">${esc(r.url.replace(/^https?:\/\//,'').slice(0,46))}</span>`:'<span class="faint">在 App 里发也行</span>',r.url?`<a class="btn sm" href="${esc(r.url)}" target="_blank" rel="noopener">打开</a>`:''),
     row('2 选视频',`<span class="faint">${esc(String(r.video||'').split('/').pop())}</span>`,`<button class="btn sm" data-act="reveal" data-file="${esc(r.video||'')}">在 Finder 里显示</button>${copy(r.video,'视频路径')}`),
-    r.cover?coverRow(r.cover,r.cover2?'3 竖封面':'3 封面',/wide/.test(r.cover)?'横版 16:9':'竖版 3:4'):'',
-    r.cover2?coverRow(r.cover2,'横封面','横版 4:3 · 在封面设置里切到横封面再传'):'',
-    row('标题',esc(v.title||'—'),copy(v.title,'标题')),
-    row(p==='bilibili'?'简介':'正文',`<span class="ms-clip">${esc(v.desc||'—')}</span>`,copy(v.desc,'正文')),
-    tags.length?row(p==='bilibili'?'标签':'话题',esc(tagText),copy(tagText,'话题')+(p==='bilibili'?'<span class="faint ms-tip">一个个粘贴后按回车</span>':'')):'',
+    r.cover&&p!=='x'?coverRow(r.cover,r.cover2?'3 竖封面':'3 封面',/wide/.test(r.cover)?'横版 16:9':'竖版 3:4'):'',
+    r.cover2&&p!=='x'?coverRow(r.cover2,'横封面','横版 4:3 · 在封面设置里切到横封面再传'):'',
+    p==='x'?row('标题','<span class="faint">推特不用标题</span>',''):row('标题',esc(v.title||'—'),copy(v.title,'标题')),
+    p==='x'?row('推文',`<span class="ms-clip">${esc(tweetText(v.desc,tags))}</span>`,copy(tweetText(v.desc,tags),'推文')):row(p==='bilibili'?'简介':'正文',`<span class="ms-clip">${esc(v.desc||'—')}</span>`,copy(v.desc,'正文')),
+    p!=='x'&&tags.length?row(p==='bilibili'?'标签':'话题',esc(tagText),copy(tagText,'话题')+(p==='bilibili'?'<span class="faint ms-tip">一个个粘贴后按回车</span>':'')):'',
     r.collection?row('合集',`选「${esc(r.collection)}」`,''):'',
   ].filter(Boolean).join('');
   return `<div class="manual-card"><div class="manual-hd"><span class="pill warn"><i></i>${esc(n)} · 等你手动发布</span><span class="faint">${fmtTime(r.at)}</span></div>
@@ -507,8 +511,8 @@ function vPublish(it,id){
       <div class="pub-sel-row"><label class="pub-sel"><input type="checkbox" data-pubsel="${p.k}" ${sel.has(p.k)?'checked':''}> <b>${p.n}</b> ${pubSelNote(it,p.k)}</label>
         <label class="pub-manual" title="勾上后这个平台由你自己发：工作台把视频、封面、标题、正文、话题准备好，你复制粘贴就行；不会碰你在这个平台上的账号"><input type="checkbox" data-pubmanual="${p.k}" ${manualOf(it.accountId,p.k)?'checked':''}> 手动发</label></div>
       ${pb.platforms[p.k]?'':'<p class="hint">还没有文案，点上方「补写」生成，已经写好的平台不受影响</p>'}
-      <div class="field"><label for="pub-${p.k}-title">标题${lim?` <span class="faint">（不超过 ${lim} 字，现在 ${String(v.title||'').length}）</span>`:''}</label><input type="text" id="pub-${p.k}-title" data-pub="${p.k}" data-f="title" value="${esc(v.title||'')}"></div>
-      <div class="field"><label for="pub-${p.k}-desc">描述</label><textarea id="pub-${p.k}-desc" data-pub="${p.k}" data-f="desc" rows="${p.k==='xhs'?6:3}">${esc(v.desc||'')}</textarea></div>
+      <div class="field"><label for="pub-${p.k}-title">标题${p.k==='x'?' <span class="faint">（只在工作台里看，不发出去）</span>':lim?` <span class="faint">（不超过 ${lim} 字，现在 ${String(v.title||'').length}）</span>`:''}</label><input type="text" id="pub-${p.k}-title" data-pub="${p.k}" data-f="title" value="${esc(v.title||'')}"></div>
+      <div class="field"><label for="pub-${p.k}-desc">${p.k==='x'?`推文正文 <span class="faint" id="pub-x-weight">（连话题现在 ${tweetWeight(tweetText(v.desc,v.tags))}/280，超出会从正文末尾截掉）</span>`:'描述'}</label><textarea id="pub-${p.k}-desc" data-pub="${p.k}" data-f="desc" rows="${p.k==='xhs'||p.k==='x'?6:3}">${esc(v.desc||'')}</textarea></div>
       <div class="field"><label for="pub-${p.k}-tags">话题（空格分隔）</label><input type="text" id="pub-${p.k}-tags" data-pub="${p.k}" data-f="tags" value="${esc((v.tags||[]).join(' '))}"></div>
     </div>`}).join('');
   return `<div class="pub-grid">${cover}<div class="pub-forms">${plats}</div></div>
@@ -605,23 +609,34 @@ function vIdeas(){
     <div class="idea-grid">${ideas.map(ideaCard).join('')||'<div class="empty"><strong>没有待挑的选题</strong>在「选题雷达」里给精选主题点「给账号出题」</div>'}</div>`;
 }
 // 热点数据服务：各榜单来源最近一次抓取的状态
-async function loadHs(){try{S.hs={sources:await api('GET','/api/hs/sources')}}catch(e){S.hs={down:e.message||'热点数据服务没有响应'};if(!S.hsRetry)S.hsRetry=setTimeout(()=>{S.hsRetry=null;loadHs()},5000)}requestRender()}
+async function loadHs(){try{const [sources,pool]=await Promise.all([api('GET','/api/hs/sources'),api('GET','/api/hs/x/pool')]);S.hs={sources,pool}}catch(e){S.hs={down:e.message||'热点数据服务没有响应'};if(!S.hsRetry)S.hsRetry=setTimeout(()=>{S.hsRetry=null;loadHs()},5000)}requestRender()}
 function vDataService(){
   const h=S.hs;
   if(!h)return `<div class="panel grid" style="gap:8px"><div class="label">热点数据服务</div><p class="hint">检查中…</p></div>`;
   if(h.down)return `<div class="panel grid" style="gap:8px"><div class="label">热点数据服务</div><p class="hint" style="color:var(--bad)">${esc(h.down)}</p></div>`;
   const src=h.sources.map(s=>`<span class="src ${s.error?'bad':s.count?'ok':''}" title="${esc(s.error||'')}">${esc(s.name)}</span>`).join('');
+  // 推特号池：添加过账号才显示
+  const p=h.pool;const down=p&&[['cooldown','冷却中'],['locked','待解锁'],['invalid','已失效']].filter(([k])=>p.counts[k]).map(([k,l])=>`${l} ${p.counts[k]}`).join(' · ');
+  const pool=p&&p.accounts.length?`<div class="pool ${p.needMore?'warn':''}">
+      <div class="row-s"><span>推特号池</span><b class="num">${p.active} 可用</b></div>
+      <div class="row-s faint"><span>今日请求</span><span class="num">${p.usage.today} / ${p.usage.cap}</span></div>
+      ${down?`<div class="row-s faint"><span>不可用</span><span class="num">${esc(down)}</span></div>`:''}
+      ${p.needMore?`<p class="hint" style="color:var(--warn)">${esc(p.message)}</p>`:''}
+      ${p.networkIssue?`<p class="hint" style="color:var(--warn)">${esc(p.networkIssue)}</p>`:''}
+    </div>`:'';
   return `<div class="panel grid" style="gap:10px"><div class="blk-head"><div class="label">热点数据服务</div><div class="actions"><button class="btn ghost" data-act="tab" data-k="sources">管理</button></div></div>
-    <div class="srcs">${src}</div></div>`;
+    <div class="srcs">${src}</div>${pool}</div>`;
 }
 /* ---------- 素材 ---------- */
+const FEED_HOURS=[[24,'24 小时'],[48,'48 小时'],[168,'7 天']];
 const safeUrl=u=>/^https?:\/\//i.test(u||'')?u:'';
 const ago=t=>{if(!t)return '';const m=Math.round((Date.now()-new Date(t))/60000);return m<60?`${Math.max(m,1)} 分钟前`:m<1440?`${Math.round(m/60)} 小时前`:`${Math.round(m/1440)} 天前`};
 const mmss=s=>`${Math.floor(s/60)}:${pad(s%60)}`;
 async function loadFeed(){
   if(S.feedLoading)return;S.feedLoading=true;
-  try{const [channels,feed]=await Promise.all([api('GET','/api/hs/channels'),api('GET','/api/hs/feed?hours=24&limit=800')]);
-    S.feed={channels,items:feed.items}}
+  // 推特单独取：全部渠道按热度分混排取前 800 条时，推文容易被榜单挤掉
+  try{const h=S.feedHours||24;const [channels,feed,tw]=await Promise.all([api('GET','/api/hs/channels'),api('GET',`/api/hs/feed?hours=${h}&limit=800`),api('GET',`/api/hs/feed?channels=x&hours=${h}&limit=1000`)]);
+    S.feed={channels,items:[...feed.items.filter(x=>x.channel!=='x'),...tw.items]}}
   catch(e){S.feed={down:e.message||'热点数据服务没有响应'}}
   S.feedLoading=false;requestRender();
   // 热点服务刚启动时会晚几秒就绪：停在渠道、素材页时自动重试，连上了就显示
@@ -657,20 +672,37 @@ function vHotList(id,items,max){
     ${shown.map(row).join('')||'<p class="hint">还没有数据</p>'}
     ${!max&&rising.length?`<div class="label" style="margin-top:10px">实时上升 <span class="faint" style="font-weight:400">还没进前 50，正在往上涨</span></div>${rising.map(row).join('')}`:''}</div>`;
 }
+function vTweet(x,names){
+  const m=x.metrics||{},e=x.extra||{},key=x.channel+':'+x.id,open=!!S.feedOpen?.has(key);const url=safeUrl(x.url),q=e.quoted;
+  return `<article class="panel feed-item">
+    <div class="feed-meta"><span class="feed-score num ${x.score>=70?'hot':x.score>=55?'warm':''}" title="热度分：每小时的互动量，涨得越快越高">${x.score}</span>${x.isNew?'<span class="emo by" title="最近一轮抓取新出现的">新</span>':''}<b>${esc(x.author||'')}</b>${e.followers!=null?`<span class="faint">${fmtN(e.followers)} 粉</span>`:''}<span class="faint">${esc(names[x.channel]||x.channel)} · ${ago(x.publishedAt)}</span>${(e.matched||[]).filter(g=>g.length<=6).map(g=>`<span class="emo">${esc(g)}</span>`).join('')}${e.hasVideo?`<span class="emo">视频${e.videoSec?' '+mmss(e.videoSec):''}</span>`:''}${e.photos?.length?`<span class="emo">${e.photos.length} 张图</span>`:''}${q?`<span class="emo">引用 ${esc(q.author)}</span>`:''}</div>
+    <button class="feed-title" data-act="feed-toggle" data-id="${esc(key)}" aria-expanded="${open}">${esc(x.title)}</button>
+    <div class="feed-nums num faint">赞 ${fmtN(m.likes)} · 转 ${fmtN(m.retweets)} · 评 ${fmtN(m.replies)}${m.views?' · 浏览 '+fmtN(m.views):''}</div>
+    ${open?`${x.text&&x.text.trim()!==x.title?`<div class="feed-text">${esc(x.text)}</div>`:''}
+      ${q?`<div class="feed-quote"><b>${esc(q.author)}</b><div class="feed-text">${esc(q.text)}</div>${safeUrl(q.url)?`<a href="${esc(q.url)}" target="_blank" rel="noopener">打开被引用的原帖</a>`:''}</div>`:''}
+      ${x.links?.length?`<div class="feed-links">${x.links.filter(safeUrl).map(l=>`<a href="${esc(l)}" target="_blank" rel="noopener">${esc(l.replace(/^https?:\/\//,'').slice(0,70))}</a>`).join('')}</div>`:''}`:''}
+    <div class="idea-actions">${url?`<a class="btn ghost" href="${esc(url)}" target="_blank" rel="noopener">打开原帖</a>`:''}<button class="btn ghost" data-act="feed-pick" data-ch="${esc(x.channel)}" data-id="${esc(x.id)}" data-title="${esc(`${x.author||''}：${x.title}`)}" data-url="${esc(url)}">送进选题雷达</button></div>
+  </article>`;
+}
 function vFeed(){
   const f=S.feed;
   if(!f)return '<div class="empty">正在读取…</div>';
   if(f.down)return `<div class="empty"><strong>热点数据服务没有响应</strong>${esc(f.down)}</div>`;
-  const ch=S.feedChan||'all';const names=Object.fromEntries(f.channels.map(c=>[c.id,c.name]));
+  const hours=S.feedHours||24;const ch=S.feedChan||'all';const names=Object.fromEntries(f.channels.map(c=>[c.id,c.name]));
   const by={};for(const x of f.items)(by[x.channel]??=[]).push(x);
-  const lists=f.channels.map(c=>c.id);
+  const lists=f.channels.filter(c=>c.id!=='x').map(c=>c.id);const tw=by.x||[];
+  // 推特号池里没账号、也没抓到过推文时，不占地方
+  const xOn=tw.length||!chan('x')?.notReady;
   // 榜单只数当前还在榜上的条数
   const nowCount=id=>{const it=by[id]||[];const last=it.reduce((m,x)=>x.lastSeen>m?x.lastSeen:m,'');return it.filter(x=>x.lastSeen===last&&!x.extra?.rising).length};
-  const chChips=[['all','全部'],...lists.map(id=>[id,`${names[id]} ${nowCount(id)}`])].map(([k,n])=>`<button class="chip" aria-pressed="${ch===k}" data-act="feed-chan" data-k="${esc(k)}">${esc(n)}</button>`).join('');
-  const body=ch!=='all'?vHotList(ch,by[ch]||[]):
+  const chChips=[['all','全部'],...(xOn?[['x',`推特 ${tw.length}`]]:[]),...lists.map(id=>[id,`${names[id]} ${nowCount(id)}`])].map(([k,n])=>`<button class="chip" aria-pressed="${ch===k}" data-act="feed-chan" data-k="${esc(k)}">${esc(n)}</button>`).join('');
+  const hChips=FEED_HOURS.map(([h,n])=>`<button class="chip" aria-pressed="${hours===h}" data-act="feed-hours" data-k="${h}">${n}</button>`).join('');
+  const tweets=`<div class="feed-list">${tw.map(x=>vTweet(x,names)).join('')||'<div class="empty"><strong>这段时间没有推特内容</strong>渠道会按间隔自动抓取，也可以在「渠道 → 推特」里立即抓取</div>'}</div>`;
+  const body=ch==='x'?tweets:ch!=='all'?vHotList(ch,by[ch]||[]):xOn?
+    `<div class="feed-cols"><div class="grid" style="gap:12px">${lists.map(id=>vHotList(id,by[id]||[],10)).join('')}</div><div>${tweets}</div></div>`:
     `<div class="feed-grid">${lists.map(id=>vHotList(id,by[id]||[],10)).join('')}</div>`;
   return `<div class="section-head"><h2>素材</h2><p>各渠道定时抓到的原始内容。精选交给下一步的 Claude；看到想做的，也可以直接送进选题雷达</p></div>
-    <div class="feed-filters"><div class="chips">${chChips}</div></div>
+    <div class="feed-filters"><div class="chips">${chChips}</div>${xOn&&(ch==='x'||ch==='all')?`<div class="chips">${hChips}</div>`:''}</div>
     ${body}`;
 }
 /* ---------- 渠道（第 1 步）：每个渠道单独配置 ---------- */
@@ -681,19 +713,19 @@ const chan=id=>S.feed?.channels?.find(c=>c.id===id);
 function draft(id){const c=chan(id);if(!c)return null;S.cfg??={};return S.cfg[id]??={everyMin:c.config.everyMin,settings:JSON.parse(JSON.stringify(c.config.settings)),dirty:false}}
 function chanState(id){const c=chan(id);if(!c)return ['','—'];if(c.running||S.feedRunning===id)return ['warn','抓取中'];if(c.lastRun?.error)return ['bad','出错'];return c.lastRun?['ok','正常']:['','还没抓过']}
 function vSources(){
-  const sel=S.chanSel||'douyin';
+  const sel=S.chanSel||'x';
   if(S.feed?.down)return `<div class="empty"><strong>热点数据服务没有响应</strong>${esc(S.feed.down)}</div>`;
   const tabs=[...(S.feed?.channels||[]).map(c=>({k:c.id,n:c.name})),{k:'xhs',n:'小红书'}];
   const nav=tabs.map(t=>{const [cls,label]=t.k==='xhs'?['','未接入']:chanState(t.k);
     return `<button class="chan-tab" role="tab" aria-selected="${sel===t.k}" data-act="chan-sel" data-k="${t.k}"><b>${t.n}</b><span class="pill ${cls}"><i></i>${label}</span></button>`}).join('');
   return `<div class="section-head"><h2>渠道</h2><p>每个渠道单独配置多久抓一次、抓什么，保存后下一轮抓取就生效</p></div>
-    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${(({douyin:vChanDouyin,xhs:vChanXhs})[sel]||(()=>vChanList(sel)))()}</div></div>`;
+    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${(({x:vChanX,douyin:vChanDouyin,xhs:vChanXhs})[sel]||(()=>vChanList(sel)))()}</div></div>`;
 }
 function vChanStatus(id){
   const c=chan(id);if(!c)return '<div class="panel"><p class="hint">正在读取渠道状态…</p></div>';
   const r=c.lastRun;const running=c.running||S.feedRunning===id;const when=t=>esc((t||'').slice(5).replace('T',' '));
   return `<div class="panel"><div class="feed-chan"><span class="faint">每 ${fmtMin(c.everyMin)}</span>
-    <span>${r?`上次 <span class="num">${when(r.startedAt)}</span> ${r.error?`<span class="err">失败：${esc(r.error)}</span>`:`抓到 <b class="num">${r.count??'—'}</b> 条`}`:'还没抓过'}</span>
+    ${c.notReady&&!r?`<span class="faint">${esc(c.notReady)}</span>`:''}<span>${r?`上次 <span class="num">${when(r.startedAt)}</span> ${r.error?`<span class="err">失败：${esc(r.error)}</span>`:`抓到 <b class="num">${r.count??'—'}</b> 条`}`:'还没抓过'}</span>
     ${c.nextRun?`<span class="faint">下次 <span class="num">${when(c.nextRun)}</span></span>`:''}<span class="faint">累计 <span class="num">${c.total}</span> 条</span>
     <button class="btn" data-act="feed-run" data-id="${esc(id)}" ${running?'disabled':''}>${running?'抓取中…':'立即抓取'}</button></div></div>`;
 }
@@ -704,6 +736,49 @@ function vCfgHead(id,title){
     ${S.cfgMsg?.id===id?`<p class="hint" role="status" style="${S.cfgMsg.bad?'color:var(--bad)':''}">${esc(S.cfgMsg.text)}</p>`:''}`;
 }
 const intervalSelect=id=>{const c=chan(id),d=draft(id);return `<label class="cfg-field">多久抓一次<select data-cfg="${id}" data-f="everyMin">${INTERVALS.filter(m=>m>=c.config.minEveryMin).map(m=>`<option value="${m}" ${d.everyMin===m?'selected':''}>${fmtMin(m)}</option>`).join('')}</select></label>`};
+function vChanX(){
+  const c=chan('x');if(!c)return vChanStatus('x');
+  const d=draft('x');const qs=d.settings.queries;const on=qs.filter(q=>q.enabled).length;
+  const perRun=on*Math.ceil(d.settings.limit/20);const perDay=Math.round(perRun*1440/d.everyMin);const cap=S.hs?.pool?.usage?.cap;
+  const rows=qs.map((q,i)=>`<div class="q-row ${q.enabled?'':'off'}">
+      <div class="q-head"><input type="text" class="q-name" data-ch="x" data-q="${i}" data-f="name" value="${esc(q.name)}" maxlength="8" aria-label="类别名" placeholder="类别名">
+        <label class="q-on"><input type="checkbox" data-ch="x" data-q="${i}" data-f="enabled" ${q.enabled?'checked':''}> 启用</label>
+        <span class="actions"><button class="btn ghost" data-act="q-test" data-ch="x" data-k="${i}" ${S.qTest?.loading?'disabled':''}>${S.qTest?.ch==='x'&&S.qTest?.i===i&&S.qTest.loading?'搜索中…':'试搜'}</button><button class="btn ghost danger" data-act="q-del" data-ch="x" data-k="${i}">删除</button></span></div>
+      <textarea class="q-text" data-ch="x" data-q="${i}" data-f="query" rows="${Math.min(6,Math.max(2,Math.ceil(q.query.length/80)))}" spellcheck="false" aria-label="${esc(q.name)} 的搜索语句" placeholder="(AI OR ChatGPT) (kids OR school) min_faves:1000 lang:en">${esc(q.query)}</textarea>
+      ${S.qTest?.ch==='x'&&S.qTest?.i===i&&!S.qTest.loading?vQTest():''}
+    </div>`).join('');
+  return `${vChanStatus('x')}
+    <div class="panel grid" style="gap:12px">
+      ${vCfgHead('x','抓取设置')}
+      <div class="cfg-row">${intervalSelect('x')}
+        <label class="cfg-field">每条取多少<select data-cfg="x" data-f="limit">${[20,40,60,80,100].map(n=>`<option value="${n}" ${d.settings.limit===n?'selected':''}>${n} 条</option>`).join('')}</select></label>
+        <span class="faint cfg-est">每轮约 ${perRun} 次请求，每天约 ${perDay} 次${cap?`，号池每天上限 ${cap} 次`:''}</span></div>
+      <div class="label">搜索语句 <span class="faint" style="font-weight:400">${on}/${qs.length} 条启用。类别名会标在每条推文上，Claude 精选时按类别各取一部分</span></div>
+      ${rows}
+      <div><button class="btn" data-act="q-add" data-ch="x" ${qs.length>=10?'disabled':''}>添加一条</button></div>
+      <details class="syntax"><summary>搜索语法</summary><ul class="rules">
+        <li><code>A B</code> 同时包含；<code>A OR B</code> 包含任意一个；括号分组：<code>(AI OR ChatGPT) (kids OR school)</code> 表示两组各至少命中一个</li>
+        <li><code>"made with AI"</code> 精确短语；<code>-crypto</code> 排除含这个词的</li>
+        <li><code>min_faves:1000</code> 至少多少赞，<code>min_retweets:100</code> 至少多少转推；<code>lang:en</code>、<code>lang:zh</code> 限定语言</li>
+        <li><code>filter:videos</code> 只要带视频的；<code>-filter:replies -filter:retweets</code> 不要回复和转推；<code>from:用户名</code> 只看某个人</li>
+        <li>不用写 <code>since</code> 和 <code>until</code>：程序自动限定最近两天，按热门排序</li>
+        <li>改完先点「试搜」看看结果（每次用 1 次号池请求），满意了再保存</li></ul></details>
+    </div>
+    ${vPool()}`;
+}
+function vQTest(){
+  const t=S.qTest;
+  if(t.error)return `<p class="err">${esc(t.error)}</p>`;
+  return `<div class="q-test"><div class="faint">试搜：按热门取最近两天前 ${t.items.length} 条</div>${t.items.map(x=>`<div class="q-hit"><span class="num faint">${fmtN(x.likes)} 赞</span><b>@${esc(x.user?.username||'')}</b> ${esc((x.text||'').replace(/\s+/g,' ').slice(0,120))}</div>`).join('')||'<p class="hint">没有搜到。可能门槛太高，或者语法有误</p>'}</div>`;
+}
+async function qTest(i){
+  const q=draft('x').settings.queries[i];if(!q?.query.trim()){toast('先写搜索语句');return}
+  const since=new Date(Date.now()-48*36e5).toISOString().slice(0,10);
+  S.qTest={ch:'x',i,loading:true};render();
+  try{const r=await api('GET','/api/hs/x/search?'+new URLSearchParams({q:`${q.query} since:${since}`,limit:'10',product:'Top'}));S.qTest={ch:'x',i,items:r.items}}
+  catch(e){S.qTest={ch:'x',i,error:e.message||'试搜失败'}}
+  render();
+}
 async function cfgSave(id){
   const d=draft(id);S.cfgSaving=true;S.cfgMsg=null;render();
   try{const cfg=await api('PUT',`/api/hs/channels/${encodeURIComponent(id)}/config`,{everyMin:d.everyMin,settings:d.settings});
@@ -740,6 +815,84 @@ function vChanList(id){
       <li>公开接口，不用登录；和国内热榜聚合共用缓存，同一来源 10 分钟内不重复请求</li>
       <li>Claude 精选时还会读跨平台聚合：同一件事在几个平台同时上榜，会合并打分</li>
       <li>灾难、时政、刑案等词条会自动标出风险</li></ul></div>`;
+}
+function vPool(){
+  const h=S.hs;
+  if(!h)return '<div class="panel"><p class="hint">正在读取推特号池…</p></div>';
+  if(h.down)return `<div class="panel"><p class="err">${esc(h.down)}</p></div>`;
+  const p=h.pool;const checking=S.poolChecking||p.checking;
+  const when=t=>t?t.replace('T',' ').slice(5):'—';
+  const rows=p.accounts.map(a=>{
+    const [cls,label]=POOL_STATUS[a.status]||['','未知'];
+    const st=`<span class="pill ${cls}"><i></i>${label}${a.status!=='active'&&a.failures>1?` · 第 ${a.failures} 次`:''}</span>${a.reason?`<div class="err">${esc(a.reason)}</div>`:''}`;
+    const next=a.status==='invalid'?'<span class="faint">不再自动检测</span>':when(a.nextCheckAt);
+    return `<tr><td><b>${esc(a.username)}</b></td><td>${st}</td><td class="num faint">${esc(a.token||'')}</td><td class="n" title="最后使用 ${when(a.lastUsed)}">${a.requestsToday}</td><td class="num faint">${next}</td>
+      <td><div style="display:flex;flex-direction:column;gap:4px"><button class="btn ghost" data-act="pool-check-one" data-id="${esc(a.username)}" ${checking?'disabled':''}>检测</button><button class="btn ghost danger" data-act="pool-del" data-id="${esc(a.username)}">删除</button></div></td></tr>`}).join('');
+  const inv=(p.recentChanges||[]).map(poolChange).join('');
+  const r=p.rules;
+  return `<div class="home-grid">
+    <div class="grid">
+      <div class="panel grid" style="gap:14px">
+        <div class="blk-head"><h3>推特号池</h3>
+          <span class="pill ${p.needMore?'warn':'ok'}"><i></i>${p.active} 个可用 · 至少需要 ${p.minRequired} 个</span>
+          <div class="actions"><button class="btn" data-act="pool-check" ${checking||!p.accounts.length?'disabled':''}>${checking?'体检中…':'立即体检'}</button></div></div>
+        <div class="kv"><span>今日请求 <b class="num">${p.usage.today} / ${p.usage.cap}</b></span><span>冷却中 <b class="num">${p.counts.cooldown}</b></span><span>待解锁 <b class="num">${p.counts.locked}</b></span><span>已失效 <b class="num">${p.counts.invalid}</b></span><span>上次体检 <b class="num">${esc((p.lastCheck||'还没有').replace('T',' '))}</b></span></div>
+        ${p.needMore?`<p class="hint" style="color:var(--warn)">${esc(p.message)}</p>`:''}
+        ${p.networkIssue?`<p class="hint" style="color:var(--warn)">${esc(p.networkIssue)}</p>`:''}
+        ${checking?'<p class="hint busy">正在逐个体检，每个账号最多约 1 分钟。体检会对每个账号发一次请求。</p>':''}
+        ${S.poolMsg?`<div role="status"><p class="hint" style="${S.poolMsg.bad?'color:var(--bad)':''}">${esc(S.poolMsg.text)}</p>${S.poolMsg.errors?.length?`<ul class="rules" style="color:var(--bad)">${S.poolMsg.errors.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>`:''}</div>`:''}
+        ${p.accounts.length?`<div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>推特账号</th><th>状态</th><th>Cookie</th><th class="n">今日请求</th><th>下次检测</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="empty">号池里还没有账号。在下面粘贴 Cookie 添加。</div>'}
+      </div>
+      <div class="panel form">
+        <h3 style="font-size:14px">批量保存账号</h3>
+        <div class="field"><label for="poolText">粘贴账号资料或 Cookie（每行一个账号）</label>
+          <textarea id="poolText" rows="6" ${S.poolBusy?'disabled':''} spellcheck="false" autocomplete="off" placeholder="用户名:密码:邮箱:auth_token:ct0&#10;也支持：用户名 auth_token=...; ct0=...&#10;或直接粘贴 Cookie、Cookie-Editor 导出的 JSON"></textarea></div>
+        <div class="field"><label for="poolUser">用户名（可选）</label><input type="text" id="poolUser" ${S.poolBusy?'disabled':''} autocomplete="off" placeholder="只粘贴了一份 Cookie 时，可以在这里填用户名"></div>
+        <div style="display:flex;gap:8px"><button class="btn primary" data-act="pool-add" ${S.poolBusy?'disabled':''}>${S.poolBusy?'保存中…':'保存'}</button></div>
+        <p class="hint">用小号，别用你自己的主号：号池是拿账号的登录 Cookie 去搜推特，不符合推特的服务条款，账号可能被限流或封禁。Cookie 只存在本机。</p>
+        <p class="hint">自动提取 auth_token 和 ct0，只保存用户名与 Cookie，不保存密码和邮箱。重复账号会跳过，同名账号的新 Cookie 会更新；用户名不区分大小写。同一批重复只保留第一条，页面仅显示 Cookie 前 6 位。</p>
+      </div>
+    </div>
+    <aside class="grid">
+      <div class="panel grid" style="gap:10px"><div class="label">最近状态变化</div>${inv||'<p class="hint">没有</p>'}</div>
+      <div class="panel grid" style="gap:6px"><div class="label">自动维护规则</div>
+        <ol class="rules"><li>可用账号每 ${r.checkIntervalH} 小时体检一次，新加的账号一分钟内体检</li><li>限流、403、超时：进入冷却，按 ${r.cooldownStepsH.join(' → ')} 小时重测，成功自动恢复；${r.cooldownGiveupDays} 天仍失败判定失效</li><li>账号被锁（326）：去浏览器登录解锁，每 ${r.lockedRecheckH} 小时重测，解锁后自动恢复；${r.lockedGiveupDays} 天没解锁判定失效</li><li>登录失效（32）：直接判定失效，粘贴新 Cookie 后恢复</li><li>同一批检测全部没有结果时按网络问题处理，不改账号状态</li><li>每个账号每天最多 ${p.usage.perAccount} 次请求，用满当天停用；两次请求至少间隔 ${p.usage.minIntervalSec} 秒，优先用最久没用的账号</li></ol></div>
+    </aside>
+  </div>`;
+}
+async function poolAdd(){
+  if(S.poolBusy)return;
+  const text=S.poolText||'';if(!text.trim()){toast('先粘贴账号资料或 Cookie');return}
+  const username=(S.poolUser||'').trim()||null;
+  S.poolBusy=true;S.poolMsg=null;render();
+  try{const r=await api('POST','/api/hs/x/pool/accounts',{text,username});
+    const errors=r.errors||[];
+    const n=r.summary||{added:(r.added||[]).length,updated:(r.replaced||[]).length,duplicates:(r.duplicates||[]).length,invalid:errors.length};
+    const message=`保存结果：新增 ${n.added} 个，更新 ${n.updated} 个，重复跳过 ${n.duplicates} 个，格式无效 ${n.invalid} 个。`;
+    S.poolMsg={text:message+(n.invalid?'已保留输入，请根据下方提示修正后重新保存。':n.added+n.updated?'新账号会在一分钟内自动体检。':''),bad:n.invalid>0,errors};
+    if(!n.invalid){S.poolText='';S.poolUser=''}
+  }catch(e){S.poolMsg={text:e.message||'保存失败',bad:true}}
+  await Promise.all([loadHs(),loadFeed()]);S.poolBusy=false;render();
+}
+async function poolCheck(){
+  S.poolChecking=true;S.poolMsg=null;render();
+  try{S.poolMsg=poolCheckMsg(await api('POST','/api/hs/x/pool/check'))}
+  catch(e){S.poolMsg={text:e.message||'体检失败',bad:true}}
+  S.poolChecking=false;await loadHs();render();
+}
+async function poolCheckOne(id){
+  S.poolChecking=true;S.poolMsg=null;render();
+  try{S.poolMsg=poolCheckMsg(await api('POST','/api/hs/x/pool/accounts/'+encodeURIComponent(id)+'/check'))}
+  catch(e){S.poolMsg={text:e.message||'检测失败',bad:true}}
+  S.poolChecking=false;await loadHs();render();
+}
+const POOL_STATUS={active:['ok','正常'],cooldown:['warn','冷却中'],locked:['warn','待解锁'],invalid:['bad','已失效']};
+const POOL_EVENT={cooldown:'进入冷却',locked:'被锁定',invalid:'判定失效',restored:'已恢复',network:'疑似网络问题'};
+function poolChange(x){return `<div class="inv"><b>${esc(x.username)}</b> ${esc(POOL_EVENT[x.event]||x.event)} <span class="num faint">${esc(x.at.replace('T',' '))}</span>${x.detail?`<br><span class="faint">${esc(x.detail)}</span>`:''}</div>`}
+function poolCheckMsg(r){
+  const parts=[['active','正常'],['cooldown','冷却'],['locked','待解锁'],['invalid','失效'],['skipped','跳过']].filter(([k])=>r[k].length).map(([k,l])=>`${l} ${r[k].length}`);
+  const errors=[...r.cooldown,...r.locked,...r.invalid,...r.skipped].map(x=>`${x.username}：${x.reason}`);
+  return {text:`体检完成：${parts.join('，')||'没有需要检测的账号'}`+(r.networkIssue?'。所有账号都没有结果，可能是网络或代理问题，账号状态没有改动':''),bad:r.networkIssue,errors};
 }
 async function ideaAdd(iid){
   const ideas=S.radar?.ideas||[];const d=ideas.find(x=>x.id===iid);if(!d)return;
@@ -1300,16 +1453,24 @@ document.addEventListener('click',e=>{
     case 'tab':S.tab=k;try{localStorage.setItem('wb.tab',k)}catch(_){};history.replaceState(null,'','#'+k);render();window.scrollTo(0,0);if(k==='sources'){loadHs();loadFeed()}if(k==='feed')loadFeed();if(k==='settings')loadModels();if(k==='skills')loadSkills();break;
     case 'goto-stage':S.tab='pipeline';S.filter='all';render();setTimeout(()=>$('#col-'+k)?.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'}),30);break;
     case 'hs-refresh':S.hs=null;render();loadHs();break;
+    case 'pool-add':poolAdd();break;
+    case 'pool-check':poolCheck();break;
+    case 'pool-check-one':poolCheckOne(id);break;
+    case 'pool-del':arm(b,'确认删除',async()=>{try{await api('DELETE','/api/hs/x/pool/accounts/'+encodeURIComponent(id));toast('已删除 '+id)}catch(e){toast(e.message||'删除失败')}await Promise.all([loadHs(),loadFeed()]);render()});break;
     case 'feed-run':feedRun(id);break;
+    case 'feed-hours':S.feedHours=Number(k);render();loadFeed();break;
     case 'feed-toggle':S.feedOpen??=new Set();S.feedOpen.has(id)?S.feedOpen.delete(id):S.feedOpen.add(id);render();break;
     case 'feed-pick':{const d=b.dataset;const pid=uid();const now=Date.now();
       store.set('picks',pid,{title:d.title.slice(0,60),why:'',angle:'',sources:[{channel:d.ch,id:d.id,title:d.title,url:safeUrl(d.url)}],accounts:[],risk:'',status:'new',by:'manual',createdAt:now,updatedAt:now});
       toast('已送进选题雷达，可以直接给账号出题');break}
     case 'feed-chan':S.feedChan=k;render();break;
-    case 'chan-sel':S.chanSel=k;S.cfgMsg=null;render();break;
+    case 'chan-sel':S.chanSel=k;S.cfgMsg=null;render();if(k==='x')loadHs();break;
     case 'cfg-save':cfgSave(id);break;
     case 'cfg-discard':S.cfg[id]=null;S.cfgMsg=null;render();break;
-    case 'cfg-reset':{const d=draft(id);d.settings=JSON.parse(JSON.stringify(chan(id).config.defaults));d.dirty=true;render();break}
+    case 'cfg-reset':{const d=draft(id);d.settings=JSON.parse(JSON.stringify(chan(id).config.defaults));d.dirty=true;S.qTest=null;render();break}
+    case 'q-add':{const d=draft('x');d.settings.queries.push({name:'新类别',query:'',enabled:true});d.dirty=true;render();break}
+    case 'q-del':arm(b,'确认删除',()=>{const d=draft('x');d.settings.queries.splice(Number(k),1);d.dirty=true;S.qTest=null;render()});break;
+    case 'q-test':qTest(Number(k));break;
     case 'curate':agentRun('curate');break;
     case 'skill-sel':S.skillSel=k;S.skillMerged=null;S.skillCur=null;render();loadSkill(k);break;
     case 'skill-save':skillAction('save');break;
@@ -1426,8 +1587,13 @@ document.addEventListener('input',e=>{
   if(t.id==='localGuide'){S.localGuide={...(S.localGuide||{}),[S.open]:t.value};return}
   if(t.dataset?.vguide){const iid=S.open;clearTimeout(S.guideT);S.guideT=setTimeout(()=>store.update('items',iid,{video:{guide:t.value.slice(0,2000)}}),600);return}
   if(t.dataset?.pub){queuePub(t.dataset.pub,t.dataset.f,t.value);
+    if(t.dataset.pub==='x'){const w=$('#pub-x-weight');if(w)w.textContent=`（连话题现在 ${tweetWeight(tweetText($('#pub-x-desc')?.value,$('#pub-x-tags')?.value))}/280，超出会从正文末尾截掉）`}
     return}
   if(t.id&&t.id.startsWith('say-')){S.say={...(S.say||{}),[t.id.slice(4)]:t.value};return}
+  if(t.dataset.q&&t.type!=='checkbox'){const d=draft('x');d.settings.queries[Number(t.dataset.q)][t.dataset.f]=t.value;
+    if(!d.dirty){d.dirty=true;S.pendingRender=true}const sv=document.querySelector('[data-act="cfg-save"][data-id="x"]');if(sv)sv.disabled=false;return}
+  if(t.id==='poolText'){S.poolText=t.value;return}
+  if(t.id==='poolUser'){S.poolUser=t.value;return}
   if(!S.open)return;
   const map={dTitle:'title',dHook:'hook',dAngle:'angle',dScript:'script',dNotes:'notes'};
   if(map[t.id])saveField(map[t.id],t.value);
@@ -1444,6 +1610,7 @@ document.addEventListener('change',e=>{
   if(t.dataset.model){setModel(t.dataset.model,t.value);return}
   if(t.dataset.effort){const f=S.modelCfg.features.find(x=>x.key===t.dataset.effort);const cur={...(local.settings.efforts||{})};if(t.value===f?.defaultEffort)delete cur[t.dataset.effort];else cur[t.dataset.effort]=t.value;store.set('settings','efforts',cur).then(()=>{toast(`「${f?.name||''}」思考强度改成 ${t.value}，下次运行生效`);loadModels()});return}
   if(t.dataset.mode){const cur={...(local.settings.modes||{})};cur[t.dataset.mode]=t.value;store.set('settings','modes',cur);toast(`改成${t.value==='agent'?'后台 Agent':'单次调用'}，下次点按钮生效`);return}
+  if(t.dataset.q&&t.type==='checkbox'){const d=draft('x');d.settings.queries[Number(t.dataset.q)].enabled=t.checked;d.dirty=true;render();return}
   if(t.dataset.cfg){const d=draft(t.dataset.cfg);const v=Number(t.value);if(t.dataset.f==='everyMin')d.everyMin=v;else d.settings[t.dataset.f]=v;d.dirty=true;render();return}
   if(!S.open)return;const id=S.open;
   if(t.dataset?.pubsel){const sel=[...document.querySelectorAll('[data-pubsel]:checked')].map(x=>x.dataset.pubsel);store.update('items',S.open,{publish:{selected:sel}});return}

@@ -1,3 +1,4 @@
 fastapi>=0.142
 uvicorn[standard]>=0.35
 httpx>=0.28
+twscrape==0.20.1
