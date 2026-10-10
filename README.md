@@ -2,6 +2,9 @@
 
 # SoloMCN
 
+https://github.com/user-attachments/assets/5b00fe30-f189-4c17-aa7a-f6080da1048b
+
+
 ### 把 Claude Code 变成你的短视频团队
 
 **不搭工作流，直接让 Claude 干活。从全网热点到抖音、小红书、B站、YouTube 发布，一个人运营一个账号矩阵，每一步都是 Claude 亲手做的。**
