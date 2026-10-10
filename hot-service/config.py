@@ -39,7 +39,7 @@ X_COOLDOWN_GIVEUP_DAYS = float(os.getenv("X_COOLDOWN_GIVEUP_DAYS", "3"))  # 冷�
 X_LOCKED_RECHECK_H = float(os.getenv("X_LOCKED_RECHECK_H", "12"))  # 被锁账号的重测间隔
 X_LOCKED_GIVEUP_DAYS = float(os.getenv("X_LOCKED_GIVEUP_DAYS", "7"))  # 锁定超过这么多天没解锁就判定失效
 X_REQUEST_TIMEOUT = float(os.getenv("X_REQUEST_TIMEOUT", "60"))
-X_CHECK_TARGET = os.getenv("X_CHECK_TARGET", "XDevelopers")  # 体检时查询的公开账号
+X_CHECK_QUERY = os.getenv("X_CHECK_QUERY", "the")  # 体检时搜的词：一定搜得到结果，搜不到就说明这个号的搜索被限制了
 
 # 定时抓取
 X_FEED_INTERVAL_MIN = int(os.getenv("X_FEED_INTERVAL_MIN", "120"))  # 推特渠道多久抓一次（花号池的请求次数）

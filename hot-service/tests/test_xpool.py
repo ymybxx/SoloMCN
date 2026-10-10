@@ -616,6 +616,41 @@ class RequestTests(PoolTestCase):
             self.assertEqual(raised.exception.code, "quota")
             self.assertEqual(await self.runtime(), {})
 
+    async def test_rejected_account_cools_down_and_query_moves_to_another_account(self):
+        await self.pool.add_accounts(record("Alice", 1) + "\n" + record("Bob", 2))
+        calls = []
+
+        async def fake_request():
+            # 第一次：推特拒绝了 Alice 的搜索，twscrape 放弃查询、返回空；第二次换到 Bob 查到了
+            calls.append(set(await self.runtime()))
+            if len(calls) == 1:
+                xpool.REJECTED.add("Alice")
+                return []
+            return ["tweet"]
+
+        self.assertEqual(await self.pool._run(fake_request), ["tweet"])
+        self.assertEqual(calls, [{"Alice", "Bob"}, {"Bob"}])
+        alice = await self.row("Alice")
+        self.assertEqual((alice["status"], alice["status_reason"]), ("cooldown", xpool.BLOCKED_REASON))
+        self.assertEqual(set(await self.runtime()), {"Bob"})
+        self.assertNotIn("Alice", xpool.REJECTED)
+
+    async def test_gives_up_after_a_few_rejected_accounts(self):
+        names = ("Alice", "Bob", "Carol", "Dave")
+        await self.pool.add_accounts("\n".join(record(n, i) for i, n in enumerate(names, 1)))
+        calls = []
+
+        async def fake_request():
+            # 每次轮到的号都被拒：换 RETRY_ACCOUNTS 个号后放弃，返回空结果，不会把号池里的号全试一遍
+            picked = sorted(await self.runtime())[0]
+            calls.append(picked)
+            xpool.REJECTED.add(picked)
+            return []
+
+        self.assertEqual(await self.pool._run(fake_request), [])
+        self.assertEqual(calls, list(names[:xpool.RETRY_ACCOUNTS]))
+        self.assertEqual([(await self.row(n))["status"] for n in names], ["cooldown"] * xpool.RETRY_ACCOUNTS + ["active"])
+
     async def test_no_active_accounts(self):
         await self.pool.add_accounts(record("Alice", 1))
         await self.set_row("Alice", status="cooldown")

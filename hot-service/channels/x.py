@@ -141,7 +141,7 @@ class XChannel:
         since = (now - MAX_AGE).date().isoformat()
         queries = [q for q in self.settings["queries"] if q.get("enabled", True)]
         out: dict[str, Entry] = {}
-        errors = []
+        errors, fetched = [], 0
         for q in queries:
             group = q["name"]
             try:
@@ -149,6 +149,7 @@ class XChannel:
             except Exception as e:  # noqa: BLE001 — 一条失败不影响其他语句
                 errors.append(f"{group}：{e}")
                 continue
+            fetched += len(tweets)
             for t in tweets:
                 if t.retweetedTweet or t.inReplyToTweetId or now - t.date > MAX_AGE:
                     continue
@@ -158,4 +159,7 @@ class XChannel:
                     out[t.id_str] = to_entry(t, group, now)
         if errors and len(errors) == len(queries):
             raise RuntimeError("；".join(errors))
+        if not fetched and not errors:
+            # 几条语句都一条没搜到，多半不是门槛太高，而是号池的号搜索被限制了
+            raise RuntimeError("所有搜索语句都没有返回推文：号池里的号可能被推特限制了搜索，看下面号池的状态")
         return list(out.values())

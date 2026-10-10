@@ -328,6 +328,10 @@ class XChannelTests(unittest.IsolatedAsyncioTestCase):
         entries = await XChannel(FakePool({"AI": RuntimeError("限流"), "Sora": [tweet("5")]}), [q("AI"), q("Sora")]).collect()
         self.assertEqual([e.item_id for e in entries], ["5"])
 
+    async def test_no_posts_from_any_query_is_reported(self):
+        with self.assertRaisesRegex(RuntimeError, "限制了搜索"):
+            await XChannel(FakePool({"AI": [], "Sora": []}), [q("AI"), q("Sora")]).collect()
+
     async def test_all_queries_failing_raises(self):
         with self.assertRaisesRegex(RuntimeError, "限流"):
             await XChannel(FakePool({"AI": RuntimeError("限流")}), [q("AI")]).collect()

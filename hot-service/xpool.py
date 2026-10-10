@@ -29,12 +29,13 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from twscrape import API
+from twscrape import queue_client
 from twscrape.logger import set_log_level
 
 from config import (
     DATA_DIR,
     X_CHECK_INTERVAL_H,
-    X_CHECK_TARGET,
+    X_CHECK_QUERY,
     X_COOLDOWN_GIVEUP_DAYS,
     X_COOLDOWN_STEPS_H,
     X_DAILY_REQ_PER_ACCOUNT,
@@ -49,6 +50,24 @@ from db import DB
 set_log_level("WARNING")
 
 STATUSES = ("active", "cooldown", "locked", "invalid")
+BLOCKED_REASON = "搜索被推特拒绝（返回 404）：这个号能登录，但搜索多半被限制了"
+RETRY_ACCOUNTS = 3  # 一次查询碰到被拒的号时，最多换几个号重查
+
+# 推特拒绝某个号的搜索时返回 404，twscrape 换三次签名都不行就放弃这次查询、返回空结果，
+# 既不报错也不换号。这里记下是哪个号被拒，号池把它转入冷却、换下一个号重查。
+REJECTED: set[str] = set()
+_ctx_req = queue_client.Ctx.req
+
+
+async def _ctx_req_watch(self, method, url, params=None):
+    try:
+        return await _ctx_req(self, method, url, params)
+    except queue_client.AbortReqError:
+        REJECTED.add(self.acc.username)
+        raise
+
+
+queue_client.Ctx.req = _ctx_req_watch
 NETWORK_RETRY = timedelta(hours=1)  # 疑似网络问题时，多久后再测
 
 
@@ -476,16 +495,23 @@ class XPool:
         with tempfile.TemporaryDirectory() as d:
             probe = API(str(Path(d) / "probe.db"))
             await probe.pool.add_account(username, "-", "-", "-", cookies=cookies)
+            REJECTED.discard(username)
             try:
-                user = await asyncio.wait_for(probe.user_by_login(X_CHECK_TARGET), X_REQUEST_TIMEOUT)
+                # 搜一个一定有结果的词：搜索是推特管得最严的接口，能登录不代表能搜
+                found = await asyncio.wait_for(
+                    self._collect(probe.search(X_CHECK_QUERY, limit=1, kv={"product": "Latest"}), 1), X_REQUEST_TIMEOUT
+                )
             except asyncio.TimeoutError:
                 return "unknown", "检测超时"
             except Exception as e:  # noqa: BLE001
                 return "unknown", f"{type(e).__name__}: {e}"[:120]
+            if username in REJECTED:
+                REJECTED.discard(username)
+                return "cooldown", BLOCKED_REASON
             acc = await probe.pool.get(username)
             if not acc.active:
                 return classify(acc.error_msg)
-            return ("ok", None) if user else ("unknown", "查询没有返回结果，可能在限流冷却中")
+            return ("ok", None) if found else ("unknown", "搜索没有返回结果，可能在限流冷却中")
 
     async def _check(self, rows: list) -> dict:
         """逐个检测。结果不明的先放着，整批看完再判断是账号的问题还是网络的问题。"""
@@ -559,29 +585,46 @@ class XPool:
     # ---------- 查询 ----------
     async def _run(self, make_coro):
         async with self.req_lock:
-            await self._sync_runtime()
-            n = await self.db.fetchrow(
-                """select coalesce(sum(a.status = 'active'), 0) as active,
-                          coalesce(sum(a.status = 'active' and coalesce(u.requests, 0) < ?), 0) as usable
-                   from x_accounts a left join x_account_usage u on u.account_id = a.id and u.day = ?""",
-                X_DAILY_REQ_PER_ACCOUNT, today(),
-            )
-            if not n["active"]:
-                raise PoolError("no_accounts", "号池里没有可用账号，请在「渠道 → 推特」添加账号")
-            if not n["usable"]:
-                raise PoolError("quota", "可用账号今天的请求次数都用完了，明天再试或增加账号")
-            wait = self.last_req + X_MIN_INTERVAL_SEC + random.uniform(0, 2) - time.time()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            before = await self._runtime_requests()
-            try:
-                return await asyncio.wait_for(make_coro(), X_REQUEST_TIMEOUT)
-            except asyncio.TimeoutError as e:
-                raise PoolError("timeout", "请求超时：账号可能都在限流冷却中，稍后再试") from e
-            finally:
-                self.last_req = time.time()
-                await self._record_runtime_usage(before)
-                await self._reap()
+            for attempt in range(RETRY_ACCOUNTS):
+                await self._sync_runtime()
+                n = await self.db.fetchrow(
+                    """select coalesce(sum(a.status = 'active'), 0) as active,
+                              coalesce(sum(a.status = 'active' and coalesce(u.requests, 0) < ?), 0) as usable
+                       from x_accounts a left join x_account_usage u on u.account_id = a.id and u.day = ?""",
+                    X_DAILY_REQ_PER_ACCOUNT, today(),
+                )
+                if not n["active"]:
+                    raise PoolError("no_accounts", "号池里没有可用账号，请在「渠道 → 推特」添加账号")
+                if not n["usable"]:
+                    raise PoolError("quota", "可用账号今天的请求次数都用完了，明天再试或增加账号")
+                wait = self.last_req + X_MIN_INTERVAL_SEC + random.uniform(0, 2) - time.time()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                before = await self._runtime_requests()
+                runtime = {a.username for a in await self._runtime_accounts()}
+                try:
+                    result = await asyncio.wait_for(make_coro(), X_REQUEST_TIMEOUT)
+                except asyncio.TimeoutError as e:
+                    raise PoolError("timeout", "请求超时：账号可能都在限流冷却中，稍后再试") from e
+                finally:
+                    self.last_req = time.time()
+                    await self._record_runtime_usage(before)
+                    rejected = await self._take_rejected(runtime)
+                    await self._reap()
+                # 被拒的号已经转入冷却、移出运行时号池；结果是空的就换个号再查一次
+                if not rejected or result:
+                    return result
+            return result
+
+    async def _take_rejected(self, usernames: set[str]) -> list[str]:
+        """调用方持有 req_lock。把这次查询里被推特拒绝的号转入冷却。"""
+        rejected = [u for u in usernames if u in REJECTED]
+        for u in rejected:
+            REJECTED.discard(u)
+            token = await self.db.fetchval("select auth_token from x_accounts where username = ?", u)
+            if token:
+                await self._apply(u, token, "cooldown", BLOCKED_REASON, "request")
+        return rejected
 
     @staticmethod
     async def _collect(agen, limit: int) -> list:

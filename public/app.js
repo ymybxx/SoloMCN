@@ -769,7 +769,7 @@ function vChanX(){
 function vQTest(){
   const t=S.qTest;
   if(t.error)return `<p class="err">${esc(t.error)}</p>`;
-  return `<div class="q-test"><div class="faint">试搜：按热门取最近两天前 ${t.items.length} 条</div>${t.items.map(x=>`<div class="q-hit"><span class="num faint">${fmtN(x.likes)} 赞</span><b>@${esc(x.user?.username||'')}</b> ${esc((x.text||'').replace(/\s+/g,' ').slice(0,120))}</div>`).join('')||'<p class="hint">没有搜到。可能门槛太高，或者语法有误</p>'}</div>`;
+  return `<div class="q-test"><div class="faint">试搜：按热门取最近两天前 ${t.items.length} 条</div>${t.items.map(x=>`<div class="q-hit"><span class="num faint">${fmtN(x.likes)} 赞</span><b>@${esc(x.user?.username||'')}</b> ${esc((x.text||'').replace(/\s+/g,' ').slice(0,120))}</div>`).join('')||'<p class="hint">没有搜到。可能门槛太高、语法有误，或者号池里的号被限制了搜索（看下面号池的状态）</p>'}</div>`;
 }
 async function qTest(i){
   const q=draft('x').settings.queries[i];if(!q?.query.trim()){toast('先写搜索语句');return}
@@ -856,7 +856,7 @@ function vPool(){
     <aside class="grid">
       <div class="panel grid" style="gap:10px"><div class="label">最近状态变化</div>${inv||'<p class="hint">没有</p>'}</div>
       <div class="panel grid" style="gap:6px"><div class="label">自动维护规则</div>
-        <ol class="rules"><li>可用账号每 ${r.checkIntervalH} 小时体检一次，新加的账号一分钟内体检</li><li>限流、403、超时：进入冷却，按 ${r.cooldownStepsH.join(' → ')} 小时重测，成功自动恢复；${r.cooldownGiveupDays} 天仍失败判定失效</li><li>账号被锁（326）：去浏览器登录解锁，每 ${r.lockedRecheckH} 小时重测，解锁后自动恢复；${r.lockedGiveupDays} 天没解锁判定失效</li><li>登录失效（32）：直接判定失效，粘贴新 Cookie 后恢复</li><li>同一批检测全部没有结果时按网络问题处理，不改账号状态</li><li>每个账号每天最多 ${p.usage.perAccount} 次请求，用满当天停用；两次请求至少间隔 ${p.usage.minIntervalSec} 秒，优先用最久没用的账号</li></ol></div>
+        <ol class="rules"><li>可用账号每 ${r.checkIntervalH} 小时体检一次，新加的账号一分钟内体检。体检就是用这个号搜一次推特：能登录不代表能搜</li><li>限流、403、超时：进入冷却，按 ${r.cooldownStepsH.join(' → ')} 小时重测，成功自动恢复；${r.cooldownGiveupDays} 天仍失败判定失效</li><li>搜索被推特拒绝（404）：号能登录，但搜索被限制了，按冷却处理，同样间隔重测；查询时碰到这种号会自动换号重查</li><li>账号被锁（326）：去浏览器登录解锁，每 ${r.lockedRecheckH} 小时重测，解锁后自动恢复；${r.lockedGiveupDays} 天没解锁判定失效</li><li>登录失效（32）：直接判定失效，粘贴新 Cookie 后恢复</li><li>同一批检测全部没有结果时按网络问题处理，不改账号状态</li><li>每个账号每天最多 ${p.usage.perAccount} 次请求，用满当天停用；两次请求至少间隔 ${p.usage.minIntervalSec} 秒，优先用最久没用的账号</li></ol></div>
     </aside>
   </div>`;
 }
