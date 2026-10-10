@@ -2,6 +2,12 @@
 
 # SoloMCN
 
+
+
+https://github.com/user-attachments/assets/3db8f9d6-2435-43d9-a3a7-a553002618d9
+
+
+
 ### Turn Claude Code into your short-video team
 
 **Don't build workflows. Let Claude do the work. From trending topics to Douyin, Xiaohongshu, Bilibili and YouTube, one person runs a whole channel network, and every step is done by Claude itself.**
