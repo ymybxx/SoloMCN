@@ -33,3 +33,6 @@ REQUEST_TIMEOUT = float(os.getenv("HOT_REQUEST_TIMEOUT", "10"))
 DOUYIN_FEED_INTERVAL_MIN = int(os.getenv("DOUYIN_FEED_INTERVAL_MIN", "30"))  # 抖音热搜多久抓一次（公开接口）
 HOTLIST_FEED_INTERVAL_MIN = int(os.getenv("HOTLIST_FEED_INTERVAL_MIN", "30"))  # 微博、B站、知乎等公开榜单多久抓一次
 
+# 管理接口鉴权：触发抓取 / 修改渠道配置需要带上 X-API-Key，未配置时拒绝所有请求
+API_KEY = os.getenv("HOT_API_KEY", "")
+

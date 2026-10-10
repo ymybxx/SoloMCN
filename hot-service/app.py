@@ -7,16 +7,22 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from channels.douyin import DouyinChannel
 from channels.hotlist import HotListChannel
-from config import DB_PATH, FETCH_INTERVAL_MIN, HOST, PORT
+from config import API_KEY, DB_PATH, FETCH_INTERVAL_MIN, HOST, PORT
 from hub import SOURCES, Hub
 from scheduler import Busy, Scheduler
 from db import connect
+
+
+async def require_api_key(x_api_key: str | None = Header(default=None)):
+    """触发抓取、修改配置属于管理操作，必须带正确的 X-API-Key。"""
+    if not API_KEY or x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="未授权：缺少或错误的 X-API-Key")
 
 hub = Hub()
 scheduler: Scheduler | None = None
@@ -97,7 +103,7 @@ async def channels():
     return await scheduler.status()
 
 
-@app.post("/channels/{channel_id}/run")
+@app.post("/channels/{channel_id}/run", dependencies=[Depends(require_api_key)])
 async def channel_run(channel_id: str):
     """立即抓一次。"""
     if channel_id not in scheduler.channels:
@@ -113,7 +119,7 @@ class ChannelConfig(BaseModel):
     settings: dict = Field(default_factory=dict)
 
 
-@app.put("/channels/{channel_id}/config")
+@app.put("/channels/{channel_id}/config", dependencies=[Depends(require_api_key)])
 async def channel_config_put(channel_id: str, body: ChannelConfig):
     """保存一个渠道的配置（抓取间隔、渠道自己的设置），下一轮抓取起生效。"""
     if channel_id not in scheduler.channels:
