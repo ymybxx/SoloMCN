@@ -15,6 +15,7 @@ import { modelSettings, modelFor, effortFor } from './models.js';
 import { createSkills, voicesFile } from './skills.js';
 import { createSetupCheck } from './setupcheck.js';
 import { createYtLogin } from './ytlogin.js';
+import { createLab } from './lab.js';
 import { runClaude } from './cli.js';
 import { captureSource } from './assets.js';
 import { watchVideo, probe } from './watch.js';
@@ -41,7 +42,10 @@ const notifyChange = () => {
 };
 
 const store = await createStore(path.join(root, 'data', 'db.json'), { onChange: notifyChange });
-const agent = createAgent({ store, cwd: root });
+// 调研里的动手实践：实验目录、录制实验画面、实践浏览器、等人处理（登录、付款、花钱确认）
+const lab = createLab({ root, store });
+lab.clearStale();
+const agent = createAgent({ store, cwd: root, lab });
 const publisher = createPublisher({ store, root });
 // 技能是本地数据：启动时装上新的出厂技能，没改过的跟着出厂说明更新
 const skills = createSkills({ root });
@@ -335,6 +339,25 @@ ${mine}`;
     }
   }
   // 调研素材：截网页（和页面里的视频）存到内容卡片上；删掉不要的
+  // 实践：Claude 通过 MCP 工具调用（录制、存素材、操作实践浏览器、请人处理），页面调用 answer
+  if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts.length === 3 && method === 'GET') {
+    return sendJson(res, 200, lab.files(parts[1]) || { dir: null, files: [] });
+  }
+  if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && method === 'POST') {
+    const body = await readBody(req);
+    const id = parts[1];
+    try {
+      if (parts[3] === 'record') return sendJson(res, 200, await lab.record(id, body));
+      if (parts[3] === 'media') return sendJson(res, 200, await lab.addMedia(id, body));
+      if (parts[3] === 'browser') return sendJson(res, 200, await lab.browse(id, body));
+      if (parts[3] === 'ask') return sendJson(res, 200, await lab.ask(id, body));
+      if (parts[3] === 'answer') return sendJson(res, 200, await lab.answer(id, String(body.id || ''), String(body.result || '')));
+    } catch (err) {
+      if (err.status) return sendError(res, err.status, err.status === 404 ? 'not_found' : err.status === 409 ? 'busy' : 'bad_request', err.message);
+      return sendError(res, 502, 'lab_failed', String(err.message || err).split('\n')[0].slice(0, 300));
+    }
+    return sendError(res, 404, 'not_found', '没有这个实践接口');
+  }
   if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'assets') {
     const it = store.get('items', parts[1]);
     if (!it) return sendError(res, 404, 'not_found', '找不到这条内容');

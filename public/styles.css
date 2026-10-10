@@ -589,3 +589,9 @@ a.pick-src:hover{color:var(--blue)}
 /* 技能页：岗位说明编辑器 */
 .skill-text{width:100%;font:13px/1.6 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);resize:vertical;min-height:360px}
 .skill-pre{white-space:pre-wrap;max-height:420px;overflow:auto;font:12.5px/1.55 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);background:var(--bg2,rgba(127,127,127,.08));padding:10px;border-radius:8px}
+
+/* 实践：Claude 在等人处理 */
+.banner.warn{background:color-mix(in srgb,var(--warn) 18%,var(--bg));border-color:var(--warn);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.lab-ask{border:1.5px solid var(--warn);display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.lab-ask h3{font-size:14px}
+.asset-kind.prac{right:6px;left:auto;background:var(--accent,#ff5c38);color:#fff}

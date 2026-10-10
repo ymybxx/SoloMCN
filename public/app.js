@@ -76,7 +76,7 @@ function applyLocal(col){
 function drawerSigOf(id,it){
   const rs=itemRun('script',id),rc=itemRun('check',id),rv=itemRun('video',id),rr=itemRun('revise',id),re=itemRun('research',id),any=runningRun(),anyV=runningVideo();
   const pb=it.publish||{};
-  return [(it.assets||[]).map(a=>a.id).join(','),pb.gen?.status,pb.cover,JSON.stringify(Object.fromEntries(Object.entries(pb.results||{}).map(([k,v])=>[k,v.status]))),!!pb.platforms,re?.id,re?.status,it.research?.at,rs?.id,rs?.status,rc?.id,rc?.status,rv?.id,rv?.status,rr?.id,rr?.status,any?.id,anyV?.id,it.stage,JSON.stringify(it.precheck||null),JSON.stringify(it.video||null)].join('|');
+  return [it.labAsk?.id,it.labAsk?.status,(it.assets||[]).map(a=>a.id).join(','),pb.gen?.status,pb.cover,JSON.stringify(Object.fromEntries(Object.entries(pb.results||{}).map(([k,v])=>[k,v.status]))),!!pb.platforms,re?.id,re?.status,it.research?.at,rs?.id,rs?.status,rc?.id,rc?.status,rv?.id,rv?.status,rr?.id,rr?.status,any?.id,anyV?.id,it.stage,JSON.stringify(it.precheck||null),JSON.stringify(it.video||null)].join('|');
 }
 let drawerSig='';
 function syncDrawer(){
@@ -161,7 +161,24 @@ function renderTabs(){
   // 窄屏时步骤条会横向滚动，保证当前这一步露出来
   const cur=$('.step-tab[aria-selected="true"]');if(cur){const bar=cur.parentElement;bar.scrollLeft=Math.max(0,cur.offsetLeft-bar.clientWidth/2+cur.clientWidth/2)}
 }
-function renderBanner(){$('#banner').innerHTML=S.mode==='offline'?'<div class="banner">连不上本地服务。在项目目录运行 <b>npm start</b>，然后刷新页面。</div>':''}
+function renderBanner(){
+  const off=S.mode==='offline'?'<div class="banner">连不上本地服务。在项目目录运行 <b>npm start</b>，然后刷新页面。</div>':'';
+  // 调研实践中 Claude 在等人处理（登录、付款、花钱确认）：不管在哪个页面都提醒
+  const waits=Object.entries(S.items||{}).filter(([,i])=>i.labAsk?.status==='waiting');
+  $('#banner').innerHTML=off+waits.map(([id,i])=>`<div class="banner warn">Claude 在等你处理：${esc(i.title)} · ${esc((ASK_TEXT[i.labAsk.kind]||ASK_TEXT.other)[0])}${i.labAsk.site?' · '+esc(i.labAsk.site):''} <button class="btn sm" data-act="open" data-id="${esc(id)}">去处理</button></div>`).join('');
+}
+// 实践中 Claude 在等人处理：登录、付款（人在弹出的窗口里自己弄）、花钱确认、其他
+const ASK_TEXT={login:['要登录','已经弹出这个网站的 Chrome 窗口，在里面登录，弄好后点「登录好了」'],payment:['要付款或绑卡','已经弹出这个网站的 Chrome 窗口，在里面自己完成付款或绑卡（银行卡、密码这些不经过 Claude），弄好后点「付好了」'],spend:['要花钱','同意的话 Claude 接着做这一步；不同意它会跳过，在实践记录里写明'],other:['需要你做一件事','做完点「好了」']};
+function vLabAsk(it,id){
+  const q=it.labAsk;if(!q||q.status!=='waiting')return '';
+  const [title,hint]=ASK_TEXT[q.kind]||ASK_TEXT.other;
+  const btns=q.kind==='spend'?`<button class="btn primary" data-act="lab-answer" data-id="${esc(id)}" data-k="approve">同意，继续</button><button class="btn" data-act="lab-answer" data-id="${esc(id)}" data-k="deny">不同意</button>`
+    :`<button class="btn primary" data-act="lab-answer" data-id="${esc(id)}" data-k="done">${q.kind==='login'?'登录好了':q.kind==='payment'?'付好了':'好了'}</button><button class="btn" data-act="lab-answer" data-id="${esc(id)}" data-k="skip">跳过这一步</button>`;
+  const link=safeUrl(q.url)&&!['login','payment'].includes(q.kind)?` · <a href="${esc(q.url)}" target="_blank" rel="noopener">打开网页</a>`:'';
+  return `<div class="panel lab-ask" role="alert"><h3>Claude 在等你：${esc(title)}${q.site?` · ${esc(q.site)}`:''}</h3>
+    <p>${esc(q.message)}</p>${q.amount?`<p><b>要花：${esc(q.amount)}</b></p>`:''}<p class="hint">${esc(hint)}${link}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${btns}</div></div>`;
+}
 
 /* ---------- 总览 ---------- */
 // 首次打开时的环境检查：只列没通过的，全部通过就不显示
@@ -416,9 +433,9 @@ function vResearch(r,open){
 // 调研时收集的真实素材（网页截图、页面里的视频），做视频时直接当画面用
 function vAssets(it){
   const as=it.assets||[];if(!as.length)return '';
-  const imgs=as.filter(a=>a.kind==='image').length,vids=as.length-imgs;
-  return `<details class="assets" open><summary>收集的素材 · ${imgs} 张截图${vids?` · ${vids} 段视频`:''}</summary><div class="asset-grid">${as.map(a=>`<figure class="asset">
-    <a href="/media/${esc(a.file)}" target="_blank" rel="noopener">${a.kind==='video'?`<video src="/media/${esc(a.file)}" muted preload="metadata"></video><span class="asset-kind">视频</span>`:`<img src="/media/${esc(a.file)}" alt="${esc(a.note||a.title||'')}" loading="lazy">`}</a>
+  const imgs=as.filter(a=>a.kind==='image').length,vids=as.length-imgs,prac=as.filter(a=>a.source==='practice').length;
+  return `<details class="assets" open><summary>收集的素材 · ${imgs} 张截图${vids?` · ${vids} 段视频`:''}${prac?` · 其中 ${prac} 个是实践素材`:''}</summary><div class="asset-grid">${as.map(a=>`<figure class="asset">
+    <a href="/media/${esc(a.file)}" target="_blank" rel="noopener">${a.kind==='video'?`<video src="/media/${esc(a.file)}" muted preload="metadata"></video><span class="asset-kind">视频</span>`:`<img src="/media/${esc(a.file)}" alt="${esc(a.note||a.title||'')}" loading="lazy">`}${a.source==='practice'?'<span class="asset-kind prac">实践</span>':''}</a>
     <figcaption><span title="${esc(a.note||'')}">${esc(a.note||a.title||a.part||'')}</span>${safeUrl(a.url)?` <a class="faint" href="${esc(a.url)}" target="_blank" rel="noopener">${esc(new URL(a.url).hostname.replace(/^www\./,''))}</a>`:''} <button class="btn ghost danger" data-act="asset-del" data-id="${esc(a.id)}" aria-label="删除这个素材">删除</button></figcaption></figure>`).join('')}</div></details>`;
 }
 /* ---------- 发布 ---------- */
@@ -1526,6 +1543,7 @@ function renderDrawer(){
       </div>
       <div class="blk" id="researchBlk">
         <div class="blk-head"><h3>调研</h3><span class="faint" style="font-size:12px">后台 Agent · 上网查资料</span><div class="actions">${researchActions(id,it)}</div></div>
+        ${vLabAsk(it,id)}
         <div id="researchRun">${vRunMini(itemRun('research',id))}</div>
         ${vSay(itemRun('research',id))}
         ${vAssets(it)}
@@ -1745,6 +1763,8 @@ document.addEventListener('click',e=>{
     case 'edit-acc':openAccModal(id);break;
     case 'toggle-chip':{const g=b.dataset.group;if(g==='color'){b.parentElement.querySelectorAll('[data-group="color"]').forEach(x=>x.setAttribute('aria-pressed','false'));b.setAttribute('aria-pressed','true')}else b.setAttribute('aria-pressed',b.getAttribute('aria-pressed')!=='true');break}
     case 'modal-close':case 'modal-bg':S.tdView=null;$('#modalRoot').innerHTML='';break;
+    case 'lab-answer':{const q=S.items[id]?.labAsk;if(!q)break;b.disabled=true;
+      api('POST',`/api/items/${encodeURIComponent(id)}/lab/answer`,{id:q.id,result:k}).then(()=>toast({done:'好了，Claude 接着做',skip:'已跳过这一步',approve:'已同意，Claude 接着做',deny:'已拒绝，Claude 会跳过这一步'}[k]||'好了'),e=>toast(e.message||'操作失败'));break}
     case 'yt-td':ytTeardown(id);break;
     case 'yt-td-view':ytTdOpen(id);break;
     case 'yt-td-redo':if(S.tdView?.teardown)arm(b,'确认重新拆解',()=>ytTeardown(id,true));else ytTeardown(id);break;

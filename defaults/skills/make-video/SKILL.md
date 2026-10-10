@@ -68,7 +68,9 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
 
 ## 真实素材：截图和视频片段
 
-`get_item` 返回的 `assets` 是调研时收集的素材：网页截图（`kind: image`）和页面里的视频（`kind: video`），每条有本地文件 `file`、来源 `url` 和说明 `note`。先把要用的复制进项目的 `assets/`。
+`get_item` 返回的 `assets` 是调研时收集的素材：网页截图（`kind: image`）和页面里的视频（`kind: video`），每条有本地文件 `file`、来源 `url` 和说明 `note`。
+
+`source` 是 `practice` 的是调研时自己动手做的**实践素材**（实验截图、录屏、生成结果），是这条视频最有说服力的画面，调研报告里标 [实践] 的结论配上它们。`get_item` 的 `lab` 是实验目录：里面做成网页的实验（three.js 3D、动画、可视化），可以复制进项目、直接当一个 HyperFrames 镜头用（比截图、录屏更清晰，节奏也能跟着配音调）。先把要用的复制进项目的 `assets/`。
 
 还缺的可以自己补：在项目目录运行 `npx hyperframes capture "<网址>" --skip-vision --max-screenshots 6 -o capture/<编号>` 截网页，需要页面里的视频就加 `--video`。网址用调研报告来源（`research.sources`）、`assets` 里的来源或脚本里提到的公开页面。
 

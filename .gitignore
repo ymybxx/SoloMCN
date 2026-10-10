@@ -20,3 +20,5 @@ data/publish/
 data/skills/
 .claude/settings.local.json
 data/youtube-cookies.txt
+# 实践浏览器：调研时操作线上工具用的浏览器配置，里面有网站的登录信息
+data/lab-browser/

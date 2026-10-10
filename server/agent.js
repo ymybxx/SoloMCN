@@ -4,10 +4,11 @@
 // 可以用 claude --resume <id> 接着看 Claude 当时是怎么想的。
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { voicesFile } from './skills.js';
+import { ASK_TIMEOUT_MS } from './lab.js';
 
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -121,10 +122,12 @@ const TASKS = {
     prompt: ({ videoId, redo }) => `/teardown-video 视频 id：${videoId}${redo ? '；重新拆解' : ''}`,
   },
   // 写脚本之前先调研：上网查真实的价格、能力、步骤和反方观点，写成带出处的报告存到卡片上
+  // 调研可以动手实践：在实验目录里跑（沙盒只允许写这个目录），见 labLaunch
   research: {
     name: '调研',
-    maxTurns: 90,
-    prompt: ({ itemId }) => `/research-topic 内容 id：${itemId}`,
+    maxTurns: 120,
+    lab: true,
+    prompt: ({ itemId, labDir }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}`,
   },
   // 下面三个在「设置」里选成「后台 Agent」时走这里，选「单次调用」时走 cli.js
   script: {
@@ -250,7 +253,34 @@ function describeToolEn(name, input = {}) {
   return label;
 }
 
-export function createAgent({ store, cwd }) {
+// 实践时沙盒只放行这些网站：装 Python、Node 依赖，拉 GitHub 上的代码，下载公开的模型和前端库
+const LAB_DOMAINS = ['pypi.org', 'files.pythonhosted.org', 'registry.npmjs.org', 'github.com', 'codeload.github.com', '*.githubusercontent.com',
+  'cdn.jsdelivr.net', 'unpkg.com', 'huggingface.co', '*.hf.co', 'crates.io', 'static.crates.io', 'index.crates.io', 'proxy.golang.org'];
+
+export function createAgent({ store, cwd, lab }) {
+  // 调研任务的启动配置：在实验目录里运行，开 Claude Code 的沙盒（不能读家目录、只能写实验目录、只连白名单网站，
+  // 被拦的命令不准退到沙盒外重试）；读写文件工具也只允许实验目录；技能复制一份进去，工作台工具用绝对路径指定
+  function labLaunch(itemId) {
+    const dir = lab.prepare(itemId);
+    const nodeDir = path.dirname(realpathSync(process.execPath));
+    const settings = {
+      sandbox: {
+        enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
+        filesystem: { denyRead: ['~/'], allowRead: [dir, nodeDir] },
+        network: { allowedDomains: LAB_DOMAINS, strictAllowlist: true },
+      },
+    };
+    const mcp = { mcpServers: { workbench: { command: process.execPath, args: [path.join(cwd, 'server', 'mcp.js')], env: { WORKBENCH_URL: process.env.WORKBENCH_URL || '' } } } };
+    return {
+      cwd: dir,
+      args: ['--settings', JSON.stringify(settings), '--mcp-config', JSON.stringify(mcp), '--strict-mcp-config'],
+      tools: [...BUILTIN_TOOLS, 'Bash', 'Read', 'Write', 'Edit', 'TodoWrite'].join(','),
+      allowed: [...ALLOWED_TOOLS, 'Bash', 'TodoWrite', `Edit(/${dir}/**)`, `Read(/${dir}/**)`],
+      denied: ['NotebookEdit', 'Glob', 'Grep'],
+      // 依赖的缓存放进实验目录（家目录读写不了）；等人处理（登录、付款）最多 40 分钟，工具调用不能先超时
+      env: { PIP_CACHE_DIR: path.join(dir, '.cache', 'pip'), npm_config_cache: path.join(dir, '.cache', 'npm'), XDG_CACHE_HOME: path.join(dir, '.cache'), MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000) },
+    };
+  }
   const uiLang = () => (store.get('settings', 'ui')?.lang === 'en' ? 'en' : 'zh');
   // 每条队列同一时间只跑一个任务：main（精选、出题、写脚本……）和 video（生成视频）互不阻塞
   const current = {}; // lane -> { id, proc, stopped }
@@ -313,8 +343,9 @@ export function createAgent({ store, cwd }) {
       if (!/^[A-Za-z0-9_-]{11}$/.test(args.videoId || '')) throw Object.assign(new Error('没认出视频 id'), { status: 400 });
       args.redo = !!args.redo;
     }
-    if (task === 'research' && (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId))) {
-      throw Object.assign(new Error('找不到这条内容'), { status: 400 });
+    if (task === 'research') {
+      if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
+      args.labDir = lab.dirOf(args.itemId);
     }
     if (task === 'script' || task === 'check') {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
@@ -380,17 +411,19 @@ export function createAgent({ store, cwd }) {
   }
 
   function launch({ id, run, task, t, lane, prompt, resumeSession = null, autoResumes = 0 }) {
-    const env = cliEnv();
+    const lb = t.lab && lab ? labLaunch(run.args.itemId) : null;
+    const env = { ...cliEnv(), ...(lb?.env || {}) };
     const proc = spawn(
       claudeBin(),
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
       ['-p', prompt, ...(resumeSession ? ['--resume', resumeSession] : []),
         '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--max-turns', String(t.maxTurns),
         '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY,
-        '--permission-mode', 'dontAsk', '--tools', t.tools ?? BUILTIN_TOOLS.join(','),
-        '--allowedTools', (t.allowed ?? ALLOWED_TOOLS).join(','), '--disallowedTools', (t.denied ?? DENIED_TOOLS).join(','),
+        '--permission-mode', 'dontAsk', '--tools', lb?.tools ?? t.tools ?? BUILTIN_TOOLS.join(','),
+        '--allowedTools', (lb?.allowed ?? t.allowed ?? ALLOWED_TOOLS).join(','), '--disallowedTools', (lb?.denied ?? t.denied ?? DENIED_TOOLS).join(','),
+        ...(lb?.args || []),
         ...(t.schema ? ['--json-schema', JSON.stringify(t.schema)] : [])],
-      { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] },
+      { cwd: lb?.cwd || cwd, env, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     const prev = current[lane];
     current[lane] = { id, proc, stopped: prev?.id === id ? prev.stopped : false, say: prev?.id === id ? prev.say : null };
