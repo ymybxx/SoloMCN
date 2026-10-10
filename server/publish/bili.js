@@ -38,10 +38,32 @@ export function createBili({ dataDir }) {
       await page.locator('input[type="file"][accept*=".mp4"]').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {});
       if (!(await loggedIn(page))) throw new Error('B站登录已失效，去「账号矩阵」重新扫码');
 
+      // 之前没提交的稿件会在上传框上方提示「本地浏览器存在 N 个未提交的视频」，挡住新上传；点「不用了」清掉再传
+      const drafts = page.getByText('不用了', { exact: true }).first();
+      if (await drafts.isVisible().catch(() => false)) {
+        log('清掉之前没提交的本地草稿');
+        await drafts.click({ timeout: 5000 }).catch(() => {});
+        await drafts.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+      }
+
       log('上传视频文件');
-      await page.locator('input[type="file"][accept*=".mp4"]').first().setInputFiles(info.mp4, { timeout: 30_000 });
       const titleBox = page.locator('input[placeholder*="稿件标题"]').first();
-      await titleBox.waitFor({ state: 'visible', timeout: 180_000 });
+      // 像人一样点「上传视频」，在选文件窗口里选视频（不弹系统窗口，由浏览器自动化接管）；
+      // B站改版后页面上会同时存在新旧几个上传框，直接往某个 input 里塞文件容易塞进不起作用的那个
+      const viaButton = await Promise.all([
+        page.waitForEvent('filechooser', { timeout: 15_000 }),
+        page.getByText('上传视频', { exact: true }).last().click({ timeout: 10_000 }),
+      ]).then(([chooser]) => chooser.setFiles(info.mp4)).then(() => true, () => false);
+      let started = viaButton && (await titleBox.waitFor({ state: 'visible', timeout: 60_000 }).then(() => true, () => false));
+      // 点按钮不行：挨个试页面上能收视频的上传框，从后往前（新的上传框在后面）
+      if (!started) {
+        const inputs = page.locator('input[type="file"][accept*=".mp4"]');
+        for (let i = (await inputs.count()) - 1; i >= 0 && !started; i--) {
+          await inputs.nth(i).setInputFiles(info.mp4, { timeout: 30_000 }).catch(() => {});
+          started = await titleBox.waitFor({ state: 'visible', timeout: 30_000 }).then(() => true, () => false);
+        }
+      }
+      if (!started) await titleBox.waitFor({ state: 'visible', timeout: 120_000 });
 
       log('填写标题、创作声明、标签和简介');
       await fillChecked(titleBox, String(info.title || '').slice(0, 80), '标题');
