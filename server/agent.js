@@ -113,6 +113,13 @@ const TASKS = {
     maxTurns: 50,
     prompt: ({ pickId, accounts, n }) => `/account-ideas 精选 id：${pickId}；账号：${accounts.join('、')}；每个账号 ${n} 个`,
   },
+  // 拆解一条 YouTube 视频：读字幕、简介和热门评论，写成拆解报告存到这条视频上（精选、出题、调研都复用）
+  teardown: {
+    name: '拆解视频',
+    maxTurns: 25,
+    lane: 'teardown',
+    prompt: ({ videoId, redo }) => `/teardown-video 视频 id：${videoId}${redo ? '；重新拆解' : ''}`,
+  },
   // 写脚本之前先调研：上网查真实的价格、能力、步骤和反方观点，写成带出处的报告存到卡片上
   research: {
     name: '调研',
@@ -183,6 +190,9 @@ const TOOL_NAMES = {
   youtube_search: '搜索 YouTube',
   youtube_videos: '读取 YouTube 视频',
   youtube_comments: '读取 YouTube 评论',
+  youtube_transcript: '读取 YouTube 字幕',
+  get_teardown: '读取拆解报告',
+  save_teardown: '保存拆解报告',
 };
 
 const TOOL_NAMES_EN = {
@@ -192,6 +202,7 @@ const TOOL_NAMES_EN = {
   save_analysis: 'Save review', save_video: 'Save video', save_research: 'Save research', capture_source: 'Capture page',
   x_search: 'Search X', x_user_tweets: 'Read X user', x_list_timeline: 'Read X list', x_pool_status: 'Check X account pool',
   youtube_search: 'Search YouTube', youtube_videos: 'Read YouTube videos', youtube_comments: 'Read YouTube comments',
+  youtube_transcript: 'Read YouTube captions', get_teardown: 'Read teardown', save_teardown: 'Save teardown',
 };
 const CHANNEL_NAMES_EN = { x: 'X', youtube: 'YouTube', douyin: 'Douyin', weibo: 'Weibo', bilibili: 'Bilibili', zhihu: 'Zhihu', baidu: 'Baidu', toutiao: 'Toutiao', 'bilibili-video': 'Bilibili videos', hackernews: 'Hacker News' };
 
@@ -243,6 +254,7 @@ export function createAgent({ store, cwd }) {
   const uiLang = () => (store.get('settings', 'ui')?.lang === 'en' ? 'en' : 'zh');
   // 每条队列同一时间只跑一个任务：main（精选、出题、写脚本……）和 video（生成视频）互不阻塞
   const current = {}; // lane -> { id, proc, stopped }
+  const busyMsg = (lane) => ({ video: '已经有一个视频在生成，等它结束或先停止', teardown: '已经有一条视频在拆解，等它结束或先停止' })[lane] || 'Claude 正在跑另一个任务，等它结束或先停止';
   const laneOf = (task) => TASKS[task]?.lane || 'main';
 
   // 服务重启时还标着“运行中”的，说明上次被中断了
@@ -297,6 +309,10 @@ export function createAgent({ store, cwd }) {
       if (!it) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
       if (!String(it.script || '').trim()) throw Object.assign(new Error('先写好脚本再生成视频'), { status: 400 });
     }
+    if (task === 'teardown') {
+      if (!/^[A-Za-z0-9_-]{11}$/.test(args.videoId || '')) throw Object.assign(new Error('没认出视频 id'), { status: 400 });
+      args.redo = !!args.redo;
+    }
     if (task === 'research' && (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId))) {
       throw Object.assign(new Error('找不到这条内容'), { status: 400 });
     }
@@ -328,8 +344,7 @@ export function createAgent({ store, cwd }) {
   async function start(task, args = {}) {
     const lane = laneOf(task);
     if (current[lane]) {
-      const msg = lane === 'video' ? '已经有一个视频在生成，等它结束或先停止' : 'Claude 正在跑另一个任务，等它结束或先停止';
-      throw Object.assign(new Error(msg), { status: 409 });
+      throw Object.assign(new Error(busyMsg(lane)), { status: 409 });
     }
     const t = validate(task, args);
     const id = randomUUID().replace(/-/g, '').slice(0, 12);
@@ -356,7 +371,7 @@ export function createAgent({ store, cwd }) {
     const t = TASKS[saved.task];
     if (!t) throw Object.assign(new Error('没有这个任务'), { status: 400 });
     const lane = laneOf(saved.task);
-    if (current[lane]) throw Object.assign(new Error(lane === 'video' ? '已经有一个视频在生成，等它结束或先停止' : 'Claude 正在跑另一个任务，等它结束或先停止'), { status: 409 });
+    if (current[lane]) throw Object.assign(new Error(busyMsg(lane)), { status: 409 });
     const run = { ...saved, status: 'running', error: null, finishedAt: null, resumes: (saved.resumes || 0) + 1, steps: [...(saved.steps || [])] };
     run.steps.push({ at: Date.now(), kind: 'text', text: '从中断处继续' });
     await store.update('agentRuns', id, { status: 'running', error: null, finishedAt: null, resumes: run.resumes, steps: run.steps });

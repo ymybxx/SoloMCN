@@ -346,6 +346,16 @@
     '还没有数据。在「渠道 → YouTube」配好 key 后会自动抓': 'No data yet. It fetches automatically once a key is set under Sources → YouTube',
     '先粘贴 key': 'Paste a key first', 'key 能用，已保存，开始抓一轮': 'Key works and is saved; fetching now', '已删除 key': 'Key deleted', '先写关键词': 'Write keywords first',
     '没有搜到，换个关键词试试': 'No results; try other keywords', '这条视频关闭了评论': 'Comments are turned off for this video',
+    // ---- YouTube 拆解 ----
+    '拆解': 'Teardown', '看拆解': 'View teardown', '重新拆解': 'Redo teardown', '拆解中…': 'Tearing down…', '已拆解': 'Torn down',
+    '确认重新拆解': 'Confirm redo', '拆解报告': 'Teardown', '还没拆解': 'Not torn down yet', '重新拉字幕': 'Refetch captions', '拉取中…': 'Fetching…',
+    '还没拉字幕': 'No captions fetched yet', '看字幕': 'Show captions', '字幕已重新拉取': 'Captions refetched', '拉字幕失败': 'Couldn\'t fetch captions',
+    'Claude 开始拆解，一般一两分钟': 'Claude started the teardown; it usually takes a minute or two', 'Claude 开始重新拆解': 'Claude started a new teardown',
+    '读字幕、简介和热门评论，写一份拆解报告存到这条视频上': 'Read the captions, description and top comments, and save a teardown on this video',
+    '已经有一条视频在拆解，等它结束或先停止': 'A video is already being torn down; wait for it or stop it first',
+    'YouTube 要求验证不是机器人，这次拿不到字幕（不去绕过它的检测），稍后再试': 'YouTube asked to verify this isn\'t a bot, so no captions this time (we don\'t work around its checks); try again later',
+    'YouTube 说请求太频繁，这次拿不到字幕，稍后再试': 'YouTube says there are too many requests, so no captions this time; try again later',
+    '这条视频没有字幕，也没有自动生成的字幕': 'This video has no captions, not even auto-generated ones',
   };
 
   // 带数字、名字的句式：(.+?) 抓到的部分会再翻译一遍
@@ -409,6 +419,8 @@
     [/^试搜：最近 (\d+) 天播放最多的前 (\d+) 条（用了 100 点额度，今天还剩 (\d+)）$/, 'Test: top $2 most-viewed from the last $1 days (used 100 units, $3 left today)'],
     [/^(.+) 播放$/, (m, a) => `${tr(a)} views`], [/^Shorts (.+)$/, 'Shorts $1'],
     [/^YouTube 拒绝了这个 API key：(.+)$/, 'YouTube rejected this API key: $1'], [/^今天的 YouTube 额度只剩 (\d+) 点，留给 Claude 临时搜索，这轮没搜$/, 'Only $1 YouTube units left today, kept for Claude\'s searches; skipped this run'],
+    [/^(.+) 拆解$/, (m, a) => `Torn down ${a}`], [/^没拿到字幕：(.+)$/, (m, a) => `No captions: ${tr(a)}`],
+    [/^字幕：(作者上传的|自动生成的)（(.*)），(.+) 拉取$/, (m, a, b, c) => `Captions: ${a === '作者上传的' ? 'uploaded by the creator' : 'auto-generated'} (${b}), fetched ${c}`],
     [/^(\d+) 分 (\d+) 秒$/, '$1 m $2 s'], [/^(\d+) 轮$/, '$1 turns'], [/^(\d+)\/(\d+) 平台已连$/, '$1/$2 platforms bound'],
   ];
 

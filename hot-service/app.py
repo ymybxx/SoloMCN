@@ -21,10 +21,12 @@ from hub import SOURCES, Hub
 from scheduler import Busy, Scheduler
 from db import connect
 from xpool import PoolError, XPool
+from videonotes import NoteError, VideoNotes
 import youtube
 
 hub = Hub()
 xpool = XPool()
+notes: VideoNotes | None = None
 scheduler: Scheduler | None = None
 
 
@@ -40,9 +42,10 @@ async def refresh_loop():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global scheduler
+    global scheduler, notes
     db = await connect(DB_PATH)
     await xpool.start(db)
+    notes = VideoNotes(db)
     # 抖音有自己的渠道（数据更全），其余榜单包一层复用热榜中心的抓取和缓存
     lists = [HotListChannel(hub, s) for s in SOURCES if s.id != "douyin"]
     scheduler = Scheduler(db, [XChannel(xpool), YouTubeChannel(), DouyinChannel(), *lists])
@@ -251,6 +254,51 @@ async def youtube_key_put(body: YouTubeKey):
 @app.delete("/youtube/key")
 async def youtube_key_delete():
     return youtube.clear_key()
+
+
+NOTE_STATUS = {"blocked": 503, "no_subtitles": 404, "unavailable": 404, "failed": 502}
+
+
+@app.exception_handler(NoteError)
+async def note_error(_req, exc: NoteError):
+    return JSONResponse(status_code=NOTE_STATUS.get(exc.code, 502), content={"error": {"code": exc.code, "message": str(exc)}})
+
+
+def _vid(video: str) -> str:
+    vid = youtube.video_id(video)
+    if not vid:
+        raise youtube.YouTubeError("bad_input", "没认出视频 id，给 YouTube 视频链接或 11 位 id")
+    return vid
+
+
+@app.get("/youtube/transcript/{video}")
+async def youtube_transcript(video: str, refresh: bool = False):
+    """视频字幕（整理成文字，带时间）。存过就直接给，cached 为 true；refresh=true 重新从 YouTube 拿。不下载视频，不登录。"""
+    return await notes.transcript(_vid(video), refresh)
+
+
+@app.get("/youtube/teardown/{video}")
+async def youtube_teardown(video: str):
+    """这条视频的拆解报告和字幕状态；还没拆解时 teardown 为空。"""
+    return await notes.get(_vid(video)) or {"videoId": _vid(video), "teardown": None, "transcript": None}
+
+
+class Teardown(BaseModel):
+    text: str = Field(..., min_length=20, max_length=40_000)
+    title: str | None = Field(None, max_length=300)
+
+
+@app.put("/youtube/teardown/{video}")
+async def youtube_teardown_put(video: str, body: Teardown):
+    """保存（覆盖）拆解报告。"""
+    return await notes.save_teardown(_vid(video), body.text, body.title)
+
+
+@app.get("/youtube/notes")
+async def youtube_notes(ids: str = Query("", description="逗号分隔的视频 id，最多 500 个")):
+    """每条视频有没有字幕、有没有拆解，素材页显示状态用，不返回正文。"""
+    vids = [v for v in (youtube.video_id(x) for x in ids.split(",")[:500]) if v]
+    return await notes.status(vids)
 
 
 @app.get("/youtube/quota")

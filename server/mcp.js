@@ -308,6 +308,73 @@ server.registerTool(
   }),
 );
 
+// ---------- YouTube 字幕和拆解报告：和视频绑定，拿过一次就存在本机，之后都直接读 ----------
+const ytId = (s) => {
+  s = String(s || '').trim();
+  if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+  const m = s.match(/(?:v=|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+  if (!m) throw new Error('没认出视频 id，给 YouTube 视频链接或 11 位 id');
+  return m[1];
+};
+const TRANSCRIPT_MAX = 60_000;
+
+server.registerTool(
+  'youtube_transcript',
+  {
+    title: '读取 YouTube 字幕',
+    description:
+      '读一条 YouTube 视频的字幕（整理成文字，每段开头带时间），用来弄清它具体讲了什么、怎么讲的。' +
+      '拿过的直接读本机存好的，不会重复请求 YouTube；refresh 只在用户明确要求重新拉字幕时才用。' +
+      '拿不到时会说明原因（YouTube 要求验证不是机器人、请求太频繁、视频没有字幕），这时不要用任何别的办法绕过，改用 youtube_videos 的简介和 youtube_comments 的评论。' +
+      '字幕只用来理解原视频，不要大段照抄，也不要逐句翻译成我们的稿子。',
+    inputSchema: {
+      video: z.string().min(1).describe('视频链接或 11 位 id'),
+      refresh: z.boolean().optional().describe('重新从 YouTube 拉，默认 false'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ video, refresh = false }) => {
+    const r = await call('GET', `/api/hs/youtube/transcript/${ytId(video)}${refresh ? '?refresh=true' : ''}`, undefined, 120_000);
+    if (!r.transcript) return { videoId: r.videoId, title: r.title || undefined, transcript: null, error: r.error || '没有拿到字幕' };
+    return {
+      videoId: r.videoId, title: r.title, lang: r.lang, source: r.source === 'manual' ? '作者上传的字幕' : '自动生成的字幕', cached: r.cached,
+      transcript: r.transcript.slice(0, TRANSCRIPT_MAX),
+      truncated: r.transcript.length > TRANSCRIPT_MAX ? `字幕太长，只给了前 ${TRANSCRIPT_MAX} 个字符` : undefined,
+    };
+  }),
+);
+
+server.registerTool(
+  'get_teardown',
+  {
+    title: '读取拆解报告',
+    description: '读一条 YouTube 视频已经写好的拆解报告（为什么火、结构、钩子、节奏、评论区洞察、能借什么不能碰什么）。拆过的视频不要重复拆，直接用这份；teardown 为空说明还没拆过。',
+    inputSchema: { video: z.string().min(1).describe('视频链接或 11 位 id') },
+    annotations: { readOnlyHint: true },
+  },
+  tool(async ({ video }) => {
+    const r = await call('GET', `/api/hs/youtube/teardown/${ytId(video)}`);
+    return { videoId: r.videoId, title: r.title || undefined, teardown: r.teardown || null, teardownAt: r.teardownAt ? new Date(r.teardownAt * 1000).toISOString().slice(0, 16) : undefined, hasTranscript: !!r.transcript };
+  }),
+);
+
+server.registerTool(
+  'save_teardown',
+  {
+    title: '保存拆解报告',
+    description: '把一条 YouTube 视频的拆解报告存到这条视频上（覆盖旧的）。之后精选、出题、调研、写脚本都会读这一份。按 /teardown-video 技能里的格式写。',
+    inputSchema: {
+      video: z.string().min(1).describe('视频链接或 11 位 id'),
+      report: z.string().min(20).max(40_000).describe('拆解报告，Markdown'),
+      title: z.string().max(300).optional().describe('视频标题'),
+    },
+  },
+  tool(async ({ video, report, title }) => {
+    const r = await call('PUT', `/api/hs/youtube/teardown/${ytId(video)}`, { text: report, title });
+    return { saved: true, videoId: r.videoId, length: report.length };
+  }),
+);
+
 server.registerTool(
   'x_list_timeline',
   {
@@ -587,18 +654,31 @@ server.registerTool(
   'get_item',
   {
     title: '读取内容和账号人设',
-    description: '读取流水线里一条内容的全部信息（标题、钩子、概要、情绪、平台、形式、备注、已有脚本、借势的热点），以及它所属账号的人设。写脚本和预审前先读。',
+    description: '读取流水线里一条内容的全部信息（标题、钩子、概要、情绪、平台、形式、备注、已有脚本、借势的热点、选题依据的来源素材，YouTube 来源带拆解报告），以及它所属账号的人设。写脚本和预审前先读。',
     inputSchema: { item_id: ITEM_ID },
     annotations: { readOnlyHint: true },
   },
   tool(async ({ item_id }) => {
     const it = await call('GET', `/api/items/${item_id}`);
     const a = it.accountId ? await call('GET', `/api/accounts/${it.accountId}`).catch(() => null) : null;
+    // 选题依据的素材；YouTube 视频带上已经写好的拆解报告
+    const sources = await Promise.all((it.sources || []).slice(0, 8).map(async (s) => {
+      const base = { channel: s.channel, title: s.title, url: s.url || undefined };
+      if (s.channel !== 'youtube') return base;
+      try {
+        const vid = ytId(s.url || s.id);
+        const t = await call('GET', `/api/hs/youtube/teardown/${vid}`);
+        return { ...base, videoId: vid, teardown: t.teardown || null };
+      } catch {
+        return base;
+      }
+    }));
     return {
       item: {
         title: it.title, hook: it.hook, angle: it.angle, emotions: it.emotions, format: it.format,
         platforms: (it.platforms || []).map((p) => PLATFORM_NAMES[p] || p),
         stage: it.stage, notes: it.notes, script: it.script || '', trend: it.trend || null, whyNow: it.whyNow || '',
+        sources: sources.length ? sources : undefined,
         research: it.research ? { text: it.research.text, sources: it.research.sources, at: it.research.at } : null,
         // 调研时收集的真实素材，file 是相对项目根目录的路径
         assets: (it.assets || []).map((a) => ({ kind: a.kind, file: a.file, part: a.part, url: a.url, title: a.title, note: a.note })),

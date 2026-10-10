@@ -61,7 +61,11 @@ function applyLocal(col){
   if(col==='radar')S.radar=local.radar.latest||null;
   if(col==='notes')S.analysis=local.notes.analysis||null;
   if(col==='picks')S.picks={...local.picks};
-  if(col==='agentRuns')S.runs={...local.agentRuns};
+  if(col==='agentRuns'){S.runs={...local.agentRuns};
+    const now=new Set(runList().filter(r=>r.task==='teardown'&&r.status==='running').map(r=>r.args?.videoId));
+    const done=[...(S.tdRunning||[])].filter(v=>!now.has(v));S.tdRunning=now;
+    if(done.length){loadYtNotes();if(S.tdView&&done.includes(S.tdView.vid))ytTdOpen(S.tdView.vid)}
+    else if(S.tdView)renderTdView()}
   if(col==='settings')S.settings={...local.settings};
   requestRender();
   if(S.open&&(col==='items'||col==='agentRuns'))syncDrawer();
@@ -234,7 +238,7 @@ const pickList=()=>Object.entries(S.picks||{}).map(([id,v])=>({id,...v})).sort((
 const runList=()=>Object.entries(S.runs||{}).map(([id,v])=>({id,...v})).sort((a,b)=>(b.startedAt||0)-(a.startedAt||0));
 // 不指定任务时只看主队列（生成视频走单独的队列，不算“Claude 正忙”）
 const VIDEO_TASKS=['video','revise'];
-const runningRun=task=>runList().find(r=>r.status==='running'&&(task?r.task===task:!VIDEO_TASKS.includes(r.task)));
+const runningRun=task=>runList().find(r=>r.status==='running'&&(task?r.task===task:!VIDEO_TASKS.includes(r.task)&&r.task!=='teardown'));
 const runningVideo=()=>runList().find(r=>r.status==='running'&&VIDEO_TASKS.includes(r.task));
 // 任务进行中插话：输入框放在会频繁刷新的进度区外面，打字不会被打断
 const vSay=run=>run?.status==='running'?`<div class="say"><input type="text" id="say-${esc(run.id)}" value="${esc(S.say?.[run.id]||'')}" placeholder="有疑问或想调整，直接说，例如：片尾那行字太小了" aria-label="对正在运行的 Claude 说"><button class="btn" data-act="agent-say" data-id="${esc(run.id)}">插话</button></div>`:'';
@@ -251,7 +255,7 @@ const fmtDur=run=>fmtSecs(Math.round(((run.finishedAt||Date.now())-run.startedAt
 // 运行中的时长每秒走一次：长时间没有新步骤（比如在等一个慢网页）时，页面不重画，时长也不能停
 const vDur=run=>run.status==='running'?`<span class="run-dur" data-start="${run.startedAt}">${fmtDur(run)}</span>`:fmtDur(run);
 setInterval(()=>{for(const el of document.querySelectorAll('.run-dur[data-start]'))el.textContent=fmtSecs(Math.round((Date.now()-Number(el.dataset.start))/1000))},1000);
-const laneBusy=run=>VIDEO_TASKS.includes(run.task)?runningVideo():runningRun();
+const laneBusy=run=>VIDEO_TASKS.includes(run.task)?runningVideo():run.task==='teardown'?runningRun('teardown'):runningRun();
 // 完整过程：可滚动，新步骤自动滚到底，往上翻时不打扰
 function vLog(run,tall){
   const steps=run.steps||[];
@@ -639,6 +643,7 @@ async function loadFeed(){
     S.feed={channels,items:[...feed.items.filter(x=>x.channel!=='x'&&x.channel!=='youtube'),...tw.items,...yt.items]}}
   catch(e){S.feed={down:e.message||'热点数据服务没有响应'}}
   S.feedLoading=false;requestRender();
+  if(S.feed.items)loadYtNotes();
   // 热点服务刚启动时会晚几秒就绪：停在渠道、素材页时自动重试，连上了就显示
   if(S.feed.down&&!S.feedRetry){S.feedRetry=setTimeout(()=>{S.feedRetry=null;if(['sources','feed'].includes(S.tab))loadFeed()},4000)}
 }
@@ -689,11 +694,11 @@ const ytDur=s=>s==null?'':s>=3600?`${Math.floor(s/3600)}:${pad(Math.floor(s%3600
 function vYtVideo(x){
   const m=x.metrics||{},e=x.extra||{},key=x.channel+':'+x.id,open=!!S.feedOpen?.has(key);const url=safeUrl(x.url);
   return `<article class="panel feed-item">
-    <div class="feed-meta"><span class="feed-score num ${x.score>=70?'hot':x.score>=55?'warm':''}" title="热度分：每小时的播放量，涨得越快越高">${x.score}</span>${x.isNew?'<span class="emo by" title="最近一轮抓取新出现的">新</span>':''}<b>${esc(x.author||'')}</b><span class="faint">YouTube · ${ago(x.publishedAt)}</span>${(e.matched||[]).filter(g=>g.length<=8).map(g=>`<span class="emo">${esc(g)}</span>`).join('')}${e.durationSec!=null?`<span class="emo">${e.short?'Shorts ':''}${ytDur(e.durationSec)}</span>`:''}${e.captions?'<span class="emo" title="作者上传了字幕">有字幕</span>':''}</div>
+    <div class="feed-meta"><span class="feed-score num ${x.score>=70?'hot':x.score>=55?'warm':''}" title="热度分：每小时的播放量，涨得越快越高">${x.score}</span>${x.isNew?'<span class="emo by" title="最近一轮抓取新出现的">新</span>':''}<b>${esc(x.author||'')}</b><span class="faint">YouTube · ${ago(x.publishedAt)}</span>${(e.matched||[]).filter(g=>g.length<=8).map(g=>`<span class="emo">${esc(g)}</span>`).join('')}${e.durationSec!=null?`<span class="emo">${e.short?'Shorts ':''}${ytDur(e.durationSec)}</span>`:''}${e.captions?'<span class="emo" title="作者上传了字幕">有字幕</span>':''}${S.ytNotes?.[x.id]?.teardownAt?'<span class="emo by">已拆解</span>':''}</div>
     <button class="feed-title" data-act="feed-toggle" data-id="${esc(key)}" aria-expanded="${open}">${esc(x.title)}</button>
     <div class="feed-nums num faint">播放 ${fmtN(m.views)} · 赞 ${fmtN(m.likes)} · 评 ${fmtN(m.comments)}</div>
     ${open&&x.text?`<div class="feed-text">${esc(x.text)}</div>`:''}
-    <div class="idea-actions">${url?`<a class="btn ghost" href="${esc(url)}" target="_blank" rel="noopener">打开视频</a>`:''}<button class="btn ghost" data-act="feed-pick" data-ch="youtube" data-id="${esc(x.id)}" data-title="${esc(`${x.author||''}：${x.title}`)}" data-url="${esc(url)}">送进选题雷达</button></div>
+    <div class="idea-actions">${url?`<a class="btn ghost" href="${esc(url)}" target="_blank" rel="noopener">打开视频</a>`:''}<button class="btn ghost" data-act="feed-pick" data-ch="youtube" data-id="${esc(x.id)}" data-title="${esc(`${x.author||''}：${x.title}`)}" data-url="${esc(url)}">送进选题雷达</button>${ytTdBtn(x)}</div>
   </article>`;
 }
 // 「全部」里的 YouTube 紧凑列表：前几条，和榜单放在一列
@@ -702,9 +707,54 @@ function vYtList(items,max){
   return `<div class="panel dy-list"><div class="blk-head"><h3>YouTube</h3><span class="faint">最近 7 天 · ${items.length} 条</span>
       ${items.length>max?`<div class="actions"><button class="btn ghost" data-act="feed-chan" data-k="youtube">看全部 ${items.length} 条</button></div>`:''}</div>
     ${shown.map(x=>`<div class="dy-row"><span class="num rk">${x.score}</span>
-      <span class="t">${safeUrl(x.url)?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`:esc(x.title)}<small class="faint">${esc([x.author,'播放 '+fmtN(x.metrics?.views),ago(x.publishedAt),...(x.extra?.matched||[])].filter(Boolean).join(' · '))}</small></span>
+      <span class="t">${safeUrl(x.url)?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`:esc(x.title)}<small class="faint">${esc([x.author,'播放 '+fmtN(x.metrics?.views),ago(x.publishedAt),...(x.extra?.matched||[]),S.ytNotes?.[x.id]?.teardownAt?'已拆解':''].filter(Boolean).join(' · '))}</small></span>
       <span class="num faint"></span>
       <button class="btn ghost" data-act="feed-pick" data-ch="youtube" data-id="${esc(x.id)}" data-title="${esc(`${x.author||''}：${x.title}`)}" data-url="${esc(safeUrl(x.url))}" title="送进选题雷达">送入</button></div>`).join('')||'<p class="hint">还没有数据。在「渠道 → YouTube」配好 key 后会自动抓</p>'}</div>`;
+}
+/* ---------- YouTube 拆解：字幕和拆解报告绑定在视频上，拿过一次就复用 ---------- */
+async function loadYtNotes(){
+  const ids=(S.feed?.items||[]).filter(x=>x.channel==='youtube').map(x=>x.id);
+  if(!ids.length){S.ytNotes={};return}
+  try{S.ytNotes=await api('GET','/api/hs/youtube/notes?ids='+ids.join(','))}catch{}
+  requestRender();
+}
+const tdRun=vid=>runList().find(r=>r.task==='teardown'&&r.status==='running'&&r.args?.videoId===vid);
+function ytTdBtn(x){
+  if(tdRun(x.id))return '<button class="btn ghost" disabled>拆解中…</button>';
+  return S.ytNotes?.[x.id]?.teardownAt?`<button class="btn ghost" data-act="yt-td-view" data-id="${esc(x.id)}">看拆解</button>`:`<button class="btn ghost" data-act="yt-td" data-id="${esc(x.id)}" title="读字幕、简介和热门评论，写一份拆解报告存到这条视频上">拆解</button>`;
+}
+async function ytTeardown(vid,redo){
+  try{await api('POST','/api/agent/run',{task:'teardown',videoId:vid,redo:!!redo});toast(redo?'Claude 开始重新拆解':'Claude 开始拆解，一般一两分钟')}
+  catch(e){toast(e.message||'启动失败')}
+  if(S.tdView)renderTdView();
+}
+async function ytTdOpen(vid){
+  S.tdView={vid,loading:true};renderTdView();
+  try{const r=await api('GET','/api/hs/youtube/teardown/'+vid);S.tdView={vid,...r}}
+  catch(e){S.tdView={vid,error:e.message||'读取失败'}}
+  renderTdView();
+}
+async function ytSubRefresh(vid){
+  S.tdView={...S.tdView,subBusy:true,subError:null};renderTdView();
+  try{const r=await api('GET','/api/hs/youtube/transcript/'+vid+'?refresh=true');S.tdView={...S.tdView,...r,subBusy:false};toast('字幕已重新拉取')}
+  catch(e){S.tdView={...S.tdView,subBusy:false,subError:e.message||'拉字幕失败'}}
+  renderTdView();loadYtNotes();
+}
+function renderTdView(){
+  const v=S.tdView;const m=$('#modalRoot');if(!v){m.innerHTML='';return}
+  const running=tdRun(v.vid);
+  const when=t=>t?new Date(t*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  const sub=v.transcript?`字幕：${v.source==='manual'?'作者上传的':'自动生成的'}（${esc(v.lang||'')}），${esc(when(v.transcriptAt))} 拉取`:v.error&&!v.transcript?`没拿到字幕：${esc(v.error)}`:'还没拉字幕';
+  m.innerHTML=`<div class="modal" data-act="modal-bg"><div class="modal-box td-box" role="dialog" aria-label="拆解报告">
+    <div class="blk-head"><h3>${esc(v.title||'拆解报告')}</h3><div class="actions"><a class="btn ghost" href="https://www.youtube.com/watch?v=${esc(v.vid)}" target="_blank" rel="noopener">打开视频</a><button class="btn ghost" data-act="modal-close">关闭</button></div></div>
+    ${v.loading?'<p class="hint">正在读取…</p>':''}
+    ${v.teardown?`<p class="faint">${esc(when(v.teardownAt))} 拆解</p><div class="td-text">${mdLite(v.teardown)}</div>`:!v.loading?'<p class="hint">还没拆解</p>':''}
+    <div class="td-sub"><span class="faint">${sub}</span>
+      <div class="actions"><button class="btn ghost" data-act="yt-sub-refresh" data-id="${esc(v.vid)}" ${v.subBusy?'disabled':''}>${v.subBusy?'拉取中…':'重新拉字幕'}</button>
+        <button class="btn" data-act="yt-td-redo" data-id="${esc(v.vid)}" ${running?'disabled':''}>${running?'拆解中…':v.teardown?'重新拆解':'拆解'}</button></div></div>
+    ${v.subError?`<p class="err">${esc(v.subError)}</p>`:''}
+    ${v.transcript?`<details class="td-trans"><summary>看字幕</summary><pre>${esc(v.transcript)}</pre></details>`:''}
+  </div></div>`;
 }
 function vFeed(){
   const f=S.feed;
@@ -982,7 +1032,9 @@ async function ideaAdd(iid){
   const ideas=S.radar?.ideas||[];const d=ideas.find(x=>x.id===iid);if(!d)return;
   const a=S.accounts[d.accountId];const id=uid();const now=Date.now();
   const oneSeries=(S.accounts[d.accountId]?.series||[]).filter(x=>x.active!==false);
-  await store.set('items',id,{accountId:d.accountId,seriesId:d.seriesId||(oneSeries.length===1?oneSeries[0].id:null),title:d.title,hook:d.hook,angle:d.angle,emotions:d.emotions||[],format:d.format||'',
+  // 带上精选的来源素材（含链接）：调研、写脚本时 Claude 能直接看到原始素材和 YouTube 视频的拆解报告
+  const pick=d.pickId&&S.picks[d.pickId];
+  await store.set('items',id,{accountId:d.accountId,seriesId:d.seriesId||(oneSeries.length===1?oneSeries[0].id:null),pickId:pick?d.pickId:null,sources:pick?.sources||[],title:d.title,hook:d.hook,angle:d.angle,emotions:d.emotions||[],format:d.format||'',
     platforms:a?.platforms||['douyin'],stage:'idea',script:'',notes:[d.pickId&&S.picks[d.pickId]?`来自精选：${S.picks[d.pickId].title}`:'',d.trend?`借势热点：${d.trend.title}（${d.trend.platforms}）`:'',d.whyNow?'为什么现在做：'+d.whyNow:'',d.risk?'风险备注（供参考）：'+d.risk:''].filter(Boolean).join('\n'),checks:{},metrics:{},scheduledAt:'',publishedAt:'',score:d.scores||{},source:'ai',createdAt:now,updatedAt:now});
   await store.set('radar','latest',{...S.radar,ideas:ideas.filter(x=>x.id!==iid)});
   toast('已加入流水线的「选题」列');
@@ -1653,7 +1705,11 @@ document.addEventListener('click',e=>{
     case 'del-item':arm(b,'再点一次确认删除',async()=>{const i=S.open;flushSaves();S.open=null;$('#drawerRoot').innerHTML='';await store.del('items',i);toast('已删除')});break;
     case 'edit-acc':openAccModal(id);break;
     case 'toggle-chip':{const g=b.dataset.group;if(g==='color'){b.parentElement.querySelectorAll('[data-group="color"]').forEach(x=>x.setAttribute('aria-pressed','false'));b.setAttribute('aria-pressed','true')}else b.setAttribute('aria-pressed',b.getAttribute('aria-pressed')!=='true');break}
-    case 'modal-close':case 'modal-bg':$('#modalRoot').innerHTML='';break;
+    case 'modal-close':case 'modal-bg':S.tdView=null;$('#modalRoot').innerHTML='';break;
+    case 'yt-td':ytTeardown(id);break;
+    case 'yt-td-view':ytTdOpen(id);break;
+    case 'yt-td-redo':if(S.tdView?.teardown)arm(b,'确认重新拆解',()=>ytTeardown(id,true));else ytTeardown(id);break;
+    case 'yt-sub-refresh':ytSubRefresh(id);break;
     case 'acc-ai':accAiFill(b);break;
     case 'edit-series':openSeriesModal(id,b.dataset.k||'');break;
     case 'acc-sel':S.accSel=id;S.bindMenu=null;render();break;
