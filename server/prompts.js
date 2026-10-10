@@ -37,6 +37,9 @@ export function creativeBlock(account = {}, item = {}) {
   if (c.series) return `${c.brief ? `账号大方向：${c.brief}\n` : ''}${seriesText(c.series)}\n（这条属于这个系列：人群、主角、语气、画面、结构和时长都按它来）\n`;
   return [c.brief && `账号大方向：${c.brief}`, `目标人群：${c.audience}`, `人设：${c.persona}`, `风格：${c.visual}`].filter(Boolean).join('\n') + '\n';
 }
+// 系列写了时长就按系列，否则默认 30–60 秒
+const seriesLength = (account, item) => creativeOf(account, item).series?.length || '';
+
 export function scriptPrompt(account = {}, item) {
   return `为下面这条短视频写一份可以直接开工制作的分镜脚本，用中文。
 
@@ -63,7 +66,7 @@ ${(item.research.sources || []).map((x, i) => `[${i + 1}] ${x.title} ${x.url}`).
 【结尾互动】一句引导评论的话
 【平台差异】其他平台的版本怎么改
 
-要求：每个镜头都必须是做视频时能直接做出来的（调研收集的截图和视频片段、公开网页和帖子截图、官方演示视频片段、数据图表、动态图文、角色动画，按怎么最好看、最可信来选），不要写需要人去录屏、实测或拍摄的镜头；${(item.assets || []).length ? `\n已收集的素材：${item.assets.map((a) => `${a.kind === 'video' ? '视频' : '截图'}「${a.note || a.title}」`).join('；')}\n` : ''}前 3 秒必须有违和感或好奇缺口；全片 30–60 秒；${item.research?.text ? '要有观众能带走的干货（具体做法、真实的价格或数据、常见的坑），干货和所有数字只能来自调研报告，来源继续保留在后台 research，不追加到脚本正文；' : ''}${RED_LINES}
+要求：每个镜头都必须是做视频时能直接做出来的（调研收集的截图和视频片段、公开网页和帖子截图、官方演示视频片段、数据图表、动态图文、角色动画，按怎么最好看、最可信来选），不要写需要人去录屏、实测或拍摄的镜头；${(item.assets || []).length ? `\n已收集的素材：${item.assets.map((a) => `${a.kind === 'video' ? '视频' : '截图'}「${a.note || a.title}」`).join('；')}\n` : ''}前 3 秒必须有违和感或好奇缺口；全片时长${seriesLength(account, item) ? `按系列的「${seriesLength(account, item)}」` : ' 30–60 秒'}；${item.research?.text ? '要有观众能带走的干货（具体做法、真实的价格或数据、常见的坑），干货和所有数字只能来自调研报告，来源继续保留在后台 research，不追加到脚本正文；' : ''}${RED_LINES}
 ${CONTENT_OUTPUT_POLICY}`;
 }
 
