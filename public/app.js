@@ -1688,7 +1688,8 @@ async function agentItemTask(task,extra={}){
   }catch(e){toast(e.message||'启动失败')}
 }
 async function aiScript(){
-  if(modeOf('script')==='agent')return agentItemTask('script');
+  // 已有脚本时按钮先确认「覆盖」，所以这里带上 rewrite：按现在的系列、人设和调研从头写，不沿用旧台词
+  if(modeOf('script')==='agent')return agentItemTask('script',S.draft?.script?.trim()?{rewrite:true}:{});
   const id=S.open;const it=S.items[id];if(!it)return;
   const ctl=startGen('script');if(!ctl)return;flushSaves();renderDrawer();
   let text='',err=null;

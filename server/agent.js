@@ -135,7 +135,7 @@ const TASKS = {
   script: {
     name: '写脚本',
     maxTurns: 30,
-    prompt: ({ itemId }) => `/write-script 内容 id：${itemId}`,
+    prompt: ({ itemId, rewrite }) => `/write-script 内容 id：${itemId}${rewrite ? '；重写' : ''}`,
   },
   check: {
     name: 'AI 预审',
@@ -368,6 +368,7 @@ export function createAgent({ store, cwd, lab }) {
       delete args.fresh;
       args.prior = days === null ? '' : fresh ? `已有 ${days} 天前的调研报告，用户要求从头查` : days > REUSE_DAYS ? `已有 ${days} 天前的调研报告，已超过 ${REUSE_DAYS} 天，从头查` : `已有 ${days} 天前的调研报告，在它基础上补`;
     }
+    if (task === 'script') args.rewrite = !!args.rewrite;
     if (task === 'script' || task === 'check') {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
       if (task === 'check' && !String(store.get('items', args.itemId).script || '').trim()) throw Object.assign(new Error('先写好脚本再预审'), { status: 400 });
