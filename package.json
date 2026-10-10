@@ -1,6 +1,6 @@
 {
   "name": "solomcn",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "一人 MCN：用 Claude Code 跑通从热点到多平台发布的 AI 短视频矩阵工作台",
   "type": "module",
