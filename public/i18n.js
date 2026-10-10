@@ -364,6 +364,19 @@
     '拉字幕用的 YouTube 登录已失效，去「渠道 → YouTube」重新登录': 'The YouTube login used for captions has expired; log in again under Sources → YouTube',
     'YouTube 登录已失效（用登录也被要求验证），去「渠道 → YouTube」重新登录': 'YouTube login expired (still asked to verify while logged in); log in again under Sources → YouTube',
     '用登录拉字幕也被 YouTube 要求验证，登录可能失效了': 'YouTube still asked for verification while logged in; the login may have expired',
+    // ---- 动手实践 ----
+    '实践占用空间': 'Practice storage', '经验本': 'Lab notes', '立即清理': 'Clean up now', '清理中…': 'Cleaning…', '共用工具箱': 'Shared toolbox',
+    '还没有工具': 'No tools yet', '还没有实验目录': 'No lab folders yet', '工具': 'Tool', '大小': 'Size', '上次用': 'Last used', '上次改动': 'Last changed',
+    '内容': 'Item', '瘦身': 'Slim down', '（已瘦身）': ' (slimmed)', '工具多久没用就删': 'Remove tools unused for', '工具箱上限': 'Toolbox limit',
+    '调研完多久给实验目录瘦身': 'Slim lab folders after research by', '单个下载超过多大先问你': 'Ask before single downloads over', '天': 'days',
+    '保存经验本': 'Save notes', '经验本已保存': 'Notes saved', '已保存，下次清理按新规则': 'Saved; the next cleanup uses the new rules', '没有需要清理的': 'Nothing to clean up',
+    '已删除，需要时 Claude 会按经验本重装': 'Removed; Claude will reinstall it from the notes when needed',
+    '调研时动手实践会装工具、下依赖。大工具装在共用工具箱里，所有内容共用；每条内容还有自己的实验目录。每次调研结束会清掉下载缓存和解压过的安装包，另外每 6 小时按下面的规则自动清理。': 'Hands-on research installs tools and dependencies. Big tools go into the shared toolbox used by every item; each item also has its own lab folder. Download caches and unpacked installers are removed after every research run, and the rules below are applied every 6 hours.',
+    '经验本：Claude 每次调研开始时读、结束时追加。写错的、过时的直接改': 'Lab notes: Claude reads them at the start of each research run and appends at the end. Fix or remove anything wrong or outdated',
+    '正在读取实践占用空间…': 'Loading practice storage…', '这条内容的实践素材还在用，先瘦身（会保留实践素材），或者先在素材里删掉它们': 'This item\'s practice assets are still in use; slim it down (keeps practice assets) or delete them from the assets first',
+    'Claude 在等你：': 'Claude is waiting for you: ', '要登录': 'Login needed', '要付款或绑卡': 'Payment or card needed', '要花钱': 'Spending approval needed', '需要你做一件事': 'Action needed',
+    '同意，继续': 'Approve and continue', '不同意': 'Decline', '登录好了': 'Logged in', '付好了': 'Paid', '跳过这一步': 'Skip this step', '去处理': 'Handle it',
+    '实践': 'Practice', '实践录屏': 'Practice recording', '实践截图': 'Practice screenshot', '实践图片': 'Practice image', '实践视频': 'Practice video',
   };
 
   // 带数字、名字的句式：(.+?) 抓到的部分会再翻译一遍
@@ -431,6 +444,8 @@
     [/^字幕：(作者上传的|自动生成的)（(.*)），(.+) 拉取$/, (m, a, b, c) => `Captions: ${a === '作者上传的' ? 'uploaded by the creator' : 'auto-generated'} (${b}), fetched ${c}`],
     [/^拆解视频要拉字幕。不登录也能拉，但 YouTube 有时会要求「登录以确认不是机器人」；登录后，被拦时会用你的账号再试一次。只在被拦时才用，两次至少隔 (\d+) 秒，每天最多 (\d+) 次（防出错时狂刷）。用账号跑 yt-dlp，YouTube 可能限制或封禁这个账号，建议用小号。登录信息只存在这台电脑上。$/, 'Teardowns need captions. They can be fetched without logging in, but YouTube sometimes asks to "sign in to confirm you\'re not a bot"; once logged in, a blocked request is retried with your account. It\'s only used when blocked, at least $1 s apart and at most $2 times a day (a guard against runaway retries). Running yt-dlp with an account may get it limited or banned by YouTube, so a spare account is recommended. The session stays on this computer.'],
     [/^今天用登录拉了 (\d+) \/ (\d+) 次$/, 'Used the login $1 / $2 times today'], [/^今天用登录拉字幕已经 (\d+) 次了，为了保护账号先停一停，明天再试$/, 'The login has been used $1 times today; pausing to protect the account until tomorrow'],
+    [/^共 (.+)$/, (m, a) => `Total ${a}`], [/^瘦身完成，腾出 (.+)$/, 'Slimmed; freed $1'], [/^已删除，腾出 (.+)$/, 'Deleted; freed $1'], [/^清理了 (\d+) 项$/, 'Cleaned up $1 items'],
+    [/^(\d+) 天前$/, '$1 days ago'], [/^Claude 在等你处理：(.+)$/, (m, a) => `Claude is waiting for you: ${a}`], [/^要花：(.+)$/, 'Cost: $1'], [/^其中 (\d+) 个是实践素材$/, '$1 from practice'],
     [/^(\d+) 分 (\d+) 秒$/, '$1 m $2 s'], [/^(\d+) 轮$/, '$1 turns'], [/^(\d+)\/(\d+) 平台已连$/, '$1/$2 platforms bound'],
   ];
 

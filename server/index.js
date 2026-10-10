@@ -45,6 +45,10 @@ const store = await createStore(path.join(root, 'data', 'db.json'), { onChange: 
 // 调研里的动手实践：实验目录、录制实验画面、实践浏览器、等人处理（登录、付款、花钱确认）
 const lab = createLab({ root, store });
 lab.clearStale();
+// 定时清理实践占用的空间：启动一分钟后一次，之后每 6 小时一次
+const labCleanup = () => { try { const r = lab.cleanup(); if (r.done.length) console.log(`实践空间清理：${r.done.length} 项`); } catch (err) { console.error('实践空间清理出错：', err.message); } };
+setTimeout(labCleanup, 60_000).unref();
+setInterval(labCleanup, 6 * 3600_000).unref();
 const agent = createAgent({ store, cwd: root, lab });
 const publisher = createPublisher({ store, root });
 // 技能是本地数据：启动时装上新的出厂技能，没改过的跟着出厂说明更新
@@ -339,6 +343,25 @@ ${mine}`;
     }
   }
   // 调研素材：截网页（和页面里的视频）存到内容卡片上；删掉不要的
+  // 实践的共用工具箱、经验本和空间管理
+  if (parts[0] === 'lab') {
+    try {
+      if (parts[1] === 'storage' && method === 'GET') return sendJson(res, 200, lab.storage());
+      if (parts[1] === 'settings' && method === 'PUT') return sendJson(res, 200, await lab.setSettings(await readBody(req)));
+      if (parts[1] === 'notes' && parts.length === 2 && method === 'GET') return sendJson(res, 200, { text: lab.readNotes() });
+      if (parts[1] === 'notes' && parts.length === 2 && method === 'PUT') return sendJson(res, 200, lab.writeNotes(String((await readBody(req)).text ?? '')));
+      if (parts[1] === 'notes' && parts[2] === 'append' && method === 'POST') return sendJson(res, 200, lab.appendNotes((await readBody(req)).text));
+      if (parts[1] === 'toolbox' && method === 'POST') return sendJson(res, 200, lab.toolbox(await readBody(req)));
+      if (parts[1] === 'cleanup' && method === 'POST') return sendJson(res, 200, lab.cleanup());
+      if (parts[1] === 'tools' && parts[2] && parts[3] === 'remove' && method === 'POST') return sendJson(res, 200, lab.removeTool(decodeURIComponent(parts[2]), null));
+      if (parts[1] === 'labs' && ID_RE.test(parts[2] || '') && parts[3] === 'slim' && method === 'POST') return sendJson(res, 200, lab.slimLab(parts[2]));
+      if (parts[1] === 'labs' && ID_RE.test(parts[2] || '') && parts[3] === 'remove' && method === 'POST') return sendJson(res, 200, lab.removeLab(parts[2]));
+    } catch (err) {
+      if (err.status) return sendError(res, err.status, 'bad_request', err.message);
+      throw err;
+    }
+    return sendError(res, 404, 'not_found', '没有这个接口');
+  }
   // 实践：Claude 通过 MCP 工具调用（录制、存素材、操作实践浏览器、请人处理），页面调用 answer
   if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts.length === 3 && method === 'GET') {
     return sendJson(res, 200, lab.files(parts[1]) || { dir: null, files: [] });

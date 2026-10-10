@@ -127,7 +127,7 @@ const TASKS = {
     name: '调研',
     maxTurns: 120,
     lab: true,
-    prompt: ({ itemId, labDir }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}`,
+    prompt: ({ itemId, labDir, sharedDir, askAboveGB }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}；共用工具箱：${sharedDir}/tools（经验本 ${sharedDir}/NOTES.md）；单个下载超过 ${askAboveGB} GB 先问用户`,
   },
   // 下面三个在「设置」里选成「后台 Agent」时走这里，选「单次调用」时走 cli.js
   script: {
@@ -267,7 +267,7 @@ export function createAgent({ store, cwd, lab }) {
     const settings = {
       sandbox: {
         enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
-        filesystem: { denyRead: ['~/'], allowRead: [dir, nodeDir] },
+        filesystem: { denyRead: ['~/'], allowRead: [dir, lab.shared, nodeDir], allowWrite: [lab.shared] },
         network: { allowedDomains: LAB_DOMAINS, strictAllowlist: true },
       },
     };
@@ -276,10 +276,15 @@ export function createAgent({ store, cwd, lab }) {
       cwd: dir,
       args: ['--settings', JSON.stringify(settings), '--mcp-config', JSON.stringify(mcp), '--strict-mcp-config'],
       tools: [...BUILTIN_TOOLS, 'Bash', 'Read', 'Write', 'Edit', 'TodoWrite'].join(','),
-      allowed: [...ALLOWED_TOOLS, 'Bash', 'TodoWrite', `Edit(/${dir}/**)`, `Read(/${dir}/**)`],
+      allowed: [...ALLOWED_TOOLS, 'Bash', 'TodoWrite', `Edit(/${dir}/**)`, `Read(/${dir}/**)`, `Edit(/${lab.shared}/**)`, `Read(/${lab.shared}/**)`],
       denied: ['NotebookEdit', 'Glob', 'Grep'],
       // 依赖的缓存放进实验目录（家目录读写不了）；等人处理（登录、付款）最多 40 分钟，工具调用不能先超时
-      env: { PIP_CACHE_DIR: path.join(dir, '.cache', 'pip'), npm_config_cache: path.join(dir, '.cache', 'npm'), XDG_CACHE_HOME: path.join(dir, '.cache'), MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000) },
+      // npm、git、pip 的个人配置文件都在家目录里，沙盒读不了会报权限错误：指到实验目录里的空文件
+      env: {
+        PIP_CACHE_DIR: path.join(dir, '.cache', 'pip'), npm_config_cache: path.join(dir, '.cache', 'npm'), XDG_CACHE_HOME: path.join(dir, '.cache'),
+        NPM_CONFIG_USERCONFIG: path.join(dir, '.npmrc'), GIT_CONFIG_GLOBAL: path.join(dir, '.gitconfig'), PIP_CONFIG_FILE: '/dev/null',
+        MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000),
+      },
     };
   }
   const uiLang = () => (store.get('settings', 'ui')?.lang === 'en' ? 'en' : 'zh');
@@ -347,6 +352,8 @@ export function createAgent({ store, cwd, lab }) {
     if (task === 'research') {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
       args.labDir = lab.dirOf(args.itemId);
+      args.sharedDir = lab.shared;
+      args.askAboveGB = lab.settings().askAboveGB;
     }
     if (task === 'script' || task === 'check') {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
@@ -549,6 +556,8 @@ export function createAgent({ store, cwd, lab }) {
     proc.on('error', (err) => finish(null, err));
     proc.on('close', (code) => {
       if (current[lane]?.id === id && current[lane]?.proc === proc) finish(code);
+      // 调研结束：清掉下载缓存和解压过的安装包
+      if (t.lab && lab) try { lab.afterRun(run.args.itemId); } catch {}
     });
   }
 

@@ -6,6 +6,10 @@
 // - 等人处理：碰到登录、要花钱、要填支付信息，Claude 调 ask，任务停在这里，等你在页面上处理完再继续。
 //   银行卡号这类支付信息只由人在弹出的窗口里自己填，实践浏览器拒绝替 Claude 输入
 // 截图、录屏都存成内容卡片上的素材（source: 'practice'），写脚本、做视频时能直接用
+// - 共用工具箱：videos/lab-shared/tools/，所有内容共用（Ghidra、JDK 这类大工具装一次），tools.json 记着每个工具的用途、用法、上次使用时间
+// - 经验本：videos/lab-shared/NOTES.md，调研开始时读、结束时追加以后能复用的经验（环境情况、踩过的坑），页面上能看能改
+// - 空间管理：每次调研结束清掉下载缓存和解压过的安装包；定时淘汰久没用的工具、总量超上限的工具，
+//   瘦身调研完一段时间或已发布内容的实验目录（只留代码、记录和实践素材）。阈值在「设置」里改
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -25,6 +29,30 @@ const LAUNCH = {
   ignoreDefaultArgs: ['--enable-automation'],
   args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
 };
+export const LAB_DEFAULTS = { toolIdleDays: 30, toolCapGB: 10, labKeepDays: 7, askAboveGB: 1 };
+const ARCHIVE_RE = /\.(zip|tar\.gz|tgz|tar\.xz|tar\.bz2|tbz2|dmg|pkg|7z)$/i; // 下载下来的安装包，解压后就没用了
+const HEAVY_DIRS = new Set(['.venv', 'venv', 'node_modules', '.cache', 'tools', '__pycache__', 'build', 'dist', 'target', '.gradle']);
+const SLIM_KEEP_MAX = 5 * 1024 * 1024; // 瘦身时单个文件超过 5MB 的删掉（实践素材 media/ 不动）
+
+// 目录占多少空间（字节），用 du 算，比逐个文件统计快得多
+function sizeOf(p) {
+  try {
+    return Number(execFileSync('du', ['-sk', p], { encoding: 'utf8', timeout: 60_000 }).split('\t')[0]) * 1024;
+  } catch {
+    return 0;
+  }
+}
+// 目录里最近一次改动的时间（只看前两层，够判断「最近有没有用过」）
+function newestMtime(p, depth = 0) {
+  let t = 0;
+  try {
+    const st = fs.statSync(p);
+    t = st.mtimeMs;
+    if (st.isDirectory() && depth < 2) for (const e of fs.readdirSync(p)) t = Math.max(t, newestMtime(path.join(p, e), depth + 1));
+  } catch {}
+  return t;
+}
+
 const ASK_KINDS = { login: ['done', 'skip'], payment: ['done', 'skip'], spend: ['approve', 'deny'], other: ['done', 'skip'] };
 
 const bad = (message) => Object.assign(new Error(message), { status: 400 });
@@ -96,6 +124,7 @@ export function createLab({ root, store }) {
   function prepare(itemId) {
     const dir = dirOf(itemId);
     fs.mkdirSync(path.join(dir, 'media'), { recursive: true });
+    for (const f of ['.npmrc', '.gitconfig']) if (!fs.existsSync(path.join(dir, f))) fs.writeFileSync(path.join(dir, f), '');
     const skills = path.join(dir, '.claude', 'skills');
     fs.rmSync(skills, { recursive: true, force: true });
     for (const name of LAB_SKILLS) {
@@ -376,5 +405,173 @@ export function createLab({ root, store }) {
     return { dir: path.relative(root, dir), files: out };
   }
 
-  return { dirOf, prepare, record, addMedia, browse, ask, answer, clearStale, files };
+  // ---------- 共用工具箱和经验本 ----------
+  const shared = path.join(root, 'videos', 'lab-shared');
+  const toolsDir = path.join(shared, 'tools');
+  const manifestFile = path.join(shared, 'tools.json');
+  const notesFile = path.join(shared, 'NOTES.md');
+  const NOTES_HEAD = '# 实践经验本\n\n调研里动手实践积累的经验：这台电脑的环境、工具箱里的工具怎么用、踩过的坑和解法。Claude 每次调研开始时读，结束时追加；你可以随时改、删掉过时的。\n\n';
+  fs.mkdirSync(toolsDir, { recursive: true });
+
+  const settings = () => ({ ...LAB_DEFAULTS, ...(store.get('settings', 'lab') || {}) });
+  async function setSettings(body) {
+    const cur = settings();
+    const num = (k, min, max) => { const v = Number(body[k]); return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : cur[k]; };
+    const next = { toolIdleDays: num('toolIdleDays', 1, 365), toolCapGB: num('toolCapGB', 1, 500), labKeepDays: num('labKeepDays', 1, 365), askAboveGB: num('askAboveGB', 0.1, 50) };
+    await store.set('settings', 'lab', next);
+    return next;
+  }
+
+  const readManifest = () => { try { return JSON.parse(fs.readFileSync(manifestFile, 'utf8')); } catch { return {}; } };
+  const writeManifest = (m) => fs.writeFileSync(manifestFile, JSON.stringify(m, null, 1));
+  const readNotes = () => { try { return fs.readFileSync(notesFile, 'utf8'); } catch { return NOTES_HEAD; } };
+  function writeNotes(text) {
+    fs.mkdirSync(shared, { recursive: true });
+    fs.writeFileSync(notesFile, String(text).slice(0, 60_000));
+    return { ok: true, length: Math.min(String(text).length, 60_000) };
+  }
+  function appendNotes(text) {
+    const lines = String(text || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 20);
+    if (!lines.length) throw bad('没写经验');
+    const day = new Date().toISOString().slice(0, 10);
+    const add = lines.map((l) => (l.startsWith('- ') ? l : `- ${l}`)).map((l) => `${l}（${day}）`).join('\n');
+    return writeNotes(readNotes().replace(/\s*$/, '\n') + add + '\n');
+  }
+
+  // 工具箱：list 列出工具和经验本；add 登记新装的工具；used 记下这次用了哪些
+  function toolbox({ action = 'list', name, dir, purpose, usage }) {
+    const m = readManifest();
+    if (action === 'add' || action === 'used') {
+      const key = String(name || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 60);
+      if (!key) throw bad('要写工具名');
+      if (action === 'add') {
+        const rel = String(dir || key).replace(/^\/+/, '');
+        const abs = path.resolve(toolsDir, rel);
+        if (!abs.startsWith(toolsDir + path.sep)) throw bad('工具要装在工具箱目录里');
+        m[key] = { ...(m[key] || {}), name: key, dir: path.relative(toolsDir, abs), purpose: String(purpose || m[key]?.purpose || '').slice(0, 300), usage: String(usage || m[key]?.usage || '').slice(0, 600), addedAt: m[key]?.addedAt || Date.now(), lastUsedAt: Date.now(), removed: false };
+      } else {
+        if (!m[key]) throw bad(`工具箱里没有 ${key}，装好后先用 add 登记`);
+        m[key].lastUsedAt = Date.now();
+      }
+      writeManifest(m);
+    }
+    const tools = Object.values(m).map((t) => ({ name: t.name, dir: t.dir, purpose: t.purpose, usage: t.usage, removed: !!t.removed,
+      exists: !t.removed && fs.existsSync(path.join(toolsDir, t.dir || t.name)), lastUsed: t.lastUsedAt ? new Date(t.lastUsedAt).toISOString().slice(0, 10) : null }));
+    return { toolsDir, tools, notes: readNotes(), askAboveGB: settings().askAboveGB };
+  }
+
+  // ---------- 空间管理 ----------
+  function storage() {
+    const m = readManifest();
+    const tools = fs.existsSync(toolsDir) ? fs.readdirSync(toolsDir, { withFileTypes: true }).filter((e) => e.isDirectory() || ARCHIVE_RE.test(e.name)).map((e) => {
+      const p = path.join(toolsDir, e.name);
+      const meta = Object.values(m).find((t) => (t.dir || t.name).split('/')[0] === e.name) || {};
+      return { name: e.name, purpose: meta.purpose || '', size: sizeOf(p), lastUsedAt: Math.max(meta.lastUsedAt || 0, newestMtime(p)) };
+    }) : [];
+    const items = store.all().items || {};
+    const labs = fs.readdirSync(path.join(root, 'videos'), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.startsWith('lab-') && e.name !== 'lab-shared')
+      .map((e) => {
+        const itemId = e.name.slice(4);
+        const p = path.join(root, 'videos', e.name);
+        return { itemId, title: items[itemId]?.title || '（内容已删除）', exists: !!items[itemId], size: sizeOf(p), slimmed: fs.existsSync(path.join(p, '.slimmed')), lastUsedAt: newestMtime(p) };
+      });
+    return { settings: settings(), tools, toolsTotal: tools.reduce((s, t) => s + t.size, 0), labs, labsTotal: labs.reduce((s, l) => s + l.size, 0), notesLength: readNotes().length };
+  }
+
+  function removeTool(name, reason) {
+    const p = path.join(toolsDir, String(name));
+    if (!p.startsWith(toolsDir + path.sep) || !fs.existsSync(p)) throw bad('工具箱里没有这个工具');
+    fs.rmSync(p, { recursive: true, force: true });
+    const m = readManifest();
+    for (const t of Object.values(m)) if ((t.dir || t.name).split('/')[0] === name) t.removed = true;
+    writeManifest(m);
+    if (reason) appendNotes(`工具箱里的 ${name} 已删除（${reason}），需要时按上面记的方法重装`);
+    return { removed: name };
+  }
+
+  // 实验目录瘦身：只留代码、记录和实践素材（media/），删掉虚拟环境、依赖、工具、编译产物和大文件
+  function slimLab(itemId) {
+    const dir = dirOf(itemId);
+    if (!fs.existsSync(dir)) throw bad('这条内容没有实验目录');
+    let freed = 0;
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (d === dir && (e.name === 'media' || e.name === '.claude')) continue;
+        if (e.isDirectory()) {
+          if (HEAVY_DIRS.has(e.name)) { freed += sizeOf(p); fs.rmSync(p, { recursive: true, force: true }); } else walk(p);
+        } else if (e.isFile()) {
+          const st = fs.statSync(p);
+          if (st.size > SLIM_KEEP_MAX || ARCHIVE_RE.test(e.name)) { freed += st.size; fs.rmSync(p, { force: true }); }
+        }
+      }
+    };
+    walk(dir);
+    fs.writeFileSync(path.join(dir, '.slimmed'), JSON.stringify({ at: Date.now(), freed }));
+    return { freed };
+  }
+
+  function removeLab(itemId) {
+    const dir = dirOf(itemId);
+    if (!fs.existsSync(dir)) throw bad('这条内容没有实验目录');
+    const used = (store.get('items', itemId)?.assets || []).some((a) => a.source === 'practice');
+    if (used) throw bad('这条内容的实践素材还在用，先瘦身（会保留实践素材），或者先在素材里删掉它们');
+    const freed = sizeOf(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { freed };
+  }
+
+  // 每次调研结束：清掉下载缓存、解压过的安装包（实验目录和工具箱里的）
+  function afterRun(itemId) {
+    let freed = 0;
+    const drop = (p) => { if (fs.existsSync(p)) { freed += sizeOf(p); fs.rmSync(p, { recursive: true, force: true }); } };
+    drop(path.join(dirOf(itemId), '.cache'));
+    // 实验目录：往下找两层（downloads/ 是实践浏览器下载的成果、media/ 是实践素材，不动）；
+    // 工具箱：只看根目录（工具装好后自带的 zip 插件之类不能删）
+    for (const [base, maxDepth] of [[dirOf(itemId), 2], [toolsDir, 0]]) {
+      const walk = (d, depth) => {
+        if (!fs.existsSync(d)) return;
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+          const p = path.join(d, e.name);
+          if (e.isFile() && ARCHIVE_RE.test(e.name)) drop(p);
+          else if (e.isDirectory() && depth < maxDepth && !HEAVY_DIRS.has(e.name) && !['media', 'downloads'].includes(e.name)) walk(p, depth + 1);
+        }
+      };
+      walk(base, 0);
+    }
+    return { freed };
+  }
+
+  // 定时清理：久没用的工具、总量超上限的工具（最久没用的先删）、调研完一段时间或已发布内容的实验目录瘦身
+  function cleanup() {
+    const s = settings();
+    const now = Date.now();
+    const done = [];
+    const st = storage();
+    const tools = [...st.tools].sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+    let total = st.toolsTotal;
+    for (const t of tools) {
+      const idleDays = (now - t.lastUsedAt) / 864e5;
+      const over = total > s.toolCapGB * 1024 ** 3;
+      if (idleDays > s.toolIdleDays || over) {
+        removeTool(t.name, idleDays > s.toolIdleDays ? `${Math.floor(idleDays)} 天没用过` : `工具箱超过 ${s.toolCapGB} GB 上限，它最久没用`);
+        total -= t.size;
+        done.push({ tool: t.name, freed: t.size });
+      }
+    }
+    const items = store.all().items || {};
+    for (const l of st.labs) {
+      if (l.slimmed) continue;
+      const it = items[l.itemId];
+      const runs = Object.values(store.all().agentRuns || {}).filter((r) => r.task === 'research' && r.args?.itemId === l.itemId);
+      if (runs.some((r) => r.status === 'running')) continue;
+      const lastRun = Math.max(0, ...runs.map((r) => r.finishedAt || 0));
+      if (!it || it.stage === 'published' || (lastRun && now - lastRun > s.labKeepDays * 864e5)) done.push({ lab: l.itemId, ...slimLab(l.itemId) });
+    }
+    return { done };
+  }
+
+  return { dirOf, prepare, record, addMedia, browse, ask, answer, clearStale, files,
+    shared, toolsDir, settings, setSettings, toolbox, readNotes, writeNotes, appendNotes, storage, removeTool, slimLab, removeLab, afterRun, cleanup };
 }

@@ -847,4 +847,32 @@ server.registerTool(
   tool(async ({ item_id, ...body }) => call('POST', `/api/items/${item_id}/lab/ask`, body, 42 * 60_000)),
 );
 
+server.registerTool(
+  'lab_toolbox',
+  {
+    title: '共用工具箱',
+    description:
+      '所有内容共用的实践工具箱（Ghidra、JDK 这类大工具装一次，以后直接用）和经验本。' +
+      'action：list 列出工具箱里的工具（用途、用法、装在哪）和经验本全文，调研开始时先看；add 登记刚装进工具箱的工具（dir 是相对工具箱的目录，写清用途和怎么运行）；used 记下这次用了哪个工具（久没用的工具会被自动清理）。',
+    inputSchema: {
+      action: z.enum(['list', 'add', 'used']),
+      name: z.string().max(60).optional().describe('add、used 时的工具名，比如 ghidra'),
+      dir: z.string().max(200).optional().describe('add 时工具在工具箱里的目录，比如 ghidra_12.1.4'),
+      purpose: z.string().max(300).optional().describe('add 时写这个工具用来做什么'),
+      usage: z.string().max(600).optional().describe('add 时写怎么运行（命令、需要的环境变量，比如 JAVA_HOME）'),
+    },
+  },
+  tool(async (body) => call('POST', '/api/lab/toolbox', body)),
+);
+
+server.registerTool(
+  'lab_notes_add',
+  {
+    title: '追加实践经验',
+    description: '调研结束前，把以后别的内容也用得上的经验追加进经验本：这台电脑的环境、工具怎么装怎么用、踩过的坑和解法。每条一行、简短，不写这条内容自己的细节，经验本里已经有的不要重复写。',
+    inputSchema: { text: z.string().min(1).max(3000).describe('一行一条经验') },
+  },
+  tool(async ({ text }) => call('POST', '/api/lab/notes/append', { text })),
+);
+
 await server.connect(new StdioServerTransport());

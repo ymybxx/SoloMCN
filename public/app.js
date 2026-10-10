@@ -1411,6 +1411,31 @@ async function skillAction(k,b){
   }catch(e){toast(e.message||'操作失败')}
   S.skillBusy=null;render();
 }
+/* ---------- 实践占用空间：共用工具箱、各内容的实验目录、经验本 ---------- */
+async function loadLabStorage(){try{S.labStore=await api('GET','/api/lab/storage')}catch(e){S.labStore={down:e.message||'读取失败'}}requestRender()}
+const fmtSize=b=>b>=1024**3?(b/1024**3).toFixed(1)+' GB':b>=1024**2?Math.round(b/1024**2)+' MB':Math.max(1,Math.round((b||0)/1024))+' KB';
+const daysAgo=t=>{if(!t)return '—';const d=Math.floor((Date.now()-t)/864e5);return d<1?'今天':d+' 天前'};
+function vLabStorage(){
+  if(S.labStore===undefined){S.labStore=null;loadLabStorage()}
+  const L=S.labStore;
+  if(!L)return '<div class="panel"><p class="hint">正在读取实践占用空间…</p></div>';
+  if(L.down)return `<div class="panel"><p class="err">${esc(L.down)}</p></div>`;
+  const s=L.settings;
+  const tools=[...L.tools].sort((a,b)=>b.size-a.size).map(t=>`<tr><td><b>${esc(t.name)}</b>${t.purpose?`<div class="faint">${esc(t.purpose)}</div>`:''}</td><td class="n">${fmtSize(t.size)}</td><td class="num faint">${daysAgo(t.lastUsedAt)}</td><td><button class="btn ghost danger" data-act="lab-tool-rm" data-id="${esc(t.name)}">删除</button></td></tr>`).join('');
+  const labs=[...L.labs].sort((a,b)=>b.size-a.size).map(l=>`<tr><td>${esc(l.title)}${l.slimmed?' <span class="faint">（已瘦身）</span>':''}</td><td class="n">${fmtSize(l.size)}</td><td class="num faint">${daysAgo(l.lastUsedAt)}</td><td style="white-space:nowrap">${l.exists?`<button class="btn ghost" data-act="open" data-id="${esc(l.itemId)}">打开</button>`:''}<button class="btn ghost" data-act="lab-slim" data-id="${esc(l.itemId)}">瘦身</button><button class="btn ghost danger" data-act="lab-rm" data-id="${esc(l.itemId)}">删除</button></td></tr>`).join('');
+  const field=(k,label,unit,step)=>`<label class="cfg-field">${label}<span style="display:flex;align-items:center;gap:6px"><input type="number" data-labcfg="${k}" value="${s[k]}" min="0" step="${step}" style="width:6em"> ${unit}</span></label>`;
+  return `<div class="panel grid" style="gap:12px"><div class="blk-head"><h3>实践占用空间</h3><span class="faint">共 ${fmtSize(L.toolsTotal+L.labsTotal)}</span><div class="actions"><button class="btn ghost" data-act="lab-notes">经验本</button><button class="btn" data-act="lab-cleanup" ${S.labCleaning?'disabled':''}>${S.labCleaning?'清理中…':'立即清理'}</button></div></div>
+    <p class="hint">调研时动手实践会装工具、下依赖。大工具装在共用工具箱里，所有内容共用；每条内容还有自己的实验目录。每次调研结束会清掉下载缓存和解压过的安装包，另外每 6 小时按下面的规则自动清理。</p>
+    <div class="cfg-row">${field('toolIdleDays','工具多久没用就删','天',1)}${field('toolCapGB','工具箱上限','GB',1)}${field('labKeepDays','调研完多久给实验目录瘦身','天',1)}${field('askAboveGB','单个下载超过多大先问你','GB',0.5)}</div>
+    <div class="label">共用工具箱 <span class="faint" style="font-weight:400">${fmtSize(L.toolsTotal)}</span></div>
+    ${tools?`<div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>工具</th><th class="n">大小</th><th>上次用</th><th></th></tr></thead><tbody>${tools}</tbody></table></div>`:'<p class="hint">还没有工具</p>'}
+    <div class="label">各内容的实验目录 <span class="faint" style="font-weight:400">${fmtSize(L.labsTotal)} · 瘦身只留代码、记录和实践素材</span></div>
+    ${labs?`<div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>内容</th><th class="n">大小</th><th>上次改动</th><th></th></tr></thead><tbody>${labs}</tbody></table></div>`:'<p class="hint">还没有实验目录</p>'}
+    ${typeof S.labNotes==='string'?`<div class="field"><label for="labNotes">经验本：Claude 每次调研开始时读、结束时追加。写错的、过时的直接改</label><textarea id="labNotes" rows="14" spellcheck="false">${esc(S.labNotes)}</textarea></div>
+      <div style="display:flex;gap:8px"><button class="btn primary" data-act="lab-notes-save">保存经验本</button><button class="btn ghost" data-act="lab-notes-close">收起</button></div>`:''}
+  </div>`;
+}
+async function labCall(method,url,ok){try{const r=await api(method,url);toast(typeof ok==='function'?ok(r):ok)}catch(e){toast(e.message||'操作失败')}await loadLabStorage()}
 function vSettings(){
   const c=S.modelCfg;
   if(!c)return '<div class="empty">正在读取…</div>';
@@ -1422,6 +1447,7 @@ function vSettings(){
     <td><select data-effort="${esc(f.key)}" aria-label="${esc(f.name)}的思考强度">${(c.efforts||[]).map(e=>`<option value="${esc(e.id)}" ${f.effort===e.id?'selected':''}>${esc(e.name)}</option>`).join('')}</select></td></tr>`).join('');
   return `<div class="section-head"><h2>设置</h2><p>用到 Claude 的功能各自用什么模型、想得多深，改完下次运行就生效</p></div>
     ${vConnect()}
+    ${vLabStorage()}
     <div class="home-grid" style="margin-top:16px">
       <div class="panel grid" style="gap:10px"><div class="blk-head"><h3>模型</h3></div>
         <div class="tbl-wrap"><table class="model-tbl"><thead><tr><th>功能</th><th>调用方式</th><th>模型</th><th>思考强度</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -1765,6 +1791,13 @@ document.addEventListener('click',e=>{
     case 'modal-close':case 'modal-bg':S.tdView=null;$('#modalRoot').innerHTML='';break;
     case 'lab-answer':{const q=S.items[id]?.labAsk;if(!q)break;b.disabled=true;
       api('POST',`/api/items/${encodeURIComponent(id)}/lab/answer`,{id:q.id,result:k}).then(()=>toast({done:'好了，Claude 接着做',skip:'已跳过这一步',approve:'已同意，Claude 接着做',deny:'已拒绝，Claude 会跳过这一步'}[k]||'好了'),e=>toast(e.message||'操作失败'));break}
+    case 'lab-tool-rm':arm(b,'确认删除',()=>labCall('POST',`/api/lab/tools/${encodeURIComponent(id)}/remove`,'已删除，需要时 Claude 会按经验本重装'));break;
+    case 'lab-slim':labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/slim`,r=>`瘦身完成，腾出 ${fmtSize(r.freed)}`);break;
+    case 'lab-rm':arm(b,'确认删除',()=>labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/remove`,r=>`已删除，腾出 ${fmtSize(r.freed)}`));break;
+    case 'lab-cleanup':S.labCleaning=true;render();labCall('POST','/api/lab/cleanup',r=>r.done.length?`清理了 ${r.done.length} 项`:'没有需要清理的').finally(()=>{S.labCleaning=false;render()});break;
+    case 'lab-notes':api('GET','/api/lab/notes').then(r=>{S.labNotes=r.text;render()},e=>toast(e.message||'读取失败'));break;
+    case 'lab-notes-save':api('PUT','/api/lab/notes',{text:$('#labNotes')?.value??S.labNotes}).then(()=>toast('经验本已保存'),e=>toast(e.message||'保存失败'));break;
+    case 'lab-notes-close':S.labNotes=undefined;render();break;
     case 'yt-td':ytTeardown(id);break;
     case 'yt-td-view':ytTdOpen(id);break;
     case 'yt-td-redo':if(S.tdView?.teardown)arm(b,'确认重新拆解',()=>ytTeardown(id,true));else ytTeardown(id);break;
@@ -1796,6 +1829,7 @@ document.addEventListener('input',e=>{
   if(t.dataset.q&&t.type!=='checkbox'){const ch=t.dataset.ch||'x';const d=draft(ch);d.settings.queries[Number(t.dataset.q)][t.dataset.f]=t.value;
     if(!d.dirty){d.dirty=true;S.pendingRender=true}const sv=document.querySelector(`[data-act="cfg-save"][data-id="${ch}"]`);if(sv)sv.disabled=false;return}
   if(t.id==='poolText'){S.poolText=t.value;return}
+  if(t.id==='labNotes'){S.labNotes=t.value;return}
   if(t.id==='poolUser'){S.poolUser=t.value;return}
   if(!S.open)return;
   const map={dTitle:'title',dHook:'hook',dAngle:'angle',dScript:'script',dNotes:'notes'};
@@ -1814,6 +1848,8 @@ document.addEventListener('change',e=>{
   if(t.dataset.effort){const f=S.modelCfg.features.find(x=>x.key===t.dataset.effort);const cur={...(local.settings.efforts||{})};if(t.value===f?.defaultEffort)delete cur[t.dataset.effort];else cur[t.dataset.effort]=t.value;store.set('settings','efforts',cur).then(()=>{toast(`「${f?.name||''}」思考强度改成 ${t.value}，下次运行生效`);loadModels()});return}
   if(t.dataset.mode){const cur={...(local.settings.modes||{})};cur[t.dataset.mode]=t.value;store.set('settings','modes',cur);toast(`改成${t.value==='agent'?'后台 Agent':'单次调用'}，下次点按钮生效`);return}
   if(t.dataset.q&&t.type==='checkbox'){const d=draft(t.dataset.ch||'x');d.settings.queries[Number(t.dataset.q)].enabled=t.checked;d.dirty=true;render();return}
+  if(t.dataset.labcfg){const body={};document.querySelectorAll('[data-labcfg]').forEach(x=>body[x.dataset.labcfg]=Number(x.value));
+    api('PUT','/api/lab/settings',body).then(s=>{if(S.labStore)S.labStore.settings=s;toast('已保存，下次清理按新规则')},e=>toast(e.message||'保存失败'));return}
   if(t.dataset.cfg){const d=draft(t.dataset.cfg);const v=Number(t.value);if(t.dataset.f==='everyMin')d.everyMin=v;else d.settings[t.dataset.f]=v;d.dirty=true;render();return}
   if(!S.open)return;const id=S.open;
   if(t.dataset?.pubsel){const sel=[...document.querySelectorAll('[data-pubsel]:checked')].map(x=>x.dataset.pubsel);store.update('items',S.open,{publish:{selected:sel}});return}
