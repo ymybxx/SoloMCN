@@ -1,0 +1,131 @@
+{
+  "note": "配音音色。engine 是用哪种方式合成：tongyi 要在 Claude Code 本地配置里配通义的 key；macos 是 macOS 自带的中文语音，不用 key。音高是粗略参考，选之前可以试听。",
+  "voices": [
+    {
+      "id": "loongjohn",
+      "label": "John（通义）",
+      "hint": "男声，约 133Hz，能读中文",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longanhuan_v3.6",
+      "label": "欢欢（通义）",
+      "hint": "女声，约 230Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longanfengyue",
+      "label": "风悦（通义）",
+      "hint": "女声，约 230Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longanyuanfei",
+      "label": "远飞（通义）",
+      "hint": "约 230Hz，语速偏慢",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longanlingxi",
+      "label": "灵犀（通义）",
+      "hint": "女声，约 240Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longhuohuo_v3.6",
+      "label": "火火（通义）",
+      "hint": "约 240Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longanxiaoxin",
+      "label": "小新（通义）",
+      "hint": "偏年轻，约 270Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longchuanshu_v3.6",
+      "label": "传书（通义）",
+      "hint": "偏年轻，约 270Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longjielidou_v3.6",
+      "label": "杰力豆（通义）",
+      "hint": "偏年轻，约 275Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "longpaopao_v3.6",
+      "label": "泡泡（通义）",
+      "hint": "童声，约 320Hz",
+      "engine": "tongyi"
+    },
+    {
+      "id": "loongmary",
+      "label": "Mary（通义）",
+      "hint": "约 197Hz，偏低的女声，能读中文",
+      "engine": "tongyi"
+    },
+    {
+      "id": "loongeva_v3.6",
+      "label": "Eva（通义）",
+      "hint": "约 194Hz，偏低的女声，能读中文",
+      "engine": "tongyi"
+    },
+    {
+      "id": "Tingting",
+      "label": "婷婷（系统语音）",
+      "hint": "女声，标准普通话，适合旁白",
+      "engine": "macos"
+    },
+    {
+      "id": "Flo (中文（中国大陆）)",
+      "label": "Flo（系统语音）",
+      "hint": "年轻女声",
+      "engine": "macos"
+    },
+    {
+      "id": "Sandy (中文（中国大陆）)",
+      "label": "Sandy（系统语音）",
+      "hint": "女声，偏活泼",
+      "engine": "macos"
+    },
+    {
+      "id": "Shelley (中文（中国大陆）)",
+      "label": "Shelley（系统语音）",
+      "hint": "女声，偏温和",
+      "engine": "macos"
+    },
+    {
+      "id": "Reed (中文（中国大陆）)",
+      "label": "Reed（系统语音）",
+      "hint": "男声，中年，偏沉稳",
+      "engine": "macos"
+    },
+    {
+      "id": "Eddy (中文（中国大陆）)",
+      "label": "Eddy（系统语音）",
+      "hint": "男声，偏年轻",
+      "engine": "macos"
+    },
+    {
+      "id": "Rocko (中文（中国大陆）)",
+      "label": "Rocko（系统语音）",
+      "hint": "男声，偏粗",
+      "engine": "macos"
+    },
+    {
+      "id": "Grandpa (中文（中国大陆）)",
+      "label": "Grandpa（系统语音）",
+      "hint": "老年男声",
+      "engine": "macos"
+    },
+    {
+      "id": "Grandma (中文（中国大陆）)",
+      "label": "Grandma（系统语音）",
+      "hint": "老年女声",
+      "engine": "macos"
+    }
+  ]
+}

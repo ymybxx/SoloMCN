@@ -12,7 +12,7 @@ import { generateIdeas, appendIdeas, appendPicks, writeScript, precheck, analyze
 import { createAgent } from './agent.js';
 import { createPublisher } from './publish/index.js';
 import { modelSettings, modelFor, effortFor } from './models.js';
-import { createSkills } from './skills.js';
+import { createSkills, voicesFile } from './skills.js';
 import { runClaude } from './cli.js';
 import { captureSource } from './assets.js';
 import { watchVideo, probe } from './watch.js';
@@ -198,7 +198,7 @@ async function handleApi(req, res, parts) {
     return sendError(res, 404, 'not_found', '没有这个发布接口');
   }
   if (parts[0] === 'voices' && parts.length === 1 && method === 'GET') {
-    return sendJson(res, 200, JSON.parse(await fs.readFile(path.join(root, 'tools', 'voices.json'), 'utf8')));
+    return sendJson(res, 200, JSON.parse(await fs.readFile(voicesFile(root), 'utf8')));
   }
   // 连接设置（图片生成的接口地址、key、模型，Claude 长期令牌）：只返回末 4 位
   // 技能：列表、查看、保存、恢复出厂、出厂更新的合并

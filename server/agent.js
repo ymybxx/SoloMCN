@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { voicesFile } from './skills.js';
+
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 import { claudeBin, cliEnv, loginErrorMessage } from './cli.js';
@@ -266,7 +268,7 @@ export function createAgent({ store, cwd }) {
       args.siblings = (acc.series || []).filter((x) => x.id !== cur?.id).map(sLine);
       args.others = Object.entries(accounts).filter(([aid]) => aid !== args.accountId).flatMap(([, a]) => (a.series || []).map((x) => `${a.name}：${sLine(x)}`));
       args.current = cur ? JSON.stringify({ name: cur.name, summary: cur.summary, audience: cur.audience, persona: cur.persona, voice: cur.voice, visual: cur.visual, emotions: cur.emotions, structure: cur.structure, length: cur.length, topics: cur.topics }, null, 1) : '';
-      const catalog = JSON.parse(readFileSync(path.join(cwd, 'tools', 'voices.json'), 'utf8'));
+      const catalog = JSON.parse(readFileSync(voicesFile(cwd), 'utf8'));
       args.voices = catalog.voices.map((v) => `${v.id}：${v.label}，${v.hint}`).join('\n');
       delete args.draft;
     }

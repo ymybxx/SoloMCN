@@ -59,15 +59,7 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
 - **Step 1**：按下文规则清理脚本中遗留的附加提示后存成 `user_script.txt`；`visible-text.txt` 只放作品正文，不混入调研局限、制作说明或账号备注里的标注指令。账号人设用于设计，不直接变成画面文字。不要去读工作台的数据文件（`data/`），卡片内容只从 `get_item` 拿。
 - **Step 2 设计**：选和账号风格最接近的预设；账号风格写明了颜色（例如深灰黑底、荧光黄标注、红色印章）就把它们写进 `tokens.json` 的 colors 再运行 `build-frame.mjs`。
 - **Step 3 分镜**：按脚本的分镜顺序和时长来，一个脚本分镜对应一个 frame（太短的可以合并）。旁白用脚本台词原文。固定角色按人设描述画成矢量图形（例如简笔线条机器人头像），全片保持一致。
-- **Step 3.1 配音**：都不需要另外的 key，按下面的顺序用第一个能用的：
-  1. HyperFrames 已登录（Step 0 的结果）而且托管配音还有额度：用 `/faceless-explainer` 里的托管配音，中文最自然。
-  2. macOS 系统语音（中文首选的免费方案，发音准）：`say -v "<音色>" -r <语速> -o voice/line-<编号>.aiff "<台词>"`，再用 `ffmpeg -i …aiff -ar 48000 -ac 1 …wav` 转成 wav，用 `ffprobe` 读时长对齐字幕。语速 `-r` 默认约 180（字/分钟量级），角色语气急的可以调到 200–220。
-  3. 都不行：做成无配音、字幕承载台词的版本。
-  - 不要用 HyperFrames 自带的本地 Kokoro 念中文：它的中文发音错得很多，基本听不懂；英文台词可以用。
-  - 音色：用 `get_item` 返回的 `account.voice`；没有设置就按人设从 `tools/voices.json` 里挑。多个角色各用一个声音（例如旁白 `Tingting`，年轻角色 `Flo`、`Sandy`，中年 `Reed`、`Eddy (中文（中国大陆）)`，老人 `Grandpa (中文（中国大陆）)`），音色名照 `say -v '?'` 列出来的原样写。只用合成音色，不克隆、不模仿任何真人。
-  - 配音文件按 `/faceless-explainer` 里处理已有配音文件的方式登记进 `audio_meta.json`，再跑时长同步和字幕。
-  - 合成后用 `whisper-cli`（有的话）回听一句抽查；念错的词（英文缩写、数字、多音字）改写成好念的说法再合成那一句。
-  - 在 notes 里写明用了哪种配音；退到下一种时写明原因。
+- **Step 3.1 配音**：按 `/voice-over` 技能做（用哪种配音、怎么挑音色、怎么登记进 `audio_meta.json` 和对齐字幕都写在那里）。
 - **BGM 和音效**：按脚本【BGM 与音效】的情绪和节点来；只用曲库或授权音乐，取不到就不加，并在 notes 里写明。
 - **Step 6**：`lint`、`check`、`snapshot` 通过后**直接渲染**，不要运行 `preview`，不要等审片——点「生成视频」就是渲染的确认。渲染命令：`npx hyperframes render --skill=faceless-explainer --quality high --output renders/video.mp4`
 - 某一步失败：按流程里的说明修最小的那处再重试。修不好就停下，最后的汇报里写清楚卡在哪一步、错误是什么。

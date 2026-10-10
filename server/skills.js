@@ -137,3 +137,9 @@ export function createSkills({ root }) {
 
   return { sync, list, get, save, reset, acceptUpdate, mergeInputs, historyContent, LIVE };
 }
+
+// 配音音色列表在配音技能里：先用在用的那份（你可能改过），没有就用出厂的
+export function voicesFile(root) {
+  const live = path.join(root, '.claude', 'skills', 'voice-over', 'voices.json');
+  return fs.existsSync(live) ? live : path.join(root, 'defaults', 'skills', 'voice-over', 'voices.json');
+}
