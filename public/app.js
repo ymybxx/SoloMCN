@@ -284,10 +284,16 @@ const vDur=run=>run.status==='running'?`<span class="run-dur" data-start="${run.
 setInterval(()=>{for(const el of document.querySelectorAll('.run-dur[data-start]'))el.textContent=fmtSecs(Math.round((Date.now()-Number(el.dataset.start))/1000))},1000);
 const laneBusy=run=>VIDEO_TASKS.includes(run.task)?runningVideo():run.task==='teardown'?runningRun('teardown'):runningRun();
 // 完整过程：可滚动，新步骤自动滚到底，往上翻时不打扰
+// 正在写的那一段：思考只显示字数；说的话和工具参数里的长文本（比如脚本正文）滚动显示最新写出的部分
+function vLive(run){
+  const l=run.status==='running'&&run.live;if(!l||!l.chars)return '';
+  const head=l.kind==='thinking'?`正在思考… 已 ${l.chars} 字`:l.kind==='text'?`正在说… 已 ${l.chars} 字`:`正在写：${esc(l.label)} · 已 ${l.chars} 字`;
+  return `<div class="run-live"><div class="lv-head"><i></i>${head}</div>${l.tail?`<div class="lv-tail"><pre>${esc(l.tail)}</pre></div>`:''}</div>`;
+}
 function vLog(run,tall){
   const steps=run.steps||[];
-  if(!steps.length)return '<p class="hint">正在启动…</p>';
-  return `<ol class="run-log${tall?' tall':''}" data-run="${esc(run.id)}">${steps.map(x=>`<li class="k-${esc(x.kind)}"><time>${fmtOffset(x.at,run.startedAt)}</time><span class="kl">${KIND_LABEL[x.kind]||''}</span><span class="tx">${esc(x.text)}</span></li>`).join('')}</ol>`;
+  if(!steps.length)return run.live?vLive(run):'<p class="hint">正在启动…</p>';
+  return `<ol class="run-log${tall?' tall':''}" data-run="${esc(run.id)}">${steps.map(x=>`<li class="k-${esc(x.kind)}"><time>${fmtOffset(x.at,run.startedAt)}</time><span class="kl">${KIND_LABEL[x.kind]||''}</span><span class="tx">${esc(x.text)}</span></li>`).join('')}</ol>`+vLive(run);
 }
 // 运行状态标签
 function runPill(run){

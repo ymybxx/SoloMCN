@@ -617,3 +617,11 @@ a.pick-src:hover{color:var(--blue)}
 .char-detail img,.char-detail .ph{width:100%;aspect-ratio:2/3;object-fit:contain;object-position:top;border-radius:8px;background:rgba(127,127,127,.12);display:block}
 .char-detail figcaption{display:grid;gap:2px;font-size:12px;line-height:1.35}
 .char-detail .linkbtn{justify-self:start}
+/* 正在写的那一段 */
+.run-live{margin-top:8px;border-radius:10px;background:rgba(127,127,127,.08);overflow:hidden}
+.run-live .lv-head{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px}
+.run-live .lv-head i{width:8px;height:8px;border-radius:50%;background:var(--warn,#e0b04a);animation:lvpulse 1.2s ease-in-out infinite}
+@keyframes lvpulse{50%{opacity:.3}}
+/* 内容贴底：新写出的字一直在最下面可见 */
+.run-live .lv-tail{max-height:220px;overflow:auto;display:flex;flex-direction:column-reverse;padding:0 12px 10px}
+.run-live pre{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.6 inherit;font-family:inherit;opacity:.9}

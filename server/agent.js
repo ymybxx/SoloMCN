@@ -260,6 +260,34 @@ const LAB_DOMAINS = ['pypi.org', 'files.pythonhosted.org', 'registry.npmjs.org',
   'api.adoptium.net',
   'cdn.jsdelivr.net', 'unpkg.com', 'huggingface.co', '*.hf.co', 'crates.io', 'static.crates.io', 'index.crates.io', 'proxy.golang.org'];
 
+// 正在输出的工具参数是一段没写完的 JSON：从里面取出最长的字符串值（比如 save_script 的脚本正文），
+// 最后一个字符串可能还没写完，也一样取出来
+export function longestString(raw) {
+  let best = '';
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] !== '"') continue;
+    let s = '', j = i + 1, done = false;
+    while (j < raw.length) {
+      const c = raw[j];
+      if (c === '\\') {
+        const n = raw[j + 1];
+        if (n === undefined) break;
+        if (n === 'u') { const hex = raw.slice(j + 2, j + 6); if (hex.length < 4) break; s += String.fromCharCode(parseInt(hex, 16)); j += 6; continue; }
+        s += { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f' }[n] ?? n; j += 2; continue;
+      }
+      if (c === '"') { done = true; break; }
+      s += c; j++;
+    }
+    let k = j + 1;
+    while (done && /\s/.test(raw[k] || '')) k++;
+    if (done && k >= raw.length) break; // 刚写完、还不知道是键名还是值
+    if (!(done && raw[k] === ':') && s.length > best.length) best = s; // 后面跟冒号的是键名，不算
+    if (!done) break;
+    i = j;
+  }
+  return best;
+}
+
 export function createAgent({ store, cwd, lab }) {
   // 调研任务的启动配置：在实验目录里运行，开 Claude Code 的沙盒（不能读家目录、只能写实验目录、只连白名单网站，
   // 被拦的命令不准退到沙盒外重试）；读写文件工具也只允许实验目录；技能复制一份进去，工作台工具用绝对路径指定
@@ -460,7 +488,7 @@ export function createAgent({ store, cwd, lab }) {
       claudeBin(),
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
       ['-p', prompt, ...(resumeSession ? ['--resume', resumeSession] : []),
-        '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--max-turns', String(t.maxTurns),
+        '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--max-turns', String(t.maxTurns),
         '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY,
         '--permission-mode', 'dontAsk', '--tools', lb?.tools ?? t.tools ?? BUILTIN_TOOLS.join(','),
         '--allowedTools', (lb?.allowed ?? t.allowed ?? ALLOWED_TOOLS).join(','), '--disallowedTools', (lb?.denied ?? t.denied ?? DENIED_TOOLS).join(','),
@@ -475,7 +503,8 @@ export function createAgent({ store, cwd, lab }) {
     const flush = () => {
       if (!dirty) return;
       dirty = false;
-      store.update('agentRuns', id, { steps: run.steps, sessionId: run.sessionId, model: run.model || null });
+      run.live = liveView();
+      store.update('agentRuns', id, { steps: run.steps, sessionId: run.sessionId, model: run.model || null, live: run.live });
     };
     const timer = setInterval(flush, 1500);
     const step = (kind, text) => {
@@ -487,6 +516,16 @@ export function createAgent({ store, cwd, lab }) {
     let buf = '';
     let stderr = '';
     let result = null;
+    // 正在写的那一段（文字、思考、工具参数），页面上显示「正在写：已写 N 字」和最新写出的部分
+    let block = null;
+    run.live = null;
+    const liveView = () => {
+      if (!block) return null;
+      if (block.kind === 'thinking') return { kind: 'thinking', label: '思考', chars: block.raw.length, tail: '' };
+      if (block.kind === 'text') return { kind: 'text', label: '说', chars: block.raw.length, tail: block.raw.slice(-1500) };
+      const text = longestString(block.raw);
+      return { kind: 'tool', label: describeTool(block.name, {}, uiLang()), chars: text.length, tail: text.slice(-1500) };
+    };
     proc.stdout.on('data', (chunk) => {
       buf += chunk;
       let nl;
@@ -507,6 +546,14 @@ export function createAgent({ store, cwd, lab }) {
         if (ev.type === 'system' && ev.subtype === 'init' && ev.model) {
           run.model = ev.model;
           dirty = true;
+        }
+        if (ev.type === 'stream_event') {
+          const e = ev.event || {};
+          if (e.type === 'content_block_start') block = { kind: e.content_block?.type === 'tool_use' ? 'tool' : e.content_block?.type === 'thinking' ? 'thinking' : 'text', name: e.content_block?.name || '', raw: '' };
+          else if (e.type === 'content_block_delta' && block) { const d = e.delta || {}; block.raw += d.text ?? d.partial_json ?? d.thinking ?? ''; }
+          else if (e.type === 'content_block_stop') block = null;
+          dirty = true;
+          continue;
         }
         if (ev.type === 'assistant') {
           for (const c of ev.message?.content || []) {

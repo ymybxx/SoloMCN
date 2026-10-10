@@ -391,6 +391,7 @@
   // 带数字、名字的句式：(.+?) 抓到的部分会再翻译一遍
   const num = (x, k) => { const v = parseFloat(x) * k; return v >= 1e9 ? +(v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? +(v / 1e3).toFixed(1) + 'k' : String(Math.round(v)); };
   const PATTERNS = [
+    [/^正在思考… 已 (\d+) 字$/, 'Thinking… $1 chars'], [/^正在说… 已 (\d+) 字$/, 'Writing a reply… $1 chars'], [/^正在写：(.+) · 已 (\d+) 字$/, (m, a, n) => `Writing: ${tr(a)} · ${n} chars`],
     [/^生成缺的 (\d+) 张（约 \$([\d.]+)）$/, 'Generate the missing $1 (about $$$2)'], [/^确认生成 (\d+) 张？约 \$([\d.]+)$/, 'Generate $1 images? About $$$2'],
     [/^生成中：(\d+)\/(\d+) 张$/, 'Generating: $1/$2'], [/^已有 (\d+)\/(\d+) 张$/, '$1/$2 ready'], [/^整套 (\d+) 张都齐了$/, 'All $1 images ready'],
     [/^上次有 (\d+) 张没生成成功：(.+)$/, '$1 images failed last time: $2'],
