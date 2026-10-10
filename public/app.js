@@ -833,7 +833,7 @@ function vYtKey(yq){
 async function ytKeySave(){
   const v=($('#ytKey')?.value||'').trim();if(!v){toast('先粘贴 key');return}
   S.ytKeySaving=true;render();
-  try{S.ytQuota=await api('PUT','/api/hs/youtube/key',{key:v});S.ytKeyEdit=false;toast('key 能用，已保存，开始抓一轮');await loadFeed();feedRun('youtube')}
+  try{await api('PUT','/api/hs/youtube/key',{key:v});S.ytKeyEdit=false;toast('key 能用，已保存，开始抓一轮');await Promise.all([loadYtQuota(),loadFeed()]);feedRun('youtube')}
   catch(e){toast(e.message||'保存失败')}
   S.ytKeySaving=false;render();
 }
@@ -858,7 +858,7 @@ function vChanYoutube(){
       <div class="cfg-row">${intervalSelect('youtube')}
         <label class="cfg-field">只看最近<select data-cfg="youtube" data-f="days">${[1,3,7,14,30].map(n=>`<option value="${n}" ${d.settings.days===n?'selected':''}>${n} 天</option>`).join('')}</select></label>
         <label class="cfg-field">每组取多少<select data-cfg="youtube" data-f="limit">${[10,25,50].map(n=>`<option value="${n}" ${d.settings.limit===n?'selected':''}>${n} 条</option>`).join('')}</select></label>
-        <span class="faint cfg-est">每轮约 ${perRun} 点额度，每天约 ${perDay} 点${yq?`；今天已用 ${yq.used} / ${yq.limit}，${esc(yq.resetsAt.slice(11))} 恢复`:''}。定时抓取会给 Claude 临时搜索留 3000 点，不够时这轮少搜几组</span></div>
+        <span class="faint cfg-est">每轮约 ${perRun} 点额度，每天约 ${perDay} 点${yq?.resetsAt?`；今天已用 ${yq.used} / ${yq.limit}，${esc(yq.resetsAt.slice(11))} 恢复`:''}。定时抓取会给 Claude 临时搜索留 3000 点，不够时这轮少搜几组</span></div>
       <div class="label">关键词 <span class="faint" style="font-weight:400">${on}/${qs.length} 组启用。按播放量取最近几天的视频，类别名会标在每条视频上，Claude 精选时按类别各取一部分</span></div>
       ${rows}
       <div><button class="btn" data-act="q-add" data-ch="youtube" ${qs.length>=10?'disabled':''}>添加一组</button></div>
