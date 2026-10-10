@@ -1348,10 +1348,14 @@ async function loadCharBlock(sel){
     const j=c.job,run=c.running;
     const thumbs=[`<figure><img src="${charFile(c,c.ref)}" alt=""><figcaption>参考图</figcaption></figure>`,
       ...(c.base?[`<figure><img src="${charFile(c,c.base)}" alt=""><figcaption>基准</figcaption></figure>`]:[]),
-      ...c.expressions.map(e=>{const n=Object.values(e.variants).filter(Boolean).length;return `<figure>${e.variants.closed?`<img src="${charFile(c,e.variants.closed)}" alt="">`:'<div class="ph"></div>'}<figcaption>${esc(e.label)} <span class="faint">${n}/4</span>${n&&!run?` <button type="button" class="linkbtn" data-act="char-redo" data-k="${e.key}" title="删掉这个表情的 4 张，再点生成会重画">重画</button>`:''}</figcaption></figure>`})].join('');
+      ...c.expressions.map(e=>{const n=Object.values(e.variants).filter(Boolean).length;return `<figure class="${S.charOpen===e.key?'on':''}" data-act="char-open" data-k="${e.key}" title="点开看这个表情的 4 张">${e.variants.closed?`<img src="${charFile(c,e.variants.closed)}" alt="">`:'<div class="ph"></div>'}<figcaption>${esc(e.label)} <span class="faint">${n}/4</span></figcaption></figure>`})].join('');
+    // 点开的表情：4 张大图，各自能重画
+    const oe=c.expressions.find(e=>e.key===S.charOpen);
+    const VAR=[['closed','表情本身','平时显示的样子'],['open','张嘴','说话时跟着配音开合'],['half','半闭眼','眨眼的中间帧'],['shut','闭眼','眨眼闭上的那一帧']];
+    const detail=oe?`<div class="char-detail">${VAR.map(([v,l,h])=>{const f=oe.variants[v];return `<figure>${f?`<a href="${charFile(c,f)}" target="_blank" rel="noopener"><img src="${charFile(c,f)}" alt="${esc(oe.label)} ${l}"></a>`:'<div class="ph"></div>'}<figcaption><b>${l}</b><span class="faint">${h}</span>${f&&!run?`<button type="button" class="linkbtn" data-act="char-redo" data-k="${oe.key}" data-v="${v}">${v==='closed'?'重画这个表情（4 张）':'重画这张'}</button>`:''}</figcaption></figure>`}).join('')}</div>`:'';
     const status=run?`生成中：${j?.done||0}/${j?.total||0} 张`:c.missing?`已有 ${c.total-c.missing}/${c.total} 张`:`整套 ${c.total} 张都齐了`;
     const fail=!run&&j?.failed?.length?`<p class="hint" style="color:var(--bad)">上次有 ${j.failed.length} 张没生成成功：${esc(j.failed[0].error)}</p>`:'';
-    body=`<div class="char-grid">${thumbs}</div>
+    body=`<div class="char-grid">${thumbs}</div>${detail}
       <div class="char-bar"><span class="faint">${status}</span>${run?`<button type="button" class="btn" data-act="char-stop">停止</button>`:c.missing?`<button type="button" class="btn" data-act="char-gen" data-n="${c.missing}" data-cost="${c.estimate}">生成缺的 ${c.missing} 张（约 $${c.estimate}）</button>`:''}</div>${fail}`;
     if(run){clearTimeout(S.charPoll);S.charPoll=setTimeout(()=>loadCharBlock(),3000)}
   }
@@ -1869,7 +1873,13 @@ document.addEventListener('click',e=>{
     case 'char-create':charCreate();break;
     case 'char-gen':arm(b,`确认生成 ${b.dataset.n} 张？约 $${b.dataset.cost}`,async()=>{try{await api('POST',`/api/characters/${$('#sChar').value}/generate`);loadCharBlock()}catch(e){toast(e.message||'生成失败')}});break;
     case 'char-stop':api('POST',`/api/characters/${$('#sChar').value}/stop`).then(()=>loadCharBlock()).catch(e=>toast(e.message||'停止失败'));break;
-    case 'char-redo':arm(b,'确认重画？',async()=>{const id=$('#sChar').value;for(const v of ['closed','open','half','shut'])await api('DELETE',`/api/characters/${id}/files/${b.dataset.k}/${v}`).catch(()=>{});loadCharBlock()});break;
+    case 'char-open':S.charOpen=S.charOpen===b.dataset.k?null:b.dataset.k;loadCharBlock();break;
+    case 'char-redo':arm(b,'确认重画？',async()=>{
+      // 表情本身变了，张嘴和眨眼图就对不上了，一起重画；其余只重画那一张。删掉后直接开始补
+      const id=$('#sChar').value,vs=b.dataset.v==='closed'?['closed','open','half','shut']:[b.dataset.v];
+      try{for(const v of vs)await api('DELETE',`/api/characters/${id}/files/${b.dataset.k}/${v}`);await api('POST',`/api/characters/${id}/generate`)}
+      catch(e){toast(e.message||'重画失败')}
+      loadCharBlock()});break;
     case 'series-ai-revise':seriesAi(b,'revise');break;
     case 'series-undo':{const f=$('#seriesForm');const cur=(S.accounts[f.dataset.acc]?.series||[]).find(x=>x.id===f.dataset.sid);const prev=cur?.history?.[0];if(!prev)break;
       fillSeriesForm(prev);$('#seriesMsg').textContent=`已经退回到 ${fmtTime(prev.savedAt)} 保存前的那一版，点保存才生效`;break}
