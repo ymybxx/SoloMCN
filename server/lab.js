@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { chromium } from 'playwright-core';
 import { CHROME, slimProfile } from './publish/browser.js';
 
@@ -135,6 +135,15 @@ export function createLab({ root, store }) {
   }
 
   const ensure = (itemId) => fs.mkdirSync(path.join(dirOf(itemId), 'media'), { recursive: true });
+
+  // 这条内容专用的临时目录：TMPDIR 指向它，沙盒只放行这里的本地通信（unix socket）。
+  // 放在 /tmp 下、名字很短：macOS 的 socket 路径不能超过 104 个字符
+  function sockDir(itemId) {
+    const id = createHash('sha1').update(itemId).digest('hex').slice(0, 8);
+    const d = path.join(fs.realpathSync('/tmp'), `smcn-${id}`);
+    fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    return d;
+  }
 
   // 只能用实验目录里的文件（挡住 ../ 越界和指到外面的链接）
   function inLab(itemId, rel) {
@@ -554,13 +563,15 @@ export function createLab({ root, store }) {
     drop(path.join(dirOf(itemId), '.cache'));
     // 实验目录：往下找两层（downloads/ 是实践浏览器下载的成果、media/ 是实践素材，不动）；
     // 工具箱：只看根目录（工具装好后自带的 zip 插件之类不能删）
-    for (const [base, maxDepth] of [[dirOf(itemId), 2], [toolsDir, 0]]) {
+    // 不往虚拟环境、依赖、素材、下载成果里找；实验目录里的 tools/dl 这类放安装包的地方要找到
+    const skip = new Set(['.venv', 'venv', 'node_modules', '.cache', 'media', 'downloads', '.claude', '__pycache__']);
+    for (const [base, maxDepth] of [[dirOf(itemId), 3], [toolsDir, 0]]) {
       const walk = (d, depth) => {
         if (!fs.existsSync(d)) return;
         for (const e of fs.readdirSync(d, { withFileTypes: true })) {
           const p = path.join(d, e.name);
           if (e.isFile() && ARCHIVE_RE.test(e.name)) drop(p);
-          else if (e.isDirectory() && depth < maxDepth && !HEAVY_DIRS.has(e.name) && !['media', 'downloads'].includes(e.name)) walk(p, depth + 1);
+          else if (e.isDirectory() && !e.isSymbolicLink() && depth < maxDepth && !skip.has(e.name)) walk(p, depth + 1);
         }
       };
       walk(base, 0);
@@ -598,6 +609,6 @@ export function createLab({ root, store }) {
     return { done };
   }
 
-  return { dirOf, prepare, record, addMedia, removeMedia, pruneMissing, browse, ask, answer, clearStale, files,
+  return { dirOf, sockDir, prepare, record, addMedia, removeMedia, pruneMissing, browse, ask, answer, clearStale, files,
     shared, toolsDir, settings, setSettings, toolbox, readNotes, writeNotes, appendNotes, storage, removeTool, slimLab, removeLab, afterRun, cleanup };
 }

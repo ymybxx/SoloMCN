@@ -263,12 +263,15 @@ export function createAgent({ store, cwd, lab }) {
   // 被拦的命令不准退到沙盒外重试）；读写文件工具也只允许实验目录；技能复制一份进去，工作台工具用绝对路径指定
   function labLaunch(itemId) {
     const dir = lab.prepare(itemId);
+    const sock = lab.sockDir(itemId);
     const nodeDir = path.dirname(realpathSync(process.execPath));
     const settings = {
       sandbox: {
         enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
-        filesystem: { denyRead: ['~/'], allowRead: [dir, lab.shared, nodeDir], allowWrite: [lab.shared] },
-        network: { allowedDomains: LAB_DOMAINS, strictAllowlist: true },
+        filesystem: { denyRead: ['~/'], allowRead: [dir, lab.shared, nodeDir, sock], allowWrite: [lab.shared, sock] },
+        // 本地通信（unix socket）只放行这条内容专用的临时目录：工具之间能通信（比如 REA 连 Ghidra），
+        // 电脑上别的本地服务（Docker、SSH 代理等）连不上
+        network: { allowedDomains: LAB_DOMAINS, strictAllowlist: true, allowUnixSockets: [sock] },
       },
     };
     const mcp = { mcpServers: { workbench: { command: process.execPath, args: [path.join(cwd, 'server', 'mcp.js')], env: { WORKBENCH_URL: process.env.WORKBENCH_URL || '' } } } };
@@ -283,6 +286,7 @@ export function createAgent({ store, cwd, lab }) {
       env: {
         PIP_CACHE_DIR: path.join(dir, '.cache', 'pip'), npm_config_cache: path.join(dir, '.cache', 'npm'), XDG_CACHE_HOME: path.join(dir, '.cache'),
         NPM_CONFIG_USERCONFIG: path.join(dir, '.npmrc'), GIT_CONFIG_GLOBAL: path.join(dir, '.gitconfig'), PIP_CONFIG_FILE: '/dev/null',
+        TMPDIR: sock,
         MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000),
       },
     };
