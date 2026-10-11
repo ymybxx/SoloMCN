@@ -32,6 +32,7 @@ export function createXhs({ dataDir }) {
     const pause = createStepPause();
     const ctx = await acc.openProfile(accountId);
     const page = ctx.pages()[0] || (await ctx.newPage());
+    acc.unblock(page, log);
     try {
       log('打开小红书创作服务平台的上传页');
       await page.goto(UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });

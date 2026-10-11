@@ -30,6 +30,7 @@ export function createDouyin({ dataDir }) {
     if (!fs.existsSync(info.mp4)) throw new Error(`找不到视频文件 ${info.mp4}`);
     const ctx = await acc.openProfile(accountId);
     const page = ctx.pages()[0] || (await ctx.newPage());
+    acc.unblock(page, log);
     try {
       log('打开抖音创作者中心的上传页');
       await page.goto(UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });

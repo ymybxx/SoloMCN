@@ -3,6 +3,7 @@
 // 选择器按 2026-10 的实际页面校正过；B站改版后这里要跟着改。
 // 登录、检查、解绑这些各平台通用的部分在 browser.js。
 import fs from 'node:fs';
+import { clearTips } from './unblock.js';
 import { createBrowserAccounts, waitState, settle, fillChecked, insertChecked } from './browser.js';
 
 const CREATOR = 'https://member.bilibili.com/platform/home';
@@ -30,28 +31,8 @@ export function createBili({ dataDir }) {
     if (!fs.existsSync(info.mp4)) throw new Error(`找不到视频文件 ${info.mp4}`);
     const ctx = await acc.openProfile(accountId);
     const page = ctx.pages()[0] || (await ctx.newPage());
+    acc.unblock(page, log);
     const bodyText = () => page.evaluate(() => document.body.innerText);
-    // B站时不时弹一个提示框挡住表单（比如「开启后视频上传完成第一时间通知」），看到「知道了」就点掉
-    const closeTips = async () => {
-      let closed = false;
-      for (const name of ['知道了', '我知道了']) {
-        const btns = page.getByText(name, { exact: true });
-        for (let i = 0, n = await btns.count().catch(() => 0); i < n; i++) {
-          const b = btns.nth(i);
-          if (!(await b.isVisible().catch(() => false))) continue;
-          await b.click({ timeout: 3000 }).then(() => { closed = true; }, () => {});
-        }
-      }
-      if (closed) { log('关掉 B站的提示弹窗'); await page.waitForTimeout(500); }
-      return closed;
-    };
-    // 点一下；被弹窗挡住点不上，就关掉弹窗再点一次
-    const clickThrough = async (loc, timeout = 8000) => {
-      try { await loc.click({ timeout }); } catch (err) {
-        if (!(await closeTips())) throw err;
-        await loc.click({ timeout });
-      }
-    };
     try {
       log('打开 B站创作中心的投稿页');
       await page.goto(UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -87,18 +68,18 @@ export function createBili({ dataDir }) {
       if (!started) await titleBox.waitFor({ state: 'visible', timeout: 120_000 });
 
       log('填写标题、创作声明、标签和简介');
-      await closeTips();
+      await clearTips(page, log); // B站常在这时弹「上传完成通知」之类的提示
       await fillChecked(titleBox, String(info.title || '').slice(0, 80), '标题');
       // 创作声明是必填项，选「内容无需标注」
-      await clickThrough(page.locator('input[placeholder*="创作声明"]'));
-      await clickThrough(page.locator('li.bcc-option:has-text("内容无需标注")').first());
+      await page.locator('input[placeholder*="创作声明"]').click({ timeout: 8000 });
+      await page.locator('li.bcc-option:has-text("内容无需标注")').first().click({ timeout: 8000 });
       await waitState(page, () => document.querySelector('input[placeholder*="创作声明"]')?.value === '内容无需标注', { timeout: 5000, what: '创作声明选中' });
       // B站会按视频自动预填几个标签（常常不相关），先删掉再填自己的
       for (let i = 0; i < 12; i++) {
         const x = page.locator('#tag-container .tag-pre-wrp .label-item-v2-container svg').first();
         if (!(await x.count())) break;
         const before = await page.locator('#tag-container .tag-pre-wrp .label-item-v2-container').count();
-        await clickThrough(x);
+        await x.click();
         // 等这个标签真的删掉，再删下一个
         const gone = await waitState(page, ([b]) => document.querySelectorAll('#tag-container .tag-pre-wrp .label-item-v2-container').length < b, { arg: [before], timeout: 5000, soft: true });
         if (!gone) { log('有预填标签删不掉，留着'); break; }
@@ -127,7 +108,7 @@ export function createBili({ dataDir }) {
       if (info.cover && fs.existsSync(info.cover)) {
         log('上传自定义封面');
         try {
-          await clickThrough(page.getByText('添加封面', { exact: true }).first(), 10_000);
+          await page.getByText('添加封面', { exact: true }).first().click({ timeout: 10_000 });
           await page.locator('.sync-checkbox-wrapper label').first().waitFor({ state: 'visible', timeout: 10_000 });
           // 4:3 和 16:9 两个比例都要有封面，勾上「双比例同步改动」后一次上传两边都用上
           const sync = page.locator('.sync-checkbox-wrapper label').first();
@@ -135,7 +116,7 @@ export function createBili({ dataDir }) {
           await page.locator('input[type="file"][accept*="image"]').last().setInputFiles(info.cover, { timeout: 15_000 });
           // 等封面上传请求结束
           await settle(page);
-          await clickThrough(page.locator('.cover-editor-button .button.submit').first(), 10_000);
+          await page.locator('.cover-editor-button .button.submit').first().click({ timeout: 10_000 });
           // 点完成后按钮变成「制作中…」，等弹窗关掉、封面栏的「添加封面」消失才算设置好
           await page.locator('.cover-editor-button .button.submit').first().waitFor({ state: 'hidden', timeout: 90_000 });
           await page.getByText('添加封面', { exact: true }).first().waitFor({ state: 'hidden', timeout: 15_000 });
@@ -153,7 +134,7 @@ export function createBili({ dataDir }) {
         log('试运行：停在点投稿之前');
         return { ok: true, dryRun: true, screenshot: await acc.shot(page, 'dryrun') };
       }
-      await clickThrough(btn, 15_000);
+      await btn.click({ timeout: 15_000 });
       await page.getByText(/稿件投递成功|投稿成功/).first().waitFor({ state: 'visible', timeout: 90_000 });
       log('投稿成功');
       return { ok: true };

@@ -51,6 +51,7 @@ export function createX({ dataDir }) {
     const text = buildTweet(info.desc || info.title, info.tags);
     const ctx = await acc.openProfile(accountId);
     const page = ctx.pages()[0] || (await ctx.newPage());
+    acc.unblock(page, log);
     try {
       log('打开推特发帖框');
       await page.goto(COMPOSE, { waitUntil: 'domcontentloaded', timeout: 60_000 });

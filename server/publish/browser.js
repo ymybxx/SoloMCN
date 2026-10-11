@@ -67,6 +67,8 @@ export function slimProfile(dir) {
 
 // opts: { dataDir, key, name, app, loginUrl, checkUrl, loggedIn(page), debugPort }
 // debugPort=false：登录窗口不开远程调试端口（Google 检测到它会拒绝登录），点「我已登录」时改用 SIGTERM 让 Chrome 正常退出
+import { enableUnblock } from './unblock.js';
+
 export function createBrowserAccounts({ dataDir, key, name, app, loginUrl, checkUrl, loggedIn, debugPort = true }) {
   const profiles = path.join(dataDir, 'publish', `${key}-profiles`);
   const shotDir = path.join(dataDir, 'publish', 'screenshots');
@@ -179,5 +181,8 @@ export function createBrowserAccounts({ dataDir, key, name, app, loginUrl, check
     if (!status(accountId).bound) throw new Error(`这个账号还没绑定${name}，先在「账号矩阵」里扫码登录`);
   }
 
-  return { key, name, openProfile, shot, check, startLogin, finishLogin, loginStatus: (id) => logins.get(id) || null, status, unbind, ensureBound };
+  // 发布页面的点击被弹窗挡住时自动清障（见 unblock.js）
+  const unblock = (page, log) => enableUnblock(page, { log, shotDir, key });
+
+  return { key, name, openProfile, shot, unblock, check, startLogin, finishLogin, loginStatus: (id) => logins.get(id) || null, status, unbind, ensureBound };
 }
