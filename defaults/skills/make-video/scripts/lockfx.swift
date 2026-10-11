@@ -17,8 +17,9 @@ struct Job: Decodable {
   struct Transition: Decodable { let type: String; let frames: Int }
   struct Hint: Decodable { let cx: Double; let cy: Double }
   // track：这一刀里认人得到的主角框 [相对这一刀开头的秒数, cx, cy, w, h]（素材坐标 0–1），用来认准是他
+  // necks：逐帧认好的主角脖子位置 [相对这一刀开头的秒数, x, y]（素材坐标 0–1）。有它就只跟这个人，认不到就补插值，绝不改跟旁边的人
   // fx：这一刀开头的换装转场（cut 硬切 / dissolve 叠化 / scan 扫描换装 / echo 残影换装 / gate 节拍光门 / whip 动势甩切 / pulse 色彩脉冲 / flash 闪白），不填就用全局 transition
-  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let strong: Bool?; let keep: [[Double]]?; let fx: Transition? }
+  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let necks: [[Double]]?; let strong: Bool?; let keep: [[Double]]?; let fx: Transition? }
   struct Theme: Decodable { let colors: [String]? }
   let size: [Int]; let fps: Double; let out: String
   let target: Target; let zoomMin: Double; let zoomMax: Double; let smooth: Double
@@ -177,6 +178,24 @@ for (si, seg) in job.segments.enumerated() {
     let tsec = Double(k - pre) / job.fps
     let tb = (seg.track ?? []).filter { $0.count == 5 && abs($0[0] - tsec) <= 0.3 }.min { abs($0[0] - tsec) < abs($1[0] - tsec) }
     var best: Body? = nil
+    let nk = seg.necks ?? []
+    if !nk.isEmpty {
+      // 逐帧认人结果：取前后最近的两个点插值，离得超过 0.25 秒就当这一帧没认到
+      let a = nk.last { $0[0] <= tsec + 1e-6 }, b = nk.first { $0[0] >= tsec - 1e-6 }
+      var ref: CGPoint? = nil
+      if let a = a, let b = b, b[0] - a[0] <= 0.35 {
+        let f = b[0] - a[0] < 1e-6 ? 0 : (tsec - a[0]) / (b[0] - a[0])
+        ref = CGPoint(x: (a[1] + (b[1] - a[1]) * f) * sw, y: (a[2] + (b[2] - a[2]) * f) * sh)
+      } else if let c = [a, b].compactMap({ $0 }).min(by: { abs($0[0] - tsec) < abs($1[0] - tsec) }), abs(c[0] - tsec) <= 0.12 {
+        ref = CGPoint(x: c[1] * sw, y: c[2] * sh)
+      }
+      if let ref = ref {
+        best = cands.filter { hypot($0.neck.x - ref.x, $0.neck.y - ref.y) < sw * 0.06 }.min { hypot($0.neck.x - ref.x, $0.neck.y - ref.y) < hypot($1.neck.x - ref.x, $1.neck.y - ref.y) }
+      }
+      picked.append(best)
+      if best != nil { prev = best }
+      continue
+    }
     if let tb = tb {
       let box = CGRect(x: (tb[1] - tb[3] / 2) * sw, y: (tb[2] - tb[4] / 2) * sh, width: tb[3] * sw, height: tb[4] * sh).insetBy(dx: -tb[3] * sw * 0.15, dy: -tb[4] * sh * 0.1)
       let ref = CGPoint(x: box.midX, y: box.minY + box.height * 0.2)

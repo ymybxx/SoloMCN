@@ -571,7 +571,9 @@ function lockFns(spec, motion) {
     const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off);
     if (xs.length < 3) return false;
     const ok = xs.filter((x) => x.ok && x.joints.filter(Boolean).length >= (spec.lock.minJoints ?? 7) && T / x.torso >= zMin * 0.92 && T / x.torso <= zMax * 1.08).length;
-    return ok / xs.length >= 0.65;
+    // 全程锁定时，这一段大部分时刻还要能把他放回画面中间（放大倍数小、他又走到边上，裁切框挪不过去，画面中间就成了别人）
+    const centered = xs.filter((x) => fitAt(x, spec.lock.centerTol ?? 0.08)).length;
+    return ok / xs.length >= 0.65 && centered / xs.length >= (spec.lock.centerShare ?? 0.7);
   };
   return { T: r3(T), sizeOk, edgeOk, reach, usableSeg };
 }
@@ -596,7 +598,15 @@ function schedule(spec, dir) {
   const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
   const L = lockFns(spec, motion);
   // 每一拍每一场能不能停：这一拍到下一拍之间锁得住
-  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); return off != null && L.usableSeg(s, off, t, e) ? off : null; }));
+  // 一段时间（素材时间 a–b）里认得准他：逐帧认人 80% 以上的帧确认是他，脖子位置没有突然跳
+  const idOk = (sObj, a, b) => {
+    const ps = []; for (let t = a; t <= b + 1e-6; t += 0.1) ps.push(poseAt(motion[sObj.id], t));
+    if (ps.filter(Boolean).length < ps.length * 0.8) return false;
+    const pp = ps.filter(Boolean);
+    for (let k = 1; k < pp.length; k++) if (Math.hypot(pp[k].neck[0] - pp[k - 1].neck[0], pp[k].neck[1] - pp[k - 1].neck[1]) > 0.06) return false;
+    return true;
+  };
+  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); return off != null && L.usableSeg(s, off, t, e) && idOk(s, t + off, e + off) ? off : null; }));
   // 造型要轮得全：能用的时间越少的场次，换进去时奖励越多（不然这几场一次都排不上）
   const okN = okAt.map((r) => r.filter((v) => v != null).length), okMax = Math.max(...okN);
   const rare = okN.map((n) => (opt.variety ?? 0.06) * (1 - n / okMax));
@@ -609,9 +619,20 @@ function schedule(spec, dir) {
     const key = `${a},${b},${i}`;
     if (sw.has(key)) return sw.get(key);
     const oa = okAt[a][i - 1] ?? okAt[a][i], ob = okAt[b][i];
-    let r = { cost: Infinity };
-    if (oa != null && ob != null) {
+    let r = { cost: Infinity, why: oa == null ? 'out' : ob == null ? 'in' : '' };
+    // 脱身：这一场已经认不准他、锁不住（被挡、挤在一起），宁可换到一场看得清的，也别继续停在这
+    if (oa == null && ob != null && okAt[a][i] == null && idOk(srcs[b], B[i] + ob - 0.3, B[i] + ob + 1.0) && L.edgeOk(srcs[b], ob, B[i])) { // 新的一场换进来那一刻要能直接放到画面中间
+      const sObjA = srcs[a], offA = usable(sObjA, B[i] - 0.5, B[i] + 0.5) ?? sObjA.offset;
+      const m = bestShift(motion[sObjA.id], B[i] + offA, motion[srcs[b].id], B[i] + ob);
+      r = { cost: opt.escape ?? 0.6, shift: Number.isFinite(m.dist) ? m.shift : 0, dist: Number.isFinite(m.dist) ? m.dist : 1, escape: true };
+      sw.set(key, r);
+      return r;
+    }
+    if (oa != null && ob != null && !idOk(srcs[a], B[i] + oa - 0.6, B[i] + oa + 0.3)) r.why = 'idOut';
+    else if (oa != null && ob != null && !idOk(srcs[b], B[i] + ob - 0.3, B[i] + ob + 1.0)) r.why = 'idIn';
+    else if (oa != null && ob != null) {
       const m = bestShift(motion[srcs[a].id], B[i] + oa, motion[srcs[b].id], B[i] + ob);
+      r.why = !Number.isFinite(m.dist) ? 'nopose' : m.dist > (opt.thrMax ?? 0.18) ? 'motion' : 'meet';
       // 动作差 thr 以内正常；到 thrMax 也能换但贵一些（实在找不到更像的才用）
       if (Number.isFinite(m.dist) && m.dist <= (opt.thrMax ?? 0.18) && meet(L.reach(srcs[a], oa, B[i]), L.reach(srcs[b], ob + m.shift, B[i]))) {
         r = { cost: m.dist - opt.bonus + Math.max(0, m.dist - opt.thr) * 2, shift: m.shift, dist: m.dist };
@@ -626,18 +647,18 @@ function schedule(spec, dir) {
   const idx = (s, p, h) => (s * (N + 1) + p) * (H + 1) + h; // p = N 表示没有上一场
   let cur = new Float64Array(N * (N + 1) * (H + 1)).fill(Infinity);
   const back = [];
-  for (let s = 0; s < N; s++) if (okAt[s][0] != null) cur[idx(s, N, 1)] = 0;
+  for (let s = 0; s < N; s++) cur[idx(s, N, 1)] = okAt[s][0] != null ? 0 : 2;
   for (let i = 1; i < B.length; i++) {
     const nxt = new Float64Array(cur.length).fill(Infinity);
     const bk = new Int32Array(cur.length).fill(-1);
-    const hold = (h) => (h > opt.softHold ? (h - opt.softHold) * 0.05 : 0);
+    const hold = (h) => (h > opt.softHold ? (h - opt.softHold) * (opt.holdCost ?? 0.05) : 0);
     for (let s = 0; s < N; s++) for (let p = 0; p <= N; p++) for (let h = 1; h <= H; h++) {
       const c = cur[idx(s, p, h)];
       if (!Number.isFinite(c)) continue;
       // 继续用这一场
       {
         // 停到上限以后还能继续停（找不到合适的换装点时），只是每拍扣分越来越多
-        const pen = okAt[s][i] == null ? 1 : 0;
+        const pen = okAt[s][i] == null ? 2 : 0; // 这一拍认不准他或锁不住：尽量别停在这场
         const v = c + pen + hold(h + 1);
         const k = idx(s, p, Math.min(H, h + 1));
         if (v < nxt[k]) { nxt[k] = v; bk[k] = idx(s, p, h); }
@@ -657,9 +678,11 @@ function schedule(spec, dir) {
   let best = -1, bv = Infinity;
   for (let k = 0; k < cur.length; k++) if (cur[k] < bv) { bv = cur[k]; best = k; }
   if (best < 0 || process.env.SCHED_DEBUG) {
+    console.error('拍子能不能停（有对齐/锁得住/认得准）：' + srcs.map((x) => { let u = 0, l = 0, d = 0; B.forEach((t, i) => { const e = B[i + 1] ?? to; const off = usable(x, t, e); if (off == null) return; u++; if (!L.usableSeg(x, off, t, e)) return; l++; if (idOk(x, t + off, e + off)) d++; }); return `${x.id}:${u}/${l}/${d}`; }).join(' '));
     console.error('每场能停的拍数：' + srcs.map((x, k) => `${x.id}:${okAt[k].filter((v) => v != null).length}/${B.length}`).join(' '));
     let n = 0; const into = new Array(N).fill(0);
     for (let i = 1; i < B.length; i++) for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) if (a !== b && Number.isFinite(swCost(a, b, i).cost)) { n++; into[b]++; }
+    if (process.env.SCHED_SPAN) { const [f0, f1] = process.env.SCHED_SPAN.split(',').map(Number); const why = {}; for (let i = 1; i < B.length; i++) if (B[i] >= f0 && B[i] <= f1) for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) if (a !== b) { const r = swCost(a, b, i); if (!Number.isFinite(r.cost)) why[r.why] = (why[r.why] || 0) + 1; else why.ok = (why.ok || 0) + 1; } console.error('这段换不了的原因：' + JSON.stringify(why)); }
     console.error(`能换的（拍 × 场次对）：${n}；能换进各场的次数：` + srcs.map((x, k) => `${x.id}:${into[k]}`).join(' '));
   }
   if (best < 0) die('这一段找不到能一直锁住主角的排法（素材都偏到边上或被挡），换一段试试');
@@ -801,7 +824,92 @@ function poseBin() {
   }
   return bin;
 }
-// 每条片段的骨架，缓存在 pose/<id>.json（要先有 track/ 的认人结果，用来认准是他）
+// 逐帧认主角：画面里每个人的骨架和外观都有，挑出整条片段里「最常出现、最靠中间的那个外观」当主角（直拍跟着他拍），
+// 再逐帧连起来：外观像、不瞬移；认不准的帧宁可当「不在画面里」，不硬跟旁边的人
+const cosdN = (a, b) => (a?.length && b?.length ? cosd(a, b) : null);
+const hdN = (a, b) => (a?.length && b?.length ? hd(a, b) : null);
+const medOf = (xs) => { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
+function resolveSubject(samples,{aspect=16/9,none=3.0,gap=2.5,sure=1.4,loose=2.6,anchor=1.5,margin=0.15}={}){
+  const all=[];samples.forEach((s,i)=>s.c.forEach((c)=>{c.i=i;all.push(c);}));
+  const cen=(c)=>Math.abs(c.neck[0]-0.5);
+  const dist=(a,b)=>Math.hypot((a.neck[0]-b.neck[0])*aspect,a.neck[1]-b.neck[1]);
+  // 1) 最常出现、最靠中间的那个外观 = 主角（直拍跟着他拍）
+  const F=all.filter((c)=>c.fp?.length&&c.torso>0.08);
+  let rnd=7;const R=()=>{rnd=(rnd*16807)%2147483647;return rnd/2147483647;};
+  let best=null;
+  for(let rs=0;rs<4;rs++){
+    let C=[F[Math.floor(R()*F.length)].fp];
+    while(C.length<6){const d=F.map((x)=>Math.min(...C.map((c)=>cosdN(x.fp,c))));const tot=d.reduce((a,b)=>a+b*b,0);let r=R()*tot,j=0;for(;j<d.length-1;j++){r-=d[j]*d[j];if(r<=0)break;}C.push(F[j].fp);}
+    let as=[];
+    for(let it=0;it<12;it++){as=F.map((x)=>{let b=0,bd=9;C.forEach((c,j)=>{const d=cosdN(x.fp,c);if(d<bd){bd=d;b=j;}});return b;});C=C.map((c,j)=>{const m=F.filter((_,q)=>as[q]===j);return m.length?meanVec(m.map((x)=>x.fp)):c;});}
+    const inert=F.reduce((a,x,q)=>a+cosdN(x.fp,C[as[q]]),0);
+    if(!best||inert<best.inert)best={inert,C,as};
+  }
+  const score=best.C.map((_,j)=>F.filter((_,q)=>best.as[q]===j).reduce((a,x)=>a+x.torso*Math.max(0,1-1.6*cen(x)),0));
+  const top=score.indexOf(Math.max(...score));
+  let members=F.filter((_,q)=>best.as[q]===top);
+  // 短轨迹：前后帧里同一个人（脖子挪得很少、附近没有第二个候选）连成一串；交叉、挤在一起的地方断开
+  for(let i=0;i<samples.length;i++){
+    const cur=samples[i].c,prev=i?samples[i-1].c:[],k=Math.max(1,i?(samples[i].t-samples[i-1].t)/0.1:1);
+    cur.forEach((c,ci)=>{
+      const near=prev.filter((o)=>dist(o,c)<0.04*k);
+      const ok1=near.length===1&&cur.every((o)=>o===c||dist(o,c)>=0.06)&&prev.filter((o)=>dist(o,near[0])<0.06).length===1;
+      c.tid=ok1?near[0].tid:`${i}-${ci}`;
+    });
+  }
+  const tracks=new Map();for(const c of all){if(!tracks.has(c.tid))tracks.set(c.tid,[]);tracks.get(c.tid).push(c);}
+  // 外观差 = 整体特征、头发颜色、上身颜色、脸部特征四项，按「这一场哪项最能把他和别人分开」加权（有的场次头发最管用，有的衣服、脸最管用）
+  let wt=[1.2,1,1,1.5],path=null;
+  for(let round=0;round<4;round++){
+    const fc=members.filter((x)=>x.face?.length);const M={face:fc.length>=5?meanVec(fc.map((x)=>x.face)):null,fp:meanVec(members.filter((x)=>x.fp?.length).map((x)=>x.fp)),hair:meanVec(members.filter((x)=>x.hair?.length).map((x)=>x.hair)),cloth:meanVec(members.filter((x)=>x.cloth?.length).map((x)=>x.cloth))};
+    const sF=medOf(members.map((x)=>cosdN(x.fp,M.fp)))||0.1,sH=medOf(members.map((x)=>hdN(x.hair,M.hair)))||0.2,sC=medOf(members.map((x)=>hdN(x.cloth,M.cloth)))||0.2,sX=medOf(members.map((x)=>cosdN(x.face,M.face)))||0.1;
+    for(const c of all)c.pz=[cosdN(c.fp,M.fp),hdN(c.hair,M.hair),hdN(c.cloth,M.cloth),cosdN(c.face,M.face)].map((v,j)=>v==null?null:Math.min(4,v/[sF,sH,sC,sX][j]));
+    if(path){
+      // 用上一轮认出来的结果估计每项的区分度：他（很像的帧）和同一帧里旁边的人比，这一项「他更小」的比例
+      const A=[[],[],[],[]],O=[[],[],[],[]];
+      path.forEach((c,i)=>{if(c.none||c.idz>=sure)return;c.pz.forEach((v,j)=>v!=null&&A[j].push(v));for(const o of samples[i].c)if(o!==c&&dist(o,c)>0.05)o.pz.forEach((v,j)=>v!=null&&O[j].push(v));});
+      wt=[0,1,2,3].map((j)=>{if(A[j].length<20||O[j].length<20)return wt[j];let w=0,n=0;for(let q=0;q<3000;q++){const a=A[j][(q*7919)%A[j].length],o=O[j][(q*104729)%O[j].length];n++;if(a<o)w++;else if(a===o)w+=0.5;}const auc=Math.min(0.99,Math.max(0.5,w/n));return Math.max(0.1,Math.log(auc/(1-auc)));});
+      if(process.env.ID_DEBUG)console.error(`round ${round} 区分度权重 外观=${wt[0].toFixed(2)} 头发=${wt[1].toFixed(2)} 衣服=${wt[2].toFixed(2)} 脸=${wt[3].toFixed(2)}`);
+    }
+    for(const c of all){const ps=c.pz.map((v,j)=>[v,wt[j]]).filter((p)=>p[0]!=null);const w=ps.reduce((a,p)=>a+p[1],0);c.raw=w?ps.reduce((a,p)=>a+p[0]*p[1],0)/w:2;}
+    // 一串短轨迹里前后各 0.6 秒取平均（有整体特征、脸部特征的帧算两份）：单帧糊了、转身了不会突然认成别人
+    for(const xs of tracks.values())xs.forEach((c,k)=>{let a=0,n=0;for(let q=Math.max(0,k-6);q<=Math.min(xs.length-1,k+6);q++){const w=xs[q].pz[0]!=null?2:1;a+=w*xs[q].raw;n+=w;}c.idz=a/n;});
+    // 2) 逐帧连起来：外观像 + 不瞬移；认不准就「不在画面里」，不硬跟别人
+    const NONE={none:true};
+    const emit=(c)=>c.none?none:c.idz+cen(c)*0.6+Math.max(0,0.12-c.torso)*5;
+    const trans=(a,b,dt)=>{
+      if(a.none&&b.none)return 0; if(a.none||b.none)return gap;
+      return 40*Math.max(0,dist(a,b)-0.035*Math.max(1,dt/0.1))+3*Math.abs(Math.log(b.torso/a.torso));
+    };
+    const st=samples.map((s)=>[...s.c,NONE]);
+    let cost=st[0].map(emit);const back=[];
+    for(let i=1;i<st.length;i++){
+      const dt=samples[i].t-samples[i-1].t,nc=[],nb=[];
+      for(const b of st[i]){let bc=Infinity,arg=0;st[i-1].forEach((a,k)=>{const v=cost[k]+trans(a,b,dt);if(v<bc){bc=v;arg=k;}});nc.push(bc+emit(b));nb.push(arg);}
+      cost=nc;back.push(nb);
+    }
+    let k=cost.indexOf(Math.min(...cost));path=new Array(st.length);
+    for(let i=st.length-1;i>=0;i--){path[i]=st[i][k];if(i>0)k=back[i-1][k];}
+    const sel=path.filter((c)=>!c.none&&c.idz<sure);
+    if(sel.length>=20)members=sel;
+  }
+  // 这一帧他旁边没有别人也像他（差不到 margin）：两个人挤在一起、外观又近，就不算认准（太近的多半是同一个人被识别了两次）
+  const alone=path.map((c,i)=>c.none||samples[i].c.every((o)=>o===c||dist(o,c)<=0.05||dist(o,c)>=0.5||o.idz>c.idz+margin));
+  // 确认是他：很像（sure）且旁边没人也像；或者还算像（loose 以内）、而且和前后 anchor 秒内「认准」的帧连成一段没断过
+  const run=new Array(path.length).fill(-1);let r=0;
+  for(let i=0;i<path.length;i++){if(path[i].none){r++;continue;}run[i]=r;if(i+1<path.length&&path[i+1].none)r++;}
+  const sureAt=path.map((c,i)=>!c.none&&c.idz<sure&&alone[i]);
+  const ok=path.map((c,i)=>{
+    if(c.none||!alone[i])return false; if(sureAt[i])return true; if(c.idz>=loose)return false;
+    for(let j=i-1;j>=0&&samples[i].t-samples[j].t<=anchor&&run[j]===run[i];j--)if(sureAt[j]){for(let k=i+1;k<path.length&&samples[k].t-samples[i].t<=anchor&&run[k]===run[i];k++)if(sureAt[k])return true;break;}
+    return false;
+  });
+  return samples.map((s,i)=>{const c=path[i];
+    if(c.none)return{t:s.t,ok:false};
+    return{t:s.t,ok:ok[i],neck:c.neck,torso:c.torso,joints:c.joints,id:Math.round(c.idz*100)/100};});
+}
+
+// 每条片段的骨架，缓存在 pose/<id>.json（逐帧认好的主角，v:2）；画面里所有人的原始数据在 pose/<id>.cands.json
 function posesOf(spec, dir) {
   scanPeople(spec, dir);
   fs.mkdirSync(path.join(dir, 'pose'), { recursive: true });
@@ -809,16 +917,21 @@ function posesOf(spec, dir) {
   for (const s of spec.sources) {
     if (s.offset == null || s.use === false) continue;
     const file = path.join(dir, 'pose', `${s.id}.json`);
-    if (!fs.existsSync(file)) {
-      const tr = JSON.parse(fs.readFileSync(path.join(dir, 'track', `${s.id}.json`), 'utf8')).samples.filter((x) => x.ok && x.w != null).map((x) => [x.t, x.cx, x.cy, x.w, x.h]);
-      const job = path.join(os.tmpdir(), `pose-job-${process.pid}-${s.id}.json`);
-      fs.writeFileSync(job, JSON.stringify({ file: path.resolve(dir, s.file), step: 0.1, track: tr }));
-      const r = spawnSync(poseBin(), [job], { maxBuffer: 1 << 28, encoding: 'utf8' });
-      fs.rmSync(job, { force: true });
-      if (r.status !== 0) die(`骨架提取失败：${s.file}\n${r.stderr}`);
-      fs.writeFileSync(file, r.stdout);
+    const cfile = path.join(dir, 'pose', `${s.id}.cands.json`);
+    let cached = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+    if (cached?.v !== 2) {
+      if (!fs.existsSync(cfile)) {
+        const job = path.join(os.tmpdir(), `pose-job-${process.pid}-${s.id}.json`);
+        fs.writeFileSync(job, JSON.stringify({ file: path.resolve(dir, s.file), step: 0.1, fpEvery: 5 }));
+        const r = spawnSync(poseBin(), [job], { maxBuffer: 1 << 30, encoding: 'utf8' });
+        fs.rmSync(job, { force: true });
+        if (r.status !== 0) die(`骨架提取失败：${s.file}\n${r.stderr}`);
+        fs.writeFileSync(cfile, r.stdout);
+      }
+      cached = { v: 2, samples: resolveSubject(JSON.parse(fs.readFileSync(cfile, 'utf8')).samples) };
+      fs.writeFileSync(file, JSON.stringify(cached));
     }
-    const samples = JSON.parse(fs.readFileSync(file, 'utf8')).samples;
+    const samples = cached.samples;
     all[s.id] = { samples, step: 0.1, t0: samples[0]?.t ?? 0 };
   }
   return all;
@@ -1008,14 +1121,16 @@ function checkVideo(spec, dir, video, table) {
   const lock = spec.lock || {};
   const tx = lock.x ?? 0.5, ty = lock.y ?? 0.3;
   const len = duration(video);
-  // 认人框：成片里他应该在锁定的位置附近
-  const track = []; for (let t = 0; t < len; t += 0.5) track.push([r3(t), tx, Math.min(0.9, ty + 0.3), 0.5, 0.95]);
   const job = path.join(os.tmpdir(), `check-job-${process.pid}.json`);
-  fs.writeFileSync(job, JSON.stringify({ file: video, step: 1 / 15, track }));
-  const r = spawnSync(poseBin(), [job], { maxBuffer: 1 << 28, encoding: 'utf8' });
+  fs.writeFileSync(job, JSON.stringify({ file: video, step: 1 / 15, fpEvery: 1000000 }));
+  const r = spawnSync(poseBin(), [job], { maxBuffer: 1 << 30, encoding: 'utf8' });
   fs.rmSync(job, { force: true });
   if (r.status !== 0) die(`成片骨架提取失败：${r.stderr}`);
-  const S = JSON.parse(r.stdout).samples;
+  // 成片里他应该在锁定的位置附近：每帧取离锁定位置最近的那个人（偏太远就当认不出）
+  const S = JSON.parse(r.stdout).samples.map((x) => {
+    const c = x.c.map((c) => ({ c, d: Math.hypot((c.neck[0] - tx) * 16 / 9, c.neck[1] - ty) })).filter((o) => o.d < 0.35).sort((p, q) => p.d - q.d)[0]?.c;
+    return c ? { t: x.t, ok: true, neck: c.neck, torso: c.torso, joints: c.joints } : { t: x.t, ok: false };
+  });
   const at = (t) => S.reduce((b, x) => (Math.abs(x.t - t) < Math.abs(b.t - t) ? x : b), S[0]);
   const vis = (x) => x?.ok && x.joints.filter(Boolean).length >= (lock.minJoints ?? 7);
   const jumps = [];
@@ -1066,6 +1181,7 @@ function render(spec, dir, out) {
   if (lock) {
     // 原地换装：交给 lockfx 逐帧锁定主角、处理背景、做过渡，直接出整条无声画面
     scanPeople(spec, dir);
+    const motion = posesOf(spec, dir);
     const jobSegs = [];
     for (let k = 0; k < segs.length; k++) {
       const { c, piece } = segs[k];
@@ -1078,7 +1194,8 @@ function render(spec, dir, out) {
       const tr = JSON.parse(fs.readFileSync(path.join(dir, 'track', `${s.id}.json`), 'utf8')).samples
         .filter((x) => x.ok && x.w != null && x.t >= st - 0.3 && x.t <= st + dur + 0.5).map((x) => [r3(x.t - st), x.cx, x.cy, x.w, x.h]);
       const mid = tr.length ? tr[Math.floor(tr.length / 2)] : null;
-      jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [],
+      const necks = motion ? motion[s.id].samples.filter((x) => x.ok && x.t >= st - 0.4 && x.t <= st + dur + 0.6).map((x) => [r3(x.t - st), x.neck[0], x.neck[1]]) : [];
+      jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, necks, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [],
         ...(c.fx && segs[k].isStart ? { fx: c.fx } : spec.cuts.some((x) => x.fx) ? { fx: { type: 'cut', frames: 1 } } : {}) });
       table.push({ at: r3(piece.from + (f0 / fps - piece.out)), out: r3(f0 / fps), dur: r3(dur), src: c.src, srcTime: r3(st), label: c.label ?? s.label ?? '' });
     }
