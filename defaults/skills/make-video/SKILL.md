@@ -233,11 +233,15 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
    - `x`/`y`/`zoom`：主角在画面里的位置和放大倍数。直拍一般主角已经居中，用默认；主角偏了、太小，就调 `x`（0–1，主角的横向位置）、`zoom`（1.0–1.6，放大会损失清晰度，480P 素材不要放大）。素材和成片横竖屏不一致时一定要设 `x`，保证裁出来的是主角。
    - `exclude`：某条片段在某段主音轨时间里挡镜头、失焦、转去拍别人，就排除掉。
    - `auto`：每几拍切一次（`beatsPerCut`），`sections` 给副歌、鼓点密的地方加快到 2 拍；`pins`：脚本里要停住的名场面，指定用哪一场、从几秒到几秒。拍点用 `beats` 子命令看（`node montage.mjs beats --master <主音轨素材>`，会给 BPM 和候选），时间都是主音轨时间。
-4. **认主角（多人画面必须做）**：`node montage.mjs track --spec montage.json`。它用 macOS 自带的人体检测，每 0.5 秒找一次人，按「整个人的外观（发色、衣服）+ 离画面中心多近 + 前后帧连贯」认出每条直拍里的主角（不做人脸识别），再用发色复核（队友常穿同款演出服）。拍到别人、主角被挡、太小、分不清的时段写进各片段的 `autoExclude`，排切点时自动避开。输出里每条片段的 `usable` 是主角可用的比例，低于 30% 的片段考虑不用。结果缓存在 `track/<id>.json`，片段换了就删掉对应文件重跑。然后在 `montage.json` 里加 `"reframe": true`：每一镜按主角的位置居中、放大到主角约占画面高度 82%（`"reframe": 0.75` 可以改比例，`"maxZoom": 1.3` 是放大上限），换装时主角的位置和大小前后接得上。单个切点写了 `zoom`/`x` 的，按手写的来。
+4. **认主角（可选，默认不做）**：`node montage.mjs track --spec montage.json` 会认出每条直拍里的主角，把拍到别人、被挡的时段写进 `autoExclude`；再加 `"reframe": true` 会按主角位置放大居中。代价是排除偏保守、可选镜头变少，放大后画面变软，整片切点也会跟着变。**默认按正常方式剪，靠第 8 步审片只修出问题的几刀**；只有素材几乎全是多人远景、主角经常不在画面中间时才用这一步。
 5. **查对齐和构图**：`node montage.mjs compare --spec montage.json --at <5–8 个时间点，覆盖主歌、副歌、舞蹈段>`，生成 `review/compare.jpg`：每一行是同一时刻、每一列是一条片段。读这张图：同一行的动作应该是同一拍的同一个动作；对不上的片段（动作明显不同步）先在 notes 记下，把它 `use: false` 或用 `exclude` 去掉那一段；主角不在中间的调 `x`/`zoom`，再出一次对比图确认。
 6. **排切点**：`node montage.mjs plan --spec montage.json`，切点写回 `cuts`（每个切点 `at`、`src`、`offset`）。看一遍：同一场不要连着出现，名场面停住的位置对。要微调就直接改 `cuts`（单个切点可以加 `nudge` 秒数微调这一镜的起点、`zoom`/`x` 覆盖这一镜的构图），改了就不要再跑 plan（会覆盖）。`pins` 指定的那一场在那段被 `autoExclude` 排除了（主角被挡），plan 会报错：换一场能用的，或者挪一下时间。
 7. **渲染**：`node montage.mjs render --spec montage.json --out renders/video.mp4`。顺带写出 `renders/video-cuts.json`（切点表）和 `snapshots/contact-sheet.jpg`。
-8. **审片**：多人画面的片段，先跑 `node montage.mjs audit --spec montage.json` 列出可疑的刀，截图确认后用 `audit --fix --only <秒数>` 只换有问题的那几刀（没跑过第 4 步的认主角也能用，它会自己跑）。读 `snapshots/contact-sheet.jpg`，挑 3–5 个切点前后各截一帧（`ffmpeg -ss <秒> -i renders/video.mp4 -frames:v 1`）看：切换前后动作是不是连着的、主角在不在画面里、字有没有挡脸、有没有黑帧。有硬伤改 `montage.json` 重渲一次，最多改一轮。
+8. **审片（多人画面必须做，只修出问题的刀）**：
+   - `node montage.mjs audit --spec montage.json` 列出可疑的刀（画面里可能是别人、主角被挡、太小）。它第一次跑会顺带做人体检测，几分钟。
+   - 体检有误报也有漏报：把标出来的每一刀在成片里截一张图（`ffmpeg -ss <这刀中间的秒数> -i renders/video.mp4 -frames:v 1`，拼成一张图看），再把 `renders/video-cuts.json` 里每一刀都过一遍缩略图（`snapshots/contact-sheet.jpg` 不够细就按切点各截一张），找出真正有问题的：正中是别人、主角被工作人员或摄影师挡住、主角小到认不出、整帧模糊。
+   - 只把确认有问题的刀交给 `node montage.mjs audit --spec montage.json --fix --only <这几刀的成片秒数，逗号分隔> --out montage-fixed.json`，它把这几刀换成同一时刻主角清楚的另一场，其余切点、节奏、构图都不动；然后 `render --spec montage-fixed.json` 重渲，换上的画面再截图核对一遍。换上的还不行，就对比 `compare` 图手动改那一刀的 `src` 和 `offset`（前后两刀不能是同一场）。最多改一轮，改不好的记进 notes。
+   - 不要因为体检就整片加 `reframe` 或重新 `plan`：大部分镜头本来没问题，重排会把它们也改掉。读 `snapshots/contact-sheet.jpg`，挑 3–5 个切点前后各截一帧（`ffmpeg -ss <秒> -i renders/video.mp4 -frames:v 1`）看：切换前后动作是不是连着的、主角在不在画面里、字有没有挡脸、有没有黑帧。有硬伤改 `montage.json` 重渲一次，最多改一轮。
 9. 不加配音、不加 BGM、不加解说员（脚本明确要求的除外）。素材的 UP 主和原视频链接写进 notes（来源记在后台），不加到画面上。
 
 ## 4. 登记到工作台
