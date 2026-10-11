@@ -62,6 +62,8 @@ const ytLogin = createYtLogin({ root });
 // B站视频素材（调研时搜视频、找高能时刻、剪片段）；可选的 B站登录只为了下 1080P
 const bili = createBiliSource({ root });
 const biliJobs = new Map(); // 剪片段任务：编号 -> { status, itemId, result | error }
+const vetJobs = new Map(); // 直拍体检任务（同上），一次只跑一个
+let vetQueue = Promise.resolve();
 {
   const r = skills.sync();
   if (r.installed.length) console.log(`已装上出厂技能：${r.installed.join('、')}`);
@@ -492,6 +494,33 @@ ${mine}`;
         if (j.status === 'failed') return sendError(res, j.code, 'clip_failed', j.error);
         await new Promise((ok) => setTimeout(ok, 500));
       }
+    }
+    // 直拍体检：素材适不适合做贴合换装（认得出、在中间、被挡、景别稳不稳、内部剪辑），结果存到素材的 vet 上
+    if (parts.length === 5 && parts[4] === 'vet' && method === 'POST') {
+      const a = (it.assets || []).find((x) => x.id === parts[3]);
+      if (!a || a.kind !== 'video') return sendError(res, 404, 'not_found', '没有这条视频素材');
+      const job = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const itemId = parts[1], assetId = parts[3];
+      vetJobs.set(job, { status: 'running', itemId, at: Date.now() });
+      const script = path.join(root, '.claude', 'skills', 'make-video', 'scripts', 'montage.mjs');
+      vetQueue = vetQueue.then(() => new Promise((ok) => execFile(process.execPath, [script, 'vet', '--file', path.resolve(root, a.file)], { timeout: 15 * 60_000, maxBuffer: 1 << 24 }, async (err, stdout, stderr) => {
+        try {
+          if (err) throw new Error(String(stderr || err.message).trim().split('\n').pop());
+          const vet = JSON.parse(stdout);
+          const cur = store.get('items', itemId)?.assets || [];
+          await store.update('items', itemId, { assets: cur.map((x) => (x.id === assetId ? { ...x, vet } : x)), updatedAt: Date.now() });
+          vetJobs.set(job, { status: 'done', itemId, at: Date.now(), result: vet });
+        } catch (e) {
+          vetJobs.set(job, { status: 'failed', itemId, at: Date.now(), error: e.message.slice(0, 300) });
+        }
+        ok();
+      })));
+      return sendJson(res, 202, { job });
+    }
+    if (parts.length === 6 && parts[4] === 'vet' && method === 'GET') {
+      const j = vetJobs.get(parts[5]);
+      if (!j || j.itemId !== parts[1]) return sendError(res, 404, 'not_found', '没有这个体检任务（可能工作台重启过），重新体检一次');
+      return sendJson(res, 200, j.status === 'done' ? { status: 'done', ...j.result } : j.status === 'failed' ? { status: 'failed', error: j.error } : { status: 'running', seconds: Math.round((Date.now() - j.at) / 1000) });
     }
     if (parts.length === 5 && parts[3] === 'bili' && method === 'GET') {
       const j = biliJobs.get(parts[4]);

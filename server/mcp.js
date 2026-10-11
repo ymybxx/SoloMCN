@@ -719,6 +719,28 @@ server.registerTool(
   }),
 );
 
+server.registerTool(
+  'vet_footage',
+  {
+    title: '直拍体检',
+    description:
+      '检查一条已经下载到这条内容素材里的视频，适不适合做贴合换装 / 舞台混剪：主角认得出的比例、在画面中间的比例、被挡的比例、景别稳不稳（忽远忽近）、内部有没有剪辑（多机位、精剪），给 0–100 分和结论（适合 / 能用但一般 / 不适合）以及原因。' +
+      '结果也存到素材上。一条整首直拍大约 1–2 分钟。asset_id 来自 get_item 的 assets[].id。',
+    inputSchema: { item_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('内容 id'), asset_id: z.string().min(3).max(40).describe('素材 id') },
+  },
+  tool(async ({ item_id, asset_id }) => {
+    const { job } = await call('POST', `/api/items/${item_id}/assets/${asset_id}/vet`, {});
+    const deadline = Date.now() + 20 * 60_000;
+    for (;;) {
+      await new Promise((ok) => setTimeout(ok, 5000));
+      const s = await call('GET', `/api/items/${item_id}/assets/${asset_id}/vet/${job}`).catch((err) => (/没有这个体检任务/.test(err.message) ? { status: 'failed', error: err.message } : null));
+      if (s?.status === 'done') { const { status, ...r } = s; return r; }
+      if (s?.status === 'failed') throw new Error(s.error);
+      if (Date.now() > deadline) throw new Error('体检超过 20 分钟还没完成，过一会儿用 get_item 看素材的 vet');
+    }
+  }),
+);
+
 // ---------- 生成视频 ----------
 const VIDEO_PATH = z.string().regex(/^videos\/[A-Za-z0-9._-]+\/[A-Za-z0-9._\/-]+$/).describe('相对项目根目录的路径，以 videos/ 开头');
 
@@ -784,7 +806,7 @@ server.registerTool(
         sources: sources.length ? sources : undefined,
         research: it.research ? { text: it.research.text, sources: it.research.sources, at: it.research.at } : null,
         // 调研时收集的真实素材，file 是相对项目根目录的路径
-        assets: (it.assets || []).map((a) => ({ kind: a.kind, file: a.file, part: a.part, url: a.url, title: a.title, note: a.note, source: a.source || undefined })),
+        assets: (it.assets || []).map((a) => ({ id: a.id, kind: a.kind, file: a.file, part: a.part, url: a.url, title: a.title, note: a.note, source: a.source || undefined, vet: a.vet || undefined })),
         video: it.video ? { mp4: it.video.mp4, project: it.video.project, durationS: it.video.durationS, notes: it.video.notes, version: it.video.version || 1 } : null,
         // 调研时动手实践的实验目录（代码、网页实验、下载的结果），做视频时网页实验可以直接当镜头
         lab: labInfo?.files?.length ? labInfo : undefined,

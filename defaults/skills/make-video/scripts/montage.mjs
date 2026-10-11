@@ -4,6 +4,7 @@
 //
 //   node montage.mjs align  --master <音轨来源.mp4> <片段1.mp4> <片段2.mp4> ...   各片段相对主音轨的时间差，带可信度
 //   node montage.mjs beats  --master <音轨来源.mp4> [--from 秒] [--to 秒]              主音轨的 BPM 和每一拍的时间
+//   node montage.mjs vet    --file <素材.mp4>                                          直拍体检：认得出、在中间、被挡、景别稳不稳、内部剪辑，给 0–100 分
 //   node montage.mjs check  --spec montage.json --video renders/video.mp4              成片核对：每个切点前后他的位置、大小有没有跳，哪些时段他被挡住或认不出
 //   node montage.mjs fx     --spec montage.json                                         按段落地图给每一刀挑换装转场（扫描、残影、光门、甩切、脉冲、叠化），写进 cuts[].fx
 //   node montage.mjs sections --master <音轨来源>                                       段落地图：小节、乐句、每段能量（0 安静–3 高潮）、爆点
@@ -620,6 +621,8 @@ function schedule(spec, dir) {
     return r;
   };
   const N = srcs.length, H = opt.maxHold;
+  // 造型分组：同一套造型的几条（不同座位拍的）之间切换不算换装，不许这样切；source.look 不写就每条一组
+  const look = srcs.map((x) => x.look || x.id);
   const idx = (s, p, h) => (s * (N + 1) + p) * (H + 1) + h; // p = N 表示没有上一场
   let cur = new Float64Array(N * (N + 1) * (H + 1)).fill(Infinity);
   const back = [];
@@ -641,7 +644,7 @@ function schedule(spec, dir) {
       }
       // 换到另一场（停够 minHold 拍、不回到上一场）
       if (h >= minHoldAt[i]) for (let q = 0; q < N; q++) {
-        if (q === s || q === p) continue;
+        if (q === s || q === p || look[q] === look[s] || (p < N && look[q] === look[p])) continue;
         const r = swCost(s, q, i);
         if (!Number.isFinite(r.cost)) continue;
         const v = c + r.cost + opt.bonus - bonusAt[i] - rare[q];
@@ -963,6 +966,43 @@ function audit(spec, dir, table, { fix = false, only = null } = {}) {
   return { flagged, changes, cuts };
 }
 
+// ---------- 直拍体检：一条素材适不适合做贴合换装 ----------
+// 认人（外观 + 居中 + 连贯）→ 逐帧骨架 → 算：认得出的比例、在画面中间的比例、被挡的比例、景别稳不稳、内部有没有剪辑
+function vetFootage(file) {
+  const t = trackSource(file, 0.5);
+  const tr = t.samples.filter((x) => x.ok && x.w != null).map((x) => [x.t, x.cx, x.cy, x.w, x.h]);
+  const job = path.join(os.tmpdir(), `vet-job-${process.pid}.json`);
+  fs.writeFileSync(job, JSON.stringify({ file, step: 0.2, track: tr }));
+  const r = spawnSync(poseBin(), [job], { maxBuffer: 1 << 28, encoding: 'utf8' });
+  fs.rmSync(job, { force: true });
+  if (r.status !== 0) die(`骨架提取失败：${r.stderr}`);
+  const S = JSON.parse(r.stdout).samples;
+  const n = Math.max(1, S.length);
+  const ok = S.filter((x) => x.ok);
+  const visible = ok.filter((x) => x.joints.filter(Boolean).length >= 7);
+  const centered = ok.filter((x) => Math.abs(x.neck[0] - 0.5) <= 0.15);
+  const tor = ok.map((x) => x.torso).sort((a, b) => a - b);
+  const q = (f) => tor[Math.min(tor.length - 1, Math.floor(tor.length * f))] || 0;
+  const spread = tor.length ? q(0.9) / Math.max(q(0.1), 0.01) : 9; // 大小 90 分位 / 10 分位，越接近 1 景别越稳
+  // 内部剪辑：画面整体突变的次数（多机位、精剪会很多；直拍正常只有灯光变化）
+  const sc = spawnSync('ffmpeg', ['-v', 'info', '-i', file, '-vf', "scale=320:-2,select='gt(scene,0.45)',showinfo", '-an', '-f', 'null', '-'], { encoding: 'utf8', maxBuffer: 1 << 26 });
+  const cuts = (sc.stderr.match(/pts_time:/g) || []).length;
+  const dur = duration(file);
+  const cutsPerMin = r3(cuts / Math.max(dur / 60, 0.1));
+  const pr = probe(file).streams.find((x) => x.codec_type === 'video') || {};
+  const m = { found: r3(ok.length / n), visible: r3(visible.length / n), centered: r3(centered.length / n), sizeSpread: r3(spread), cutsPerMin, size: `${pr.width}×${pr.height}` };
+  // 综合分：0–100
+  // 景别稳定、没有内部剪辑最要紧（统一大小、对齐全靠它），其次是在中间、不被挡
+  const score = Math.round(100 * (0.15 * m.found + 0.25 * m.visible + 0.25 * m.centered + 0.2 * Math.max(0, Math.min(1, 1 - (spread - 1.2) / 0.8)) + 0.15 * Math.max(0, 1 - cutsPerMin / 5)));
+  const why = [];
+  if (m.centered < 0.6) why.push('他常常不在画面中间');
+  if (m.visible < 0.6) why.push('经常被挡或认不全');
+  if (spread > 1.6) why.push('景别忽远忽近（可能是多机位或推拉很多）');
+  if (cutsPerMin > 3) why.push('疑似多机位或精剪（内部切换多）');
+  if (pr.height && pr.height < 1080 && pr.width < 1920) why.push('分辨率偏低');
+  return { score, verdict: score >= 70 && !why.length ? '适合' : score >= 55 ? '能用但一般' : '不适合', why, ...m };
+}
+
 // ---------- 成片核对：量成片里每个切点前后他的位置、大小，找出跳位的刀和被挡的时段 ----------
 function checkVideo(spec, dir, video, table) {
   const lock = spec.lock || {};
@@ -1184,6 +1224,9 @@ if (cmd === 'align') {
     fs.writeFileSync(path.resolve(dir, o.out || 'montage-fixed.json'), JSON.stringify(outSpec, null, 1));
   }
   console.log(JSON.stringify({ flagged: r.flagged.map((f) => ({ out: f.out, dur: f.dur, src: f.src, label: f.label, why: f.why })), changes: r.changes }, null, 1));
+} else if (cmd === 'vet') {
+  if (!o.file) die('用法：montage.mjs vet --file <素材.mp4>（直拍体检：适不适合做贴合换装）');
+  console.log(JSON.stringify(vetFootage(path.resolve(o.file))));
 } else if (cmd === 'schedule') {
   if (!o.spec) die('用法：montage.mjs schedule --spec montage.json（全局挑换装点，写进 cuts）');
   const file = path.resolve(o.spec); const dir = path.dirname(file);
