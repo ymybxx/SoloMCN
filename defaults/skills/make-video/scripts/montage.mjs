@@ -383,6 +383,36 @@ function plan(spec, dir) {
     const h = cutHealth(dir, s.id, a + off, b + off);
     return h ? h.ok / h.n - h.frame : null;
   });
+  // 按动作挑：结构模式下默认开（"matchMotion": false 关掉）。新场次优先选和上一套动作最一致的，并挪到最一致的接点
+  const motion = spec.structure && spec.matchMotion !== false ? posesOf(spec, dir) : null;
+  // 统一大小：主角在各场里的身体大小（骨架算的，占画面高的比例）。全程锁定时只用能缩放到同一大小的镜头，
+  // 目标大小选「能覆盖最多镜头」的那个，写进 lock.torso 给渲染用
+  let sizeOk = null;
+  if (motion && spec.lock?.mode === 'full') {
+    const zMin = spec.lock.zoomMin ?? 1.15, zMax = spec.lock.zoomMax ?? 1.6;
+    const all = Object.values(motion).flatMap((P) => P.samples.filter((x) => x.ok).map((x) => x.torso)).sort((a, b) => a - b);
+    let T = spec.lock.torso, bestN = -1;
+    if (!T) for (let i = 0; i < all.length; i += Math.max(1, Math.floor(all.length / 200))) {
+      const c = all[i] * zMin, lo = c / zMax, hi = c / zMin;
+      const n = all.filter((v) => v >= lo && v <= hi).length;
+      if (n > bestN) { bestN = n; T = c; }
+    }
+    spec.lock.torso = r3(T);
+    // 能不能锁住：这段里大部分时刻，主角能缩放到统一大小，而且放大后裁切框能把他放到画面中间（不会顶到原画边上）
+    const ty = spec.lock.y ?? 0.3, aspect = 16 / 9;
+    sizeOk = (s, off, a, b) => {
+      const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off);
+      if (xs.length < 3) return false;
+      const ok = xs.filter((x) => {
+        if (!x.ok) return false;
+        const z = T / x.torso;
+        if (z < zMin * 0.92 || z > zMax * 1.08) return false;
+        const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
+        return nx >= 0.5 / zc - 0.02 && nx <= 1 - 0.5 / zc + 0.02 && ny >= ty / zc - 0.02 && ny <= 1 - (1 - ty) / zc + 0.02;
+      }).length;
+      return ok / xs.length >= 0.7;
+    };
+  }
   const cuts = [];
   const used = new Map();
   const recent = [];
@@ -408,13 +438,36 @@ function plan(spec, dir) {
     if (nextPin) end = nextPin.from;
     // 挑一个覆盖这一段、最近两段没用过的片段：出场次数不能比最少的多出 1 次以上（8 套造型轮得匀），
     // 在这里面挑主角最清楚、最居中的；差不多清楚的，挑用得少的，再一样就随机
-    const cover = srcs.map((s) => ({ s, off: usable(s, at, end) })).filter((x) => x.off != null);
+    let cover = srcs.map((s) => ({ s, off: usable(s, at, end) })).filter((x) => x.off != null);
+    let fitted = false;
+    if (sizeOk) { const fit = cover.filter((x) => sizeOk(x.s, x.off, at, end)); if (fit.length) { cover = fit; fitted = true; } }
     if (!cover.length) die(`${r3(at)}–${r3(end)} 秒没有片段能覆盖，检查对齐结果或缩短 audio 范围`);
     const fresh = cover.filter((x) => !recent.slice(-2).includes(x.s.id));
     const pool = fresh.length ? fresh : cover.filter((x) => x.s.id !== recent.at(-1)).length ? cover.filter((x) => x.s.id !== recent.at(-1)) : cover;
     const min = Math.min(...pool.map((x) => used.get(x.s.id) || 0));
-    let cand = pool.filter((x) => (used.get(x.s.id) || 0) <= min + (clear ? 1 : 0));
-    if (clear) {
+    let cand = pool.filter((x) => (used.get(x.s.id) || 0) <= min + (clear || motion ? 1 : 0));
+    const prevCut = cuts.at(-1);
+    if (motion && prevCut) {
+      // 动作一致度为主、主角清楚为辅：分数 = 动作差（越小越好）- 清楚程度 × 0.3
+      const outT = at + prevCut.offset + (prevCut.nudge || 0);
+      for (const x of cand) {
+        x.q = clear ? clear(x.s, x.off, at, end) ?? 0 : 0;
+        x.m = bestShift(motion[prevCut.src], outT, motion[x.s.id], at + x.off);
+        x.score = (Number.isFinite(x.m.dist) ? x.m.dist : 1.5) - x.q * 0.3 + (used.get(x.s.id) || 0) * 0.01;
+      }
+      cand.sort((a, b) => a.score - b.score);
+      // 宁可少换、不乱换：没有合格的（锁得住、动作差在 0.3 以内），当前这套还能继续用、也锁得住，就先不换，多停几拍（最多约 10 秒）
+      const cur = srcs.find((x) => x.id === prevCut.src);
+      const curOff = cur && usable(cur, at, end);
+      const held = at - prevCut.at;
+      const good = fitted && cand[0] && Number.isFinite(cand[0].m.dist) && cand[0].m.dist <= (spec.matchMax ?? 0.3);
+      if (!good && curOff != null && (!sizeOk || sizeOk(cur, curOff, at, end)) && held < (spec.maxHold ?? 10)) {
+        if (nextPin) { while (i < grid.length && grid[i] < nextPin.from - 0.01) i++; if (Math.abs((grid[i] ?? Infinity) - nextPin.from) > 0.05) grid.splice(i, 0, nextPin.from); }
+        else i = stopAt === -1 ? grid.length : stopAt;
+        continue;
+      }
+      cand = [cand[0]];
+    } else if (clear) {
       for (const x of cand) x.q = clear(x.s, x.off, at, end) ?? 0;
       const best = Math.max(...cand.map((x) => x.q));
       cand = cand.filter((x) => x.q >= best - 0.1);
@@ -423,12 +476,14 @@ function plan(spec, dir) {
     }
     const pick = cand[Math.floor(rand() * cand.length)];
     used.set(pick.s.id, (used.get(pick.s.id) || 0) + 1);
-    cuts.push({ at: r3(at), src: pick.s.id, offset: pick.off });
+    cuts.push({ at: r3(at), src: pick.s.id, offset: pick.off, ...(pick.m?.shift ? { nudge: pick.m.shift } : {}), ...(pick.m && Number.isFinite(pick.m.dist) ? { motion: r3(pick.m.dist) } : {}) });
     recent.push(pick.s.id);
     if (nextPin) { while (i < grid.length && grid[i] < nextPin.from - 0.01) i++; if (Math.abs((grid[i] ?? Infinity) - nextPin.from) > 0.05) grid.splice(i, 0, nextPin.from); }
     else i = stopAt === -1 ? grid.length : stopAt;
   }
-  return { cuts, beats: { bpm: bt.bpm, period: bt.period, first: bt.first }, structureMap: spec.structureMap };
+  // 连着两刀是同一场（候选太少时会发生），合成一刀，不然就是同一场里跳一下
+  const merged = cuts.filter((c, k) => k === 0 || c.src !== cuts[k - 1].src || c.pinned);
+  return { cuts: merged, beats: { bpm: bt.bpm, period: bt.period, first: bt.first }, structureMap: spec.structureMap };
 }
 
 // ---------- 换装转场：按段落地图给每一刀挑转场 ----------
@@ -441,7 +496,7 @@ function assignFx(spec) {
   if (!sm) die('先按段落地图排切点（"structure": true 再 plan），才能自动挑转场');
   const opt = spec.fx || {};
   const budget = Math.round(cuts.length * (opt.budget ?? 0.2));
-  const caps = { scan: 4, ...(opt.caps || {}) };
+  const caps = { scan: opt.style === 'silky' ? 6 : 4, echo: 4, ...(opt.caps || {}) };
   const rand = rng((spec.auto?.seed || 1) * 7 + 3);
   const secOf = (t) => sm.sections.find((x) => t >= x.from - 0.01 && t < x.to - 0.01) || sm.sections.at(-1);
   const isStart = (t) => sm.sections.some((x) => Math.abs(x.from - t) < 0.06);
@@ -454,7 +509,11 @@ function assignFx(spec) {
     if (i === 0) continue;
     const sec = secOf(c.at);
     let cand = [], prob = 0;
-    if (isDrop(c.at)) { cand = pick(['gate', 'scan']); prob = 1; }
+    if (opt.style === 'silky') {
+      // 丝滑换装：只用作用在人身上的转场，不强调「换场景」；大部分是对准动作的硬切
+      if (isDrop(c.at) || isStart(c.at)) { cand = pick(['scan']); prob = 0.9; }
+      else if (sec.energy === 3) { cand = pick(['echo']); prob = 0.2; }
+    } else if (isDrop(c.at)) { cand = pick(['gate', 'scan']); prob = 1; }
     else if (isStart(c.at)) { cand = pick(sec.energy >= 2 ? ['scan', 'gate'] : ['scan', 'dissolve']); prob = 0.9; }
     else if (sec.energy === 3) { cand = pick(['echo', 'whip', 'pulse']); prob = 0.35; }
     else if (sec.energy === 2) { cand = pick(['whip', 'pulse']); prob = 0.15; }
@@ -576,6 +635,66 @@ function trackSource(file, step = 0.5) {
       return { ...base, ok: true };
     }),
   };
+}
+
+// ---------- 动作：逐帧骨架（每秒 10 帧），换装时找新旧两场动作最一致的接点 ----------
+const POSE_SWIFT = path.join(path.dirname(new URL(import.meta.url).pathname), 'pose.swift');
+function poseBin() {
+  const st = fs.statSync(POSE_SWIFT);
+  const bin = path.join(os.tmpdir(), `montage-pose-${Math.round(st.mtimeMs)}`);
+  if (!fs.existsSync(bin)) {
+    const r = spawnSync('swiftc', ['-O', POSE_SWIFT, '-o', bin], { encoding: 'utf8' });
+    if (r.status !== 0) die(`编译 pose.swift 失败：${r.stderr}`);
+  }
+  return bin;
+}
+// 每条片段的骨架，缓存在 pose/<id>.json（要先有 track/ 的认人结果，用来认准是他）
+function posesOf(spec, dir) {
+  scanPeople(spec, dir);
+  fs.mkdirSync(path.join(dir, 'pose'), { recursive: true });
+  const all = {};
+  for (const s of spec.sources) {
+    if (s.offset == null || s.use === false) continue;
+    const file = path.join(dir, 'pose', `${s.id}.json`);
+    if (!fs.existsSync(file)) {
+      const tr = JSON.parse(fs.readFileSync(path.join(dir, 'track', `${s.id}.json`), 'utf8')).samples.filter((x) => x.ok && x.w != null).map((x) => [x.t, x.cx, x.cy, x.w, x.h]);
+      const job = path.join(os.tmpdir(), `pose-job-${process.pid}-${s.id}.json`);
+      fs.writeFileSync(job, JSON.stringify({ file: path.resolve(dir, s.file), step: 0.1, track: tr }));
+      const r = spawnSync(poseBin(), [job], { maxBuffer: 1 << 28, encoding: 'utf8' });
+      fs.rmSync(job, { force: true });
+      if (r.status !== 0) die(`骨架提取失败：${s.file}\n${r.stderr}`);
+      fs.writeFileSync(file, r.stdout);
+    }
+    const samples = JSON.parse(fs.readFileSync(file, 'utf8')).samples;
+    all[s.id] = { samples, step: 0.1, t0: samples[0]?.t ?? 0 };
+  }
+  return all;
+}
+function poseAt(P, t) {
+  if (!P) return null;
+  const i = Math.round((t - P.t0) / P.step);
+  for (const d of [0, -1, 1]) { const x = P.samples[i + d]; if (x && Math.abs(x.t - t) <= 0.07) return x.ok ? x : null; }
+  return null;
+}
+function poseDist(a, b) {
+  let sum = 0, n = 0;
+  for (let i = 0; i < a.joints.length; i++) { const p = a.joints[i], q = b.joints[i]; if (p && q) { sum += Math.hypot(p[0] - q[0], p[1] - q[1]); n++; } }
+  return n >= 5 ? sum / n : Infinity;
+}
+// 一小段动作有多像：切点前后各 0.3 秒，每 0.1 秒比一次姿势
+function motionDist(Pa, ta, Pb, tb) {
+  let sum = 0, n = 0;
+  for (let d = -0.3; d <= 0.301; d += 0.1) { const a = poseAt(Pa, ta + d), b = poseAt(Pb, tb + d); if (a && b) { const x = poseDist(a, b); if (Number.isFinite(x)) { sum += x; n++; } } }
+  return n >= 4 ? sum / n : Infinity;
+}
+// 新场次在 ±range 秒里挪多少，和旧场次的动作最一致
+function bestShift(Pout, tOut, Pin, tIn, range = 0.3) {
+  let best = { shift: 0, dist: motionDist(Pout, tOut, Pin, tIn) };
+  for (let sft = -range; sft <= range + 1e-6; sft += 0.1) {
+    const d = motionDist(Pout, tOut, Pin, tIn + sft) + Math.abs(sft) * 0.15; // 能不挪就不挪
+    if (d < best.dist) best = { shift: r3(sft), dist: d };
+  }
+  return best;
 }
 
 // 只做人体检测、缓存到 track/<id>.json，不改 spec（排切点挑场次、体检都用它）
@@ -737,7 +856,7 @@ function render(spec, dir, out) {
     }
     const job = {
       size: [W, H], fps, out: joined,
-      target: { x: lock.x ?? 0.5, y: lock.y ?? 0.3, ...(lock.torso ? { torso: lock.torso } : {}) },
+      target: { x: lock.x ?? 0.5, y: lock.y ?? 0.3, ...(lock.torso ? { torso: lock.torso } : {}) }, // torso：plan 按动作挑场次时算好的统一大小
       zoomMin: lock.zoomMin ?? 1.1, zoomMax: lock.zoomMax ?? 1.45, smooth: lock.smooth ?? 0.3,
       // 背景虚化：全程锁定默认开（旧版本的效果），换装瞬间对齐默认关（保留舞台）
       background: lock.background === false || (lock.background === undefined && lock.mode === 'cut') ? null : { blur: 14, dim: 0.55, desat: 0.35, ...(lock.background || {}) },
