@@ -9,7 +9,7 @@ description: 按人的修改意见改一条已经生成好的视频（HyperFrame
 
 可用的：`workbench` MCP 的 `get_item`、`save_video`；命令行、读写文件、技能、子代理。没有网页搜索。
 
-**项目目录里有 `montage.json` 的是原片剪辑**（一键换装、舞台混剪，见 `/make-video` 的「原片剪辑」）：不按下面的 HyperFrames 流程改。读 `montage.json` 和 `renders/video-cuts.json`（切点表：成片第几秒 `out` 是哪个片段 `src`），意见里的时间点按切点表找到对应切点，改 `montage.json`（换片段改 `src`、微调起点加 `nudge`、构图改 `x`/`zoom`、某场不要了设 `use: false` 后重新 `plan`、字改 `texts`），然后 `node <make-video 技能目录>/scripts/montage.mjs render --spec montage.json --out renders/video-v<N>.mp4` 渲成新文件，照第 3 步登记。
+**项目目录里有 `montage.json` 的是原片剪辑**（一键换装、舞台混剪，见 `/make-video` 的「原片剪辑」）：不按下面的 HyperFrames 流程改。读 `montage.json` 和 `renders/video-cuts.json`（切点表：成片第几秒 `out` 是哪个片段 `src`），意见里的时间点按切点表找到对应切点，改 `montage.json`（换片段改 `src`、微调起点加 `nudge`、构图改 `x`/`zoom`、某场不要了设 `use: false` 后重新 `plan`、字改 `texts`；意见说「剪到别人了」「主角被挡」「人不在中间」，又还没跑过认主角的，先跑 `montage.mjs track`、加 `"reframe": true`，再重新 `plan`），然后 `node <make-video 技能目录>/scripts/montage.mjs render --spec montage.json --out renders/video-v<N>.mp4` 渲成新文件，照第 3 步登记。
 
 ## 1. 找到项目和要改的地方
 

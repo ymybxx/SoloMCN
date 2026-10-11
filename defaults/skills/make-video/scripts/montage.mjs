@@ -5,6 +5,7 @@
 //   node montage.mjs align  --master <音轨来源.mp4> <片段1.mp4> <片段2.mp4> ...   各片段相对主音轨的时间差，带可信度
 //   node montage.mjs beats  --master <音轨来源.mp4> [--from 秒] [--to 秒]              主音轨的 BPM 和每一拍的时间
 //   node montage.mjs skips  --master <音轨来源> --within 90,150                     找能无缝砍掉的整数个八拍（成片超时长时用，写进 audio.skip）
+//   node montage.mjs track  --spec montage.json                                         认主角：每条片段里主角在哪、哪些时段拍到别人或太小（写进 autoExclude，配合 reframe 自动居中放大）
 //   node montage.mjs compare --spec montage.json --at 30,60,90                         同一时刻各片段的画面拼成对比图（查对齐、调构图）
 //   node montage.mjs plan   --spec montage.json                                         按 spec 排切点，写回 spec 的 cuts（不渲染）
 //   node montage.mjs render --spec montage.json [--out renders/video.mp4]               渲染成片，顺带出切点表和缩略图拼图
@@ -223,7 +224,7 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = (s * 1664525 + 
 
 // 片段在主音轨 [a, b] 这段能不能用：落在某个对齐段里、不在排除范围里。能用就返回这一段的时间差
 function usable(s, a, b) {
-  if ((s.exclude || []).some(([x, y]) => a < y && b > x)) return null;
+  if ([...(s.exclude || []), ...(s.autoExclude || [])].some(([x, y]) => a < y && b > x)) return null;
   const segs = s.segments?.length ? s.segments : [{ from: -Infinity, to: Infinity, offset: s.offset }];
   const seg = segs.find((g) => a >= g.from - 0.01 && b <= g.to + 0.01);
   if (!seg) return null;
@@ -359,6 +360,123 @@ function compare(spec, dir, times, out) {
   return { out, rows: times.map((t) => `${t}s`), cols: srcs.map((s) => s.id) };
 }
 
+// ---------- 认主角：每条片段里主角在哪、是不是他、能不能用 ----------
+// 用 persons.swift（macOS Vision 人体检测）每 0.5 秒取一帧找人；不做人脸识别：
+// 直拍的镜头跟着主角走，主角又一直是同一个造型，所以用「整个人的外观（发色、衣服）」+「离画面中心多近」+「前后帧连贯」认人。
+const SWIFT = path.join(path.dirname(new URL(import.meta.url).pathname), 'persons.swift');
+function personsBin() {
+  const st = fs.statSync(SWIFT);
+  const bin = path.join(os.tmpdir(), `montage-persons-${Math.round(st.mtimeMs)}`);
+  if (!fs.existsSync(bin)) {
+    const r = spawnSync('swiftc', ['-O', SWIFT, '-o', bin], { encoding: 'utf8' });
+    if (r.status !== 0) die(`编译 persons.swift 失败（要装 Xcode 命令行工具）：${r.stderr}`);
+  }
+  return bin;
+}
+
+const cosd = (a, b) => { if (!a?.length || !b?.length) return 1; let s = 0, na = 0, nb = 0; for (let i = 0; i < a.length; i++) { s += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; } return 1 - s / Math.sqrt(na * nb || 1); };
+const hd = (a, b) => (a?.length && b?.length ? a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0) / 2 : 0.5); // 颜色分布差多少，0–1
+const meanVec = (list) => { const out = new Array(list[0].length).fill(0); for (const v of list) for (let i = 0; i < v.length; i++) out[i] += v[i] / list.length; return out; };
+
+function trackSource(file, step = 0.5) {
+  const r = spawnSync(personsBin(), [file, String(step)], { maxBuffer: 1 << 30, encoding: 'utf8' });
+  if (r.status !== 0) die(`人体检测失败：${file}\n${r.stderr}`);
+  const { samples } = JSON.parse(r.stdout);
+  const center = (p) => Math.abs(p.x + p.w / 2 - 0.5);
+  const ppl = samples.map((s) => s.people.filter((p) => p.fp?.length && p.h > 0.2));
+  // 主角样本：又大又在正中间的人（直拍的镜头跟着主角走），先用它们算出主角的外观
+  const seeds = ppl.map((ps) => ps.filter((p) => p.h > 0.5 && center(p) < 0.12).sort((a, b) => b.h - a.h)[0]).filter(Boolean);
+  if (seeds.length < 5) return { samples: samples.map((s) => ({ t: s.t, ok: false, why: '找不到主角' })) };
+  let model = meanVec(seeds.map((p) => p.fp));
+  // 发色：队友常穿同款演出服，分得开的往往只有头发
+  let hair = meanVec(seeds.filter((p) => p.hair?.length).map((p) => p.hair));
+  let path_ = [];
+  for (let round = 0; round < 3; round++) {
+    // 维特比：每一帧在「画面里的每个人」和「主角不在画面里」之间选，整段连起来代价最小
+    // 代价 = 外观不像（主） + 离中心远 + 和上一帧位置跳得远
+    const NONE = { none: true };
+    const states = ppl.map((ps) => [...ps, NONE]);
+    // 发色只在选出来以后复核（头发区域本身差异就大，放进代价里会让「主角不在画面里」总是更便宜）
+    const emit = (p) => (p.none ? 0.32 : cosd(p.fp, model) * 2.2 + center(p) * 0.5 + Math.max(0, 0.5 - p.h) * 0.4);
+    const trans = (a, b) => (a.none || b.none ? 0.15 : Math.abs(a.x + a.w / 2 - (b.x + b.w / 2)) * 1.2 + Math.abs(a.h - b.h) * 0.5);
+    let cost = states[0].map(emit), back = [];
+    for (let i = 1; i < states.length; i++) {
+      const nc = [], nb = [];
+      for (const b of states[i]) {
+        let best = Infinity, arg = 0;
+        states[i - 1].forEach((a, k) => { const c = cost[k] + trans(a, b); if (c < best) { best = c; arg = k; } });
+        nc.push(best + emit(b)); nb.push(arg);
+      }
+      cost = nc; back.push(nb);
+    }
+    let k = cost.indexOf(Math.min(...cost));
+    path_ = new Array(states.length);
+    for (let i = states.length - 1; i >= 0; i--) { path_[i] = states[i][k]; if (i > 0) k = back[i - 1][k]; }
+    const chosen = path_.filter((p) => !p.none && cosd(p.fp, model) < 0.25);
+    if (chosen.length >= 5) { model = meanVec(chosen.map((p) => p.fp)); const hs = chosen.filter((p) => p.hair?.length); if (hs.length >= 5) hair = meanVec(hs.map((p) => p.hair)); }
+  }
+  const ds = path_.filter((p) => !p.none).map((p) => cosd(p.fp, model)).sort((a, b) => a - b);
+  const limit = Math.min(0.35, Math.max(0.15, (ds[Math.floor(ds.length * 0.8)] ?? 0.2) * 1.4));
+  const hs = path_.filter((p) => !p.none && p.hair?.length).map((p) => hd(p.hair, hair)).sort((a, b) => a - b);
+  const hairLimit = Math.min(0.6, Math.max(0.3, (hs[Math.floor(hs.length * 0.8)] ?? 0.4) * 1.3));
+  return {
+    samples: samples.map((s, i) => {
+      const p = path_[i];
+      if (!p || p.none) return { t: s.t, ok: false, why: '画面里找不到主角' };
+      const d = cosd(p.fp, model);
+      const base = { t: s.t, cx: r3(p.x + p.w / 2), cy: r3(p.y + p.h / 2), h: r3(p.h), w: r3(p.w), d: r3(d) };
+      if (d > limit) return { ...base, ok: false, why: '不像主角，可能拍到别人了' };
+      if (p.hair?.length && hd(p.hair, hair) > hairLimit) return { ...base, ok: false, why: '发色对不上，可能是穿同款衣服的队友' };
+      if (p.h < 0.35) return { ...base, ok: false, why: '主角太小' };
+      // 画面里另一个人比他更大、更居中：镜头可能在拍别人
+      const rival = ppl[i].find((q) => q !== p && q.h > p.h * 1.15 && center(q) < center(p) - 0.1);
+      if (rival) return { ...base, ok: false, why: '画面焦点在别人身上' };
+      return { ...base, ok: true };
+    }),
+  };
+}
+
+// 对每条片段跑一遍，结果存到 track/<id>.json；把连续的坏帧变成 autoExclude（主音轨时间）
+function track(spec, dir, { step = 0.5 } = {}) {
+  fs.mkdirSync(path.join(dir, 'track'), { recursive: true });
+  const report = [];
+  for (const s of spec.sources) {
+    if (s.offset == null || s.use === false) continue;
+    const file = path.join(dir, 'track', `${s.id}.json`);
+    const t = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : trackSource(path.resolve(dir, s.file), step);
+    fs.writeFileSync(file, JSON.stringify(t));
+    // 片段时间 -> 主音轨时间：用 segments 的时间差
+    const segs = s.segments?.length ? s.segments : [{ from: -Infinity, to: Infinity, offset: s.offset }];
+    const toMaster = (ct) => { const g = segs.find((x) => ct - x.offset >= x.from - 0.01 && ct - x.offset <= x.to + 0.01); return g ? ct - g.offset : null; };
+    const bad = [];
+    for (const x of t.samples) {
+      if (x.ok) continue;
+      const m = toMaster(x.t);
+      if (m == null) continue;
+      const last = bad.at(-1);
+      if (last && m - last[1] <= step * 1.5 + 0.01) last[1] = r3(m + step / 2);
+      else bad.push([r3(m - step / 2), r3(m + step / 2)]);
+    }
+    s.autoExclude = bad;
+    const okRate = t.samples.filter((x) => x.ok).length / Math.max(1, t.samples.length);
+    const whys = {};
+    for (const x of t.samples) if (!x.ok) whys[x.why] = (whys[x.why] || 0) + 1;
+    report.push({ id: s.id, usable: `${Math.round(okRate * 100)}%`, excluded: bad.length, whys });
+  }
+  return report;
+}
+
+// 某个片段在片段时间 ct 附近主角的位置（取前后 1 秒里能用的样本的中位数）
+function targetAt(dir, s, ct) {
+  const file = path.join(dir, 'track', `${s.id}.json`);
+  if (!fs.existsSync(file)) return null;
+  const t = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const near = t.samples.filter((x) => x.ok && Math.abs(x.t - ct) <= 1);
+  if (!near.length) return null;
+  const med = (k) => near.map((x) => x[k]).sort((a, b) => a - b)[Math.floor(near.length / 2)];
+  return { cx: med('cx'), cy: med('cy'), h: med('h') };
+}
+
 // ---------- 渲染 ----------
 function esc(t) { return String(t).replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\u2019").replace(/%/g, '\\%'); }
 
@@ -391,8 +509,18 @@ function render(spec, dir, out) {
     const f1 = k + 1 < segs.length ? Math.round(segs[k + 1].out * fps) : total;
     if (f1 <= f0) continue;
     const st = piece.from + (f0 / fps - piece.out) + (c.offset ?? s.offset) + (c.nudge || 0);
-    const zoom = c.zoom ?? s.zoom ?? 1;
-    const cx = c.x ?? s.x ?? 0.5, cy = c.y ?? s.y ?? 0.5;
+    // reframe：按这一镜中间那一刻主角的位置，放大到主角占画面 reframe 高度并居中（换装时主角的位置、大小前后接得上）
+    let auto = null;
+    if (spec.reframe && c.zoom == null && c.x == null) {
+      const tg = targetAt(dir, s, st + (f1 - f0) / fps / 2);
+      if (tg) {
+        const want = typeof spec.reframe === 'number' ? spec.reframe : 0.82;
+        const z = Math.max(1, Math.min(spec.maxZoom || 1.3, want / Math.max(tg.h, 0.1)));
+        auto = { zoom: r3(z), x: tg.cx, y: Math.min(tg.cy, 0.5) };
+      }
+    }
+    const zoom = c.zoom ?? auto?.zoom ?? s.zoom ?? 1;
+    const cx = c.x ?? auto?.x ?? s.x ?? 0.5, cy = c.y ?? auto?.y ?? s.y ?? 0.5;
     // 先等比铺满画面，再按 zoom 放大，以 (x, y) 为中心裁出 W×H
     const vf = [
       `scale=${Math.round(W * zoom)}:${Math.round(H * zoom)}:force_original_aspect_ratio=increase:flags=lanczos`,
@@ -458,6 +586,14 @@ if (cmd === 'align') {
   if (!o.master) die('用法：montage.mjs beats --master <音轨来源> [--from 秒] [--to 秒]');
   const b = beats(o.master, { from: Number(o.from) || 0, to: o.to ? Number(o.to) : Infinity });
   console.log(JSON.stringify({ ...b, beats: o.all ? b.beats : `${b.beats.length} 拍（加 --all 全部列出）` }, null, 1));
+} else if (cmd === 'track') {
+  if (!o.spec) die('用法：montage.mjs track --spec montage.json [--step 0.5]');
+  const file = path.resolve(o.spec); const dir = path.dirname(file);
+  const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const s of spec.sources) s.duration ??= duration(path.resolve(dir, s.file));
+  const rep = track(spec, dir, { step: Number(o.step) || 0.5 });
+  fs.writeFileSync(file, JSON.stringify(spec, null, 1));
+  console.log(JSON.stringify(rep, null, 1));
 } else if (cmd === 'skips') {
   if (!o.master) die('用法：montage.mjs skips --master <音轨来源> [--within 90,150] [--min 5] [--max 30] [--step 8]');
   const w = o.within ? String(o.within).split(',').map(Number) : [0, Infinity];
