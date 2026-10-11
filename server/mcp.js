@@ -27,7 +27,9 @@ async function call(method, pathname, body, timeoutMs = 30000) {
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
+  } catch (err) {
+    // 超时和连不上是两回事：超时时工作台往往还在后台做（截网页、下载视频），做完结果照样会存上
+    if (err?.name === 'TimeoutError') throw new Error(`工作台这一步超过 ${Math.round(timeoutMs / 1000)} 秒还没做完，可能还在后台继续（截网页、下载视频这类慢操作做完会照样存上）。先接着做别的，过一会儿用 get_item 看结果，不要马上重试同一个。`);
     throw new Error(`连不上工作台服务（${BASE}）。请先在项目目录运行 npm start。`);
   }
   const data = await res.json().catch(() => ({}));
