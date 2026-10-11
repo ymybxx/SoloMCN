@@ -324,6 +324,10 @@ func transition(_ type: String, k: Int, n: Int, incoming: CIImage, prevTail: [CV
     return incoming
   }
 }
+// 全程锁定时把位置、大小接力下去：上一刀最后一帧他在成片里实际在哪、多大，新一刀开头就先放到同一个地方、同样大小，
+// 再在约 1 秒里慢慢回到统一的位置和大小（上一刀如果因为原画不够没能放到正中，新一刀也不会突然跳到正中）
+var carry: (x: Double, y: Double, s: Double)? = nil // 脖子在成片里的位置、身体大小（躯干像素）
+let carryFrames = max(1.0, job.fps * 1.0)
 let cutMode = job.mode == "cut"
 let E = max(1.0, (job.ease ?? 0.5) * job.fps)
 func smooth01(_ x: Double) -> Double { let t = min(1, max(0, x)); return t * t * (3 - 2 * t) }
@@ -362,6 +366,13 @@ for (si, seg) in job.segments.enumerated() {
     // 裁切框：让脖子落在目标位置，框不出原画
     var S = S
     var x0 = neckX[j] * S - job.target.x * W, y0 = neckY[j] * S - job.target.y * H
+    if !cutMode, let c = carry, si > 0, p.torso > 0 {
+      let w = smooth01(1 - Double(k) / carryFrames)
+      let Sc = c.s / p.torso // 让他和上一刀结尾一样大
+      S = min(s0 * job.zoomMax, max(s0 * job.zoomMin, S + (Sc - S) * w))
+      let wantX = job.target.x * W + (c.x - job.target.x * W) * w, wantY = job.target.y * H + (c.y - job.target.y * H) * w
+      x0 = neckX[j] * S - wantX; y0 = neckY[j] * S - wantY
+    }
     if cutMode {
       // 只在换装瞬间对齐：开头 E 帧从对齐过渡到原机位，结尾 E 帧从原机位过渡到对齐；第一刀开头、最后一刀结尾不对齐
       let wIn = si == 0 ? 0 : smooth01(1 - Double(k) / E)
@@ -378,6 +389,8 @@ for (si, seg) in job.segments.enumerated() {
     // 没有背景虚化就只能在原画范围里移动
     let over = job.background != nil ? 0.3 : 0.0
     x0 = min(max(-W * over, x0), sw * S - W + W * over); y0 = min(max(-H * over, y0), sh * S - H + H * over)
+    // 记下这一刀结尾（切点前最后一帧）他实际在哪、多大，给下一刀接力
+    if k == seg.frames - 1, p.torso > 0 { carry = (neckX[j] * S - x0, neckY[j] * S - y0, p.torso * S) }
     // 切点放大回弹
     var punch = 1.0, ev = 0.0
     if fx.type == "pulse", k < fx.frames {

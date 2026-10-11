@@ -4,6 +4,7 @@
 //
 //   node montage.mjs align  --master <音轨来源.mp4> <片段1.mp4> <片段2.mp4> ...   各片段相对主音轨的时间差，带可信度
 //   node montage.mjs beats  --master <音轨来源.mp4> [--from 秒] [--to 秒]              主音轨的 BPM 和每一拍的时间
+//   node montage.mjs check  --spec montage.json --video renders/video.mp4              成片核对：每个切点前后他的位置、大小有没有跳，哪些时段他被挡住或认不出
 //   node montage.mjs fx     --spec montage.json                                         按段落地图给每一刀挑换装转场（扫描、残影、光门、甩切、脉冲、叠化），写进 cuts[].fx
 //   node montage.mjs sections --master <音轨来源>                                       段落地图：小节、乐句、每段能量（0 安静–3 高潮）、爆点
 //   node montage.mjs skips  --master <音轨来源> --within 90,150                     找能无缝砍掉的整数个八拍（成片超时长时用，写进 audio.skip）
@@ -387,7 +388,7 @@ function plan(spec, dir) {
   const motion = spec.structure && spec.matchMotion !== false ? posesOf(spec, dir) : null;
   // 统一大小：主角在各场里的身体大小（骨架算的，占画面高的比例）。全程锁定时只用能缩放到同一大小的镜头，
   // 目标大小选「能覆盖最多镜头」的那个，写进 lock.torso 给渲染用
-  let sizeOk = null;
+  let sizeOk = null, edgeOk = null;
   if (motion && spec.lock?.mode === 'full') {
     const zMin = spec.lock.zoomMin ?? 1.15, zMax = spec.lock.zoomMax ?? 1.6;
     const all = Object.values(motion).flatMap((P) => P.samples.filter((x) => x.ok).map((x) => x.torso)).sort((a, b) => a - b);
@@ -400,11 +401,26 @@ function plan(spec, dir) {
     spec.lock.torso = r3(T);
     // 能不能锁住：这段里大部分时刻，主角能缩放到统一大小，而且放大后裁切框能把他放到画面中间（不会顶到原画边上）
     const ty = spec.lock.y ?? 0.3, aspect = 16 / 9;
+    // 切点前后 0.25 秒（a 附近）这一小段能不能放到正中：换装那一刻最要紧，比整段的比例更严（偏差只允许 5%）
+    const fitAt = (x, tol) => {
+      if (!x?.ok || x.joints.filter(Boolean).length < (spec.lock.minJoints ?? 7)) return false;
+      const z = T / x.torso;
+      if (z < zMin * 0.92 || z > zMax * 1.08) return false;
+      const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
+      return nx >= 0.5 / zc - tol && nx <= 1 - 0.5 / zc + tol && ny >= ty / zc - tol && ny <= 1 - (1 - ty) / zc + tol;
+    };
+    edgeOk = (s, off, t) => {
+      const xs = motion[s.id].samples.filter((x) => Math.abs(x.t - (t + off)) <= 0.25);
+      return xs.length >= 3 && xs.filter((x) => fitAt(x, 0.05)).length / xs.length >= 0.8;
+    };
     sizeOk = (s, off, a, b) => {
+      if (!edgeOk(s, off, a) || !edgeOk(s, off, b)) return false;
       const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off);
       if (xs.length < 3) return false;
       const ok = xs.filter((x) => {
         if (!x.ok) return false;
+        // 被挡住：12 个主要关节里看得见的少于 7 个，多半是前面有人挡着他
+        if (x.joints.filter(Boolean).length < (spec.lock.minJoints ?? 7)) return false;
         const z = T / x.torso;
         if (z < zMin * 0.92 || z > zMax * 1.08) return false;
         const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
@@ -811,6 +827,40 @@ function audit(spec, dir, table, { fix = false, only = null } = {}) {
   return { flagged, changes, cuts };
 }
 
+// ---------- 成片核对：量成片里每个切点前后他的位置、大小，找出跳位的刀和被挡的时段 ----------
+function checkVideo(spec, dir, video, table) {
+  const lock = spec.lock || {};
+  const tx = lock.x ?? 0.5, ty = lock.y ?? 0.3;
+  const len = duration(video);
+  // 认人框：成片里他应该在锁定的位置附近
+  const track = []; for (let t = 0; t < len; t += 0.5) track.push([r3(t), tx, Math.min(0.9, ty + 0.3), 0.5, 0.95]);
+  const job = path.join(os.tmpdir(), `check-job-${process.pid}.json`);
+  fs.writeFileSync(job, JSON.stringify({ file: video, step: 1 / 15, track }));
+  const r = spawnSync(poseBin(), [job], { maxBuffer: 1 << 28, encoding: 'utf8' });
+  fs.rmSync(job, { force: true });
+  if (r.status !== 0) die(`成片骨架提取失败：${r.stderr}`);
+  const S = JSON.parse(r.stdout).samples;
+  const at = (t) => S.reduce((b, x) => (Math.abs(x.t - t) < Math.abs(b.t - t) ? x : b), S[0]);
+  const vis = (x) => x?.ok && x.joints.filter(Boolean).length >= (lock.minJoints ?? 7);
+  const jumps = [];
+  for (const c of table.slice(1)) {
+    const a = at(c.out - 0.1), b = at(c.out + 0.1);
+    if (!a?.ok || !b?.ok) { jumps.push({ out: c.out, src: c.src, why: '切点前后认不出他' }); continue; }
+    const dx = (b.neck[0] - a.neck[0]) * 16 / 9, dy = b.neck[1] - a.neck[1], d = Math.hypot(dx, dy);
+    const ratio = Math.max(a.torso, b.torso) / Math.min(a.torso, b.torso);
+    if (d > (spec.checkJump ?? 0.08) || ratio > 1.3) jumps.push({ out: c.out, src: c.src, jump: r3(d), size: r3(ratio), why: d > 0.08 ? '位置跳了' : '大小跳了' });
+  }
+  // 连续 1 秒以上认不出或者被挡住
+  const blocked = [];
+  let start = null;
+  for (const x of S) {
+    if (!vis(x)) { if (start == null) start = x.t; }
+    else if (start != null) { if (x.t - start >= 1) blocked.push([r3(start), r3(x.t)]); start = null; }
+  }
+  if (start != null && len - start >= 1) blocked.push([r3(start), r3(len)]);
+  return { cuts: table.length, jumps, blocked };
+}
+
 // ---------- 渲染 ----------
 function esc(t) { return String(t).replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\u2019").replace(/%/g, '\\%'); }
 
@@ -997,6 +1047,13 @@ if (cmd === 'align') {
     fs.writeFileSync(path.resolve(dir, o.out || 'montage-fixed.json'), JSON.stringify(outSpec, null, 1));
   }
   console.log(JSON.stringify({ flagged: r.flagged.map((f) => ({ out: f.out, dur: f.dur, src: f.src, label: f.label, why: f.why })), changes: r.changes }, null, 1));
+} else if (cmd === 'check') {
+  if (!o.spec) die('用法：montage.mjs check --spec montage.json [--video renders/video.mp4] [--cuts renders/video-cuts.json]');
+  const file = path.resolve(o.spec); const dir = path.dirname(file);
+  const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const video = path.resolve(dir, o.video || 'renders/video.mp4');
+  const table = JSON.parse(fs.readFileSync(path.resolve(dir, o.cuts || video.replace(/\.mp4$/, '-cuts.json')), 'utf8'));
+  console.log(JSON.stringify(checkVideo(spec, dir, video, table), null, 1));
 } else if (cmd === 'fx') {
   if (!o.spec) die('用法：montage.mjs fx --spec montage.json（按段落地图重新给每一刀挑转场，切点不动）');
   const file = path.resolve(o.spec);
