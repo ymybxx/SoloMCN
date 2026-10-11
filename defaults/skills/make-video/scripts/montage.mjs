@@ -127,7 +127,7 @@ function scan(win, ec, start) {
 // 对齐：整体时间差 + 分段复核。单场直拍的音轨是连续的，整首用同一个时间差；
 // 删减版、多天混剪（中间有接缝）在接缝后时间差会变：每 8 秒一个窗口复核，
 // 连续 3 个以上窗口都明确指向另一个位置，才认为这里有接缝，另起一段（副歌重复会造成假匹配，所以门槛高）。
-function align(master, clips, { maxShift = 120 } = {}) {
+function align(master, clips, { maxShift = 120, debug = false } = {}) {
   const em = envelope(master);
   const W = 8 * ENV_HZ, HOPW = 4 * ENV_HZ;
   const out = [];
@@ -155,7 +155,12 @@ function align(master, clips, { maxShift = 120 } = {}) {
       if (windows[i].state !== 'shift') continue;
       let j = i;
       while (j + 1 < windows.length && windows[j + 1].state === 'shift' && Math.abs(windows[j + 1].far.offset - windows[i].far.offset) < 0.05) j++;
-      if (j - i + 1 < 3) for (let k = i; k <= j; k++) windows[k].state = 'unknown';
+      // 前后最近的可信窗口都还在原来的时间差上，说明中间没有接缝（接缝之后时间差会一直变着）：
+      // 远处的峰多半是 UP 主片头里放过的同一段歌，或者副歌重复
+      const before = windows.slice(0, i).reverse().find((w) => w.state !== 'unknown');
+      const after = windows.slice(j + 1).find((w) => w.state !== 'unknown');
+      const sandwiched = before?.state === 'match' && after?.state === 'match';
+      if (j - i + 1 < 3 || sandwiched) for (let k = i; k <= j; k++) windows[k].state = 'unknown';
       i = j;
     }
     // 拼段：match/unknown 用整体时间差，shift 用自己的时间差；接缝两边各收 1 秒
@@ -175,6 +180,7 @@ function align(master, clips, { maxShift = 120 } = {}) {
     const covered = r3(segments.reduce((a, x) => a + x.to - x.from, 0));
     out.push({
       file: f, offset: r3(G), z: Math.round(g.z * 10) / 10, segments, covered,
+      ...(debug ? { windows: windows.map((w) => ({ at: w.from, state: w.state, near: w.near && [r3(w.near.offset), Math.round(w.near.z * 10) / 10], far: w.far && [r3(w.far.offset), Math.round(w.far.z * 10) / 10] })) } : {}),
       // 整体可信度低、或者大部分窗口都对不上，就别用
       ok: g.z >= 8 && covered >= 20,
     });
@@ -377,7 +383,7 @@ const o = args(process.argv.slice(2));
 const cmd = o._.shift();
 if (cmd === 'align') {
   if (!o.master || !o._.length) die('用法：montage.mjs align --master <音轨来源> <片段...>');
-  console.log(JSON.stringify(align(o.master, o._, { maxShift: Number(o['max-shift']) || 120 }), null, 1));
+  console.log(JSON.stringify(align(o.master, o._, { maxShift: Number(o['max-shift']) || 120, debug: !!o.debug }), null, 1));
 } else if (cmd === 'beats') {
   if (!o.master) die('用法：montage.mjs beats --master <音轨来源> [--from 秒] [--to 秒]');
   const b = beats(o.master, { from: Number(o.from) || 0, to: o.to ? Number(o.to) : Infinity });
