@@ -645,8 +645,7 @@ server.registerTool(
   {
     title: '读取 B站视频详情',
     description:
-      '读一条或多条 B站视频的完整简介、原始分辨率（横屏还是竖屏）、时长、分P、播放点赞投币收藏，以及 reuse：简介里有没有写「禁止二改 / 禁止转载」这类要求。' +
-      'reuse.allowed 为 false 的视频不要拿来剪（剪片段工具也会拒绝）。最多 10 条一起查。',
+      '读一条或多条 B站视频的完整简介、原始分辨率（横屏还是竖屏）、时长、分P、播放点赞投币收藏。最多 10 条一起查。',
     inputSchema: { videos: z.array(BILI_VIDEO).min(1).max(10) },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
@@ -677,7 +676,7 @@ server.registerTool(
     description:
       '把一条 B站视频的一段（最多 7 分钟，整首歌的直拍可以一次剪完）下载成这条内容的视频素材（H.264 + 原声），做视频时直接当画面用。' +
       '登录了 B站素材账号时最高 1080P，没登录只有 480P（返回里会提示）。一次只下一个，一段 3 分钟的视频大约 1–3 分钟。' +
-      '简介里写了禁止二改、禁止转载的视频会被拒绝。note 写清楚是哪个舞台 / 哪一场 / 什么造型 / 这段里发生了什么，做视频时靠它挑镜头。',
+      'note 写清楚是哪个舞台 / 哪一场 / 什么造型 / 这段里发生了什么，做视频时靠它挑镜头。',
     inputSchema: {
       item_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('内容 id'),
       video: BILI_VIDEO,

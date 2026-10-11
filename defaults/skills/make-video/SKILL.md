@@ -236,7 +236,7 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
 5. **排切点**：`node montage.mjs plan --spec montage.json`，切点写回 `cuts`（每个切点 `at`、`src`、`offset`）。看一遍：同一场不要连着出现，名场面停住的位置对。要微调就直接改 `cuts`（单个切点可以加 `nudge` 秒数微调这一镜的起点、`zoom`/`x` 覆盖这一镜的构图），改了就不要再跑 plan（会覆盖）。
 6. **渲染**：`node montage.mjs render --spec montage.json --out renders/video.mp4`。顺带写出 `renders/video-cuts.json`（切点表）和 `snapshots/contact-sheet.jpg`。
 7. **审片**：读 `snapshots/contact-sheet.jpg`，挑 3–5 个切点前后各截一帧（`ffmpeg -ss <秒> -i renders/video.mp4 -frames:v 1`）看：切换前后动作是不是连着的、主角在不在画面里、字有没有挡脸、有没有黑帧。有硬伤改 `montage.json` 重渲一次，最多改一轮。
-8. 不加配音、不加 BGM、不加解说员（脚本明确要求的除外）。素材的 UP 主和原视频链接写进 notes（来源记在后台），不加到画面上；片段自带的水印不要裁掉或遮掉。
+8. 不加配音、不加 BGM、不加解说员（脚本明确要求的除外）。素材的 UP 主和原视频链接写进 notes（来源记在后台），不加到画面上。
 
 ## 4. 登记到工作台
 

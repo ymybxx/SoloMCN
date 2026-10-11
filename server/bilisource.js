@@ -1,4 +1,4 @@
-// B站视频素材：搜视频、读详情和简介里的转载要求、按弹幕找高能时刻、把视频的一段剪下来存成这条内容的素材。
+// B站视频素材：搜视频、读详情、按弹幕找高能时刻、把视频的一段剪下来存成这条内容的素材。
 // 调研时用（追星舞台、综艺、游戏、影视这类要用真实片段的选题）。只用公开接口，一次只下一个，不批量扒站。
 // 不登录最高 480P；在「渠道 → B站热门视频」扫码登录一个 B站账号后能下 1080P。这个登录和发布用的 B站账号分开，
 // cookie 存在 data/bilibili-cookies.json（只有本机账号能读，不进 git）。
@@ -15,8 +15,6 @@ const MIX = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43
 const MAX_CLIP_S = 420; // 一次最多剪这么长（整首歌的直拍也能一次下完）
 const MAX_HEIGHT = 1080; // 素材够用就行，不下 4K
 const MIN_GAP_MS = 1500; // 两次请求 B站至少隔这么久
-// 简介里写了这些，就是 UP 主不同意别人拿去剪：不下载
-const NO_REUSE = /(禁止?|勿|不[可要准许得]|谢绝|严禁|拒绝)\s*(二改|二传|二次(剪辑|创作|加工|上传|修改)|转载|搬运|商用|二用|盗用|截取|剪辑)|禁二|勿二|未经(授权|允许|同意)[^。\n]{0,8}(使用|转载|搬运)|ban\s*二改/i;
 
 const badRequest = (message) => Object.assign(new Error(message), { status: 400 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -35,13 +33,6 @@ export function parseVideo(v) {
   const av = s.match(/(?:^|\/|av)(\d{4,})/i);
   if (av) return { aid: av[1], p };
   throw badRequest(`认不出这个 B站视频：${s.slice(0, 80)}（给 BV 号或视频链接）`);
-}
-
-// 简介里的转载要求：命中「禁止二改 / 禁止转载」这类就不能拿来剪
-export function reuseOf(desc, copyright) {
-  const m = String(desc || '').match(NO_REUSE);
-  if (m) return { allowed: false, why: `简介写了「${m[0]}」` };
-  return { allowed: true, why: copyright === 2 ? '标的是转载，原作者不是这个 UP 主，出处记原作者' : undefined };
 }
 
 export function createBiliSource({ root }) {
@@ -129,7 +120,6 @@ export function createBiliSource({ root }) {
     for (const v of list.slice(0, 10)) {
       try {
         const { d } = await view(v);
-        const reuse = reuseOf(d.desc, d.copyright);
         out.push({
           bvid: d.bvid,
           title: d.title,
@@ -142,7 +132,6 @@ export function createBiliSource({ root }) {
           size: d.dimension ? `${d.dimension.rotate ? d.dimension.height : d.dimension.width}×${d.dimension.rotate ? d.dimension.width : d.dimension.height}` : undefined,
           pages: d.pages?.length > 1 ? d.pages.map((x) => ({ p: x.page, title: x.part, duration: mmss(x.duration) })) : undefined,
           desc: String(d.desc || '').slice(0, 600) || undefined,
-          reuse,
           url: `https://www.bilibili.com/video/${d.bvid}`,
         });
       } catch (err) {
@@ -206,8 +195,6 @@ export function createBiliSource({ root }) {
 
   async function doClip({ itemId, video, start, end }) {
     const { d, p } = await view(video);
-    const reuse = reuseOf(d.desc, d.copyright);
-    if (!reuse.allowed) throw badRequest(`UP 主不同意别人拿去剪（${reuse.why}），换官方或没写禁止的视频`);
     const page = d.pages?.find((x) => x.page === (p || 1)) || d.pages?.[0];
     if (!page) throw badRequest('这个视频没有可读的分P');
     const from = Math.max(0, seconds(start));

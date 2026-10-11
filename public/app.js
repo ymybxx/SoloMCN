@@ -986,7 +986,7 @@ function vBiliLogin(){
   else body=`${run?.status==='failed'||run?.exported?.ok===false?`<p class="err">${esc(run.exported?.message||run.message)}</p>`:''}<div><button class="btn" data-act="bl-start">扫码登录 B站</button></div>`;
   return `<div class="panel grid" style="gap:10px"><div class="blk-head"><h3>剪 B站片段用的登录 <span class="faint" style="font-weight:400">可选</span></h3>${pill}</div>
     ${body}
-    <p class="hint">调研时 Claude 会从 B站搜舞台直拍、纯享、名场面，剪成片段当素材。不登录只能下到 480P，放进成片会糊；登录后能下 1080P。和「账号矩阵」里发布用的 B站账号分开，建议用小号。简介里写了禁止二改、禁止转载的视频不会下载。登录信息只存在这台电脑上。</p></div>`;
+    <p class="hint">调研时 Claude 会从 B站搜舞台直拍、纯享、名场面，剪成片段当素材。不登录只能下到 480P，放进成片会糊；登录后能下 1080P。和「账号矩阵」里发布用的 B站账号分开，建议用小号。登录信息只存在这台电脑上。</p></div>`;
 }
 async function biliLoginStart(){
   try{S.biliLoginRun=await api('POST','/api/bili/login/start')}catch(e){toast(e.message||'打开登录窗口失败');return}
