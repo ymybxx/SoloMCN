@@ -19,6 +19,7 @@ import { createLab } from './lab.js';
 import { createCharacters } from './characters.js';
 import { runClaude } from './cli.js';
 import { captureSource } from './assets.js';
+import { createBiliSource } from './bilisource.js';
 import { watchVideo, probe } from './watch.js';
 import { publicConfig, setImage, clearImage, setClaudeToken, clearClaudeToken } from './secrets.js';
 
@@ -58,6 +59,8 @@ const skills = createSkills({ root });
 const setupCheck = createSetupCheck({ hotUrl: HOT_URL });
 // 拉 YouTube 字幕用的登录（可选），cookie 导出到 data/youtube-cookies.txt 给热点服务的 yt-dlp 用
 const ytLogin = createYtLogin({ root });
+// B站视频素材（调研时搜视频、找高能时刻、剪片段）；可选的 B站登录只为了下 1080P
+const bili = createBiliSource({ root });
 {
   const r = skills.sync();
   if (r.installed.length) console.log(`已装上出厂技能：${r.installed.join('、')}`);
@@ -285,6 +288,29 @@ ${mine}`;
     if (parts[1] === 'check' && method === 'POST') return sendJson(res, 200, await ytLogin.check());
     if (parts[1] === 'logout' && method === 'POST') return sendJson(res, 200, ytLogin.logout());
   }
+  // B站视频素材：搜索、详情、弹幕高能时刻；登录（可选，下 1080P 用）
+  if (parts[0] === 'bili') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    try {
+      if (parts[1] === 'search' && method === 'GET') return sendJson(res, 200, await bili.search({ q: q.get('q'), order: q.get('order') || 'totalrank', limit: Number(q.get('limit')) || 20, days: Number(q.get('days')) || 0, duration: Number(q.get('duration')) || 0 }));
+      if (parts[1] === 'videos' && method === 'GET') return sendJson(res, 200, await bili.videos(String(q.get('ids') || '').split(',').filter(Boolean)));
+      if (parts[1] === 'highlights' && method === 'GET') return sendJson(res, 200, await bili.highlights(q.get('video'), { window: Number(q.get('window')) || 5, top: Number(q.get('top')) || 8 }));
+    } catch (err) {
+      return sendError(res, err.status || 502, 'bili_failed', err.message);
+    }
+    if (parts[1] === 'login') {
+      const L = bili.login;
+      if (parts.length === 2 && method === 'GET') return sendJson(res, 200, L.status());
+      if (parts[2] === 'start' && method === 'POST') return sendJson(res, 200, L.start());
+      if (parts[2] === 'done' && method === 'POST') return sendJson(res, 200, { ok: await L.finish() });
+      if (parts[2] === 'progress' && parts[3] && method === 'GET') {
+        const st = L.progress(parts[3]);
+        return st ? sendJson(res, 200, st) : sendError(res, 404, 'not_found', '没有这次登录');
+      }
+      if (parts[2] === 'check' && method === 'POST') return sendJson(res, 200, await L.check());
+      if (parts[2] === 'logout' && method === 'POST') return sendJson(res, 200, L.logout());
+    }
+  }
   // 其他热点数据接口原样转发：/api/hs/global、/api/hs/feed、/api/hs/channels、/api/hs/x/pool、/api/hs/x/search?q=...、/api/hs/youtube/search?q=...
   if (parts[0] === 'hs' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) {
     const rest = parts.slice(1).join('/');
@@ -431,6 +457,19 @@ ${mine}`;
         return sendJson(res, 200, { title: r.title, files: added.map((a) => ({ id: a.id, kind: a.kind, file: a.file, part: a.part })), skippedVideos: r.skippedVideos });
       } catch (err) {
         return sendError(res, err.status || 502, 'capture_failed', `截图失败：${String(err.message).split('\n')[0].slice(0, 200)}`);
+      }
+    }
+    // 剪一段 B站视频存成素材：{ video, start, end, note }
+    if (parts.length === 4 && parts[3] === 'bili' && method === 'POST') {
+      const body = await readBody(req);
+      try {
+        const r = await bili.clip({ itemId: parts[1], video: String(body.video || ''), start: body.start, end: body.end });
+        const a = { id: `${Date.now().toString(36)}0`, kind: 'video', file: r.file, part: r.part, url: r.url, title: r.title, note: String(body.note || '').slice(0, 300), source: 'bilibili', at: Date.now() };
+        const cur = store.get('items', parts[1]).assets || [];
+        await store.update('items', parts[1], { assets: [...cur, a].slice(-80), updatedAt: Date.now() });
+        return sendJson(res, 200, { id: a.id, file: a.file, part: a.part, quality: r.quality, loggedIn: r.loggedIn, ...(r.loggedIn ? {} : { hint: '没登录 B站，只能下到 480P；在「渠道 → B站热门视频」登录后能下 1080P' }) });
+      } catch (err) {
+        return sendError(res, err.status || 502, 'clip_failed', err.message);
       }
     }
     if (parts.length === 4 && method === 'DELETE') {

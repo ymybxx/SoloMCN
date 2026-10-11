@@ -619,6 +619,76 @@ server.registerTool(
   tool(async ({ item_id, url, note, videos }) => call('POST', `/api/items/${item_id}/assets`, { url, note, videos: !!videos }, 240000)),
 );
 
+// ---------- B站视频素材 ----------
+const BILI_VIDEO = z.string().min(3).describe('BV 号或视频链接（多 P 视频在链接里带 ?p=2）');
+
+server.registerTool(
+  'bilibili_search',
+  {
+    title: '搜索 B站视频',
+    description:
+      '按关键词搜 B站视频，每条带 UP 主、时长、播放、弹幕、收藏、发布日期、标签和简介开头。用来找舞台直拍、官方纯享、综艺片段、游戏实况、影视剪辑这类要用真实画面的素材，也能看某个话题在 B站火不火。' +
+      '换几种说法多搜几次（人名+歌名+直拍 / 纯享 / 官摄 / 4K / 场次名），按播放量（click）和综合（totalrank）各看一遍。',
+    inputSchema: {
+      q: z.string().min(1).describe('关键词，例如「苏新皓 竞速游戏 直拍」'),
+      order: z.enum(['totalrank', 'click', 'pubdate', 'dm', 'stow']).optional().describe('totalrank 综合（默认）/ click 播放最多 / pubdate 最新 / dm 弹幕最多 / stow 收藏最多'),
+      limit: z.number().int().min(1).max(50).optional().describe('默认 20'),
+      days: z.number().int().min(0).max(3650).optional().describe('只看最近多少天发布的，默认不限'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ q, order = 'totalrank', limit = 20, days = 0 }) => call('GET', `/api/bili/search?${new URLSearchParams({ q, order, limit: String(limit), days: String(days) })}`)),
+);
+
+server.registerTool(
+  'bilibili_video',
+  {
+    title: '读取 B站视频详情',
+    description:
+      '读一条或多条 B站视频的完整简介、原始分辨率（横屏还是竖屏）、时长、分P、播放点赞投币收藏，以及 reuse：简介里有没有写「禁止二改 / 禁止转载」这类要求。' +
+      'reuse.allowed 为 false 的视频不要拿来剪（剪片段工具也会拒绝）。最多 10 条一起查。',
+    inputSchema: { videos: z.array(BILI_VIDEO).min(1).max(10) },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ videos }) => call('GET', `/api/bili/videos?${new URLSearchParams({ ids: videos.join(',') })}`, null, 60_000)),
+);
+
+server.registerTool(
+  'bilibili_highlights',
+  {
+    title: 'B站视频的高能时刻',
+    description:
+      '按弹幕密度找一条 B站视频里观众反应最强的几段（名场面、高音、炸场的动作、笑点），每段带起止时间、比平均密集几倍、观众在刷什么。' +
+      '用来挑剪哪几秒：舞台混剪、综艺名场面、游戏高光都先看这个。弹幕取的是 B站公开的抽样，只当参考。',
+    inputSchema: {
+      video: BILI_VIDEO,
+      window: z.number().int().min(2).max(30).optional().describe('按几秒一格统计，默认 5'),
+      top: z.number().int().min(1).max(20).optional().describe('返回几段，默认 8'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ video, window = 5, top = 8 }) => call('GET', `/api/bili/highlights?${new URLSearchParams({ video, window: String(window), top: String(top) })}`, null, 60_000)),
+);
+
+server.registerTool(
+  'capture_bilibili',
+  {
+    title: '收集素材：剪 B站视频片段',
+    description:
+      '把一条 B站视频的一段（最多 7 分钟，整首歌的直拍可以一次剪完）下载成这条内容的视频素材（H.264 + 原声），做视频时直接当画面用。' +
+      '登录了 B站素材账号时最高 1080P，没登录只有 480P（返回里会提示）。一次只下一个，一段 3 分钟的视频大约 1–3 分钟。' +
+      '简介里写了禁止二改、禁止转载的视频会被拒绝。note 写清楚是哪个舞台 / 哪一场 / 什么造型 / 这段里发生了什么，做视频时靠它挑镜头。',
+    inputSchema: {
+      item_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('内容 id'),
+      video: BILI_VIDEO,
+      start: z.string().regex(/^\d{1,2}(:\d{1,2}){0,2}(\.\d+)?$/).optional().describe('从哪里开始，如 0:58、1:02:03；默认 0:00'),
+      end: z.string().regex(/^\d{1,2}(:\d{1,2}){0,2}(\.\d+)?$/).optional().describe('到哪里结束；默认开始后 30 秒'),
+      note: z.string().max(300).describe('例如「苏新皓《竞速游戏》260726 梦寐以求演唱会 DAY1 直拍，红发白西装，整首」'),
+    },
+  },
+  tool(async ({ item_id, video, start, end, note }) => call('POST', `/api/items/${item_id}/assets/bili`, { video, start, end, note }, 600_000)),
+);
+
 // ---------- 生成视频 ----------
 const VIDEO_PATH = z.string().regex(/^videos\/[A-Za-z0-9._-]+\/[A-Za-z0-9._\/-]+$/).describe('相对项目根目录的路径，以 videos/ 开头');
 
@@ -684,7 +754,7 @@ server.registerTool(
         sources: sources.length ? sources : undefined,
         research: it.research ? { text: it.research.text, sources: it.research.sources, at: it.research.at } : null,
         // 调研时收集的真实素材，file 是相对项目根目录的路径
-        assets: (it.assets || []).map((a) => ({ kind: a.kind, file: a.file, part: a.part, url: a.url, title: a.title, note: a.note })),
+        assets: (it.assets || []).map((a) => ({ kind: a.kind, file: a.file, part: a.part, url: a.url, title: a.title, note: a.note, source: a.source || undefined })),
         video: it.video ? { mp4: it.video.mp4, project: it.video.project, durationS: it.video.durationS, notes: it.video.notes, version: it.video.version || 1 } : null,
         // 调研时动手实践的实验目录（代码、网页实验、下载的结果），做视频时网页实验可以直接当镜头
         lab: labInfo?.files?.length ? labInfo : undefined,

@@ -15,6 +15,8 @@ description: 把流水线里一条内容的分镜脚本做成成片 MP4（HyperF
 
 `get_item` 的 `series` 是这条所属的系列：画面风格、版式、时长以系列为准，角色形象和配音按账号。从脚本里读出：标题备选、时长、画幅（例如"竖屏 9:16"）、每个分镜的画面 / 台词 / 字幕、BGM 与音效。从账号里读出人群、人设（固定角色的样子）、风格（颜色、画面、语气）。先按下文的「作品正文与后台记录」清理旧的附加提示。
 
+**脚本里有【剪辑方案】的是原片剪辑**（一键换装、舞台混剪）：不走下面的第 2、3 步和 HyperFrames，按下文「原片剪辑」做，做完照常第 4 步登记、第 5 步汇报。
+
 ## 2. 建项目
 
 在项目根目录（当前工作目录）下建 HyperFrames 项目：
@@ -204,6 +206,37 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
 ## 内容要求
 
 - **唯一的红线：不伪造。** 不编造新闻、事件、测试结果和数据；不用 AI 合成真人的脸或声音，让他说没说过的话、做没做过的事。除此之外不设限制：可以点名真实的公司、产品、开源项目、博主和公众人物，可以用他们公开的网页、帖子截图和官方视频片段做介绍和评论（出处记在后台）。
+
+## 原片剪辑：一键换装、舞台混剪
+
+画面全是 `assets` 里的真实片段（多数是调研时从 B站剪的整首直拍），声音是一条主音轨的歌曲原声，各片段按音轨对齐、踩着拍子切换：同一个动作接着跳，造型一下变了，这就是「一键换装」。用本技能目录下的 `scripts/montage.mjs`（ffmpeg 逐段截取拼接，帧精确，几分钟出片），不用 HyperFrames 渲染。
+
+1. **建目录** `videos/<两到四个英文单词>-<内容 id>/`（已有没做完的就接着做，规则同第 2 步），里面放 `montage.json`。素材路径直接写相对这个目录的路径（例如 `../_assets/<内容 id>/xxx.mp4`），不要复制大文件。
+2. **对齐**：`node <本技能目录>/scripts/montage.mjs align --master <主音轨素材> <各片段...>`。每条返回 `offset`（片段时间 − 主音轨时间）、`z`（可信度）、`segments`（能用的时间段和各段时间差）、`ok`。`ok` 为 false 的不用，在 notes 里记原因（多半是编曲不同、不是同一首、音质太差）。主音轨素材本身如果主角不在画面里（官方 MV 的群舞镜头），只用声音，不放进 sources。
+3. **写 `montage.json`**：
+   ```json
+   {
+     "size": [1920, 1080], "fps": 30,
+     "audio": { "file": "../_assets/<id>/master.mp4", "start": 3.2, "end": 182.5, "fadeIn": 0.4, "fadeOut": 1.5 },
+     "sources": [
+       { "id": "d1", "file": "../_assets/<id>/a.mp4", "offset": 21.368, "segments": [ {"from": 0, "to": 191.8, "offset": 21.368} ], "label": "0726 梦寐以求", "x": 0.5, "y": 0.45, "zoom": 1.0, "exclude": [[88, 92]] }
+     ],
+     "auto": { "beatsPerCut": 4, "seed": 1, "sections": [ {"from": 60, "to": 75, "beatsPerCut": 2} ] },
+     "pins": [ {"from": 120.4, "to": 126.6, "src": "d1"} ],
+     "texts": [ {"text": "苏新皓《竞速游戏》一键换装", "from": 3.2, "to": 6, "size": 0.065, "y": 0.12} ],
+     "labels": true
+   }
+   ```
+   - `size` 按脚本【剪辑方案】的画幅；`audio.start/end` 按脚本的主音轨范围，总长不超过系列时长。
+   - `sources` 用 align 的 `offset` 和 `segments` 原样填；`label` 是画面左下角的场次小字（脚本素材表里的），不要就不填或 `labels: false`。
+   - `x`/`y`/`zoom`：主角在画面里的位置和放大倍数。直拍一般主角已经居中，用默认；主角偏了、太小，就调 `x`（0–1，主角的横向位置）、`zoom`（1.0–1.6，放大会损失清晰度，480P 素材不要放大）。素材和成片横竖屏不一致时一定要设 `x`，保证裁出来的是主角。
+   - `exclude`：某条片段在某段主音轨时间里挡镜头、失焦、转去拍别人，就排除掉。
+   - `auto`：每几拍切一次（`beatsPerCut`），`sections` 给副歌、鼓点密的地方加快到 2 拍；`pins`：脚本里要停住的名场面，指定用哪一场、从几秒到几秒。拍点用 `beats` 子命令看（`node montage.mjs beats --master <主音轨素材>`，会给 BPM 和候选），时间都是主音轨时间。
+4. **查对齐和构图**：`node montage.mjs compare --spec montage.json --at <5–8 个时间点，覆盖主歌、副歌、舞蹈段>`，生成 `review/compare.jpg`：每一行是同一时刻、每一列是一条片段。读这张图：同一行的动作应该是同一拍的同一个动作；对不上的片段（动作明显不同步）先在 notes 记下，把它 `use: false` 或用 `exclude` 去掉那一段；主角不在中间的调 `x`/`zoom`，再出一次对比图确认。
+5. **排切点**：`node montage.mjs plan --spec montage.json`，切点写回 `cuts`（每个切点 `at`、`src`、`offset`）。看一遍：同一场不要连着出现，名场面停住的位置对。要微调就直接改 `cuts`（单个切点可以加 `nudge` 秒数微调这一镜的起点、`zoom`/`x` 覆盖这一镜的构图），改了就不要再跑 plan（会覆盖）。
+6. **渲染**：`node montage.mjs render --spec montage.json --out renders/video.mp4`。顺带写出 `renders/video-cuts.json`（切点表）和 `snapshots/contact-sheet.jpg`。
+7. **审片**：读 `snapshots/contact-sheet.jpg`，挑 3–5 个切点前后各截一帧（`ffmpeg -ss <秒> -i renders/video.mp4 -frames:v 1`）看：切换前后动作是不是连着的、主角在不在画面里、字有没有挡脸、有没有黑帧。有硬伤改 `montage.json` 重渲一次，最多改一轮。
+8. 不加配音、不加 BGM、不加解说员（脚本明确要求的除外）。素材的 UP 主和原视频链接写进 notes（来源记在后台），不加到画面上；片段自带的水印不要裁掉或遮掉。
 
 ## 4. 登记到工作台
 

@@ -846,7 +846,7 @@ function vSources(){
   const nav=tabs.map(t=>{const [cls,label]=t.k==='xhs'?['','未接入']:chanState(t.k);
     return `<button class="chan-tab" role="tab" aria-selected="${sel===t.k}" data-act="chan-sel" data-k="${t.k}"><b>${t.n}</b><span class="pill ${cls}"><i></i>${label}</span></button>`}).join('');
   return `<div class="section-head"><h2>渠道</h2><p>每个渠道单独配置多久抓一次、抓什么，保存后下一轮抓取就生效</p></div>
-    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${(({x:vChanX,youtube:vChanYoutube,douyin:vChanDouyin,xhs:vChanXhs})[sel]||(()=>vChanList(sel)))()}</div></div>`;
+    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${(({x:vChanX,youtube:vChanYoutube,douyin:vChanDouyin,xhs:vChanXhs,bilibili:()=>vBiliLogin()+vChanList('bilibili'),'bilibili-video':()=>vBiliLogin()+vChanList('bilibili-video')})[sel]||(()=>vChanList(sel)))()}</div></div>`;
 }
 function vChanStatus(id){
   const c=chan(id);if(!c)return '<div class="panel"><p class="hint">正在读取渠道状态…</p></div>';
@@ -969,6 +969,35 @@ async function ytLoginPoll(){
   const r=S.ytLoginRun;const finished=r.status==='failed'||r.exported?.ok||r.exported?.ok===false;
   if(finished){if(r.exported?.ok){toast('YouTube 登录好了');S.ytLoginRun=null}await loadYtLogin()}
   else setTimeout(ytLoginPoll,2000);
+  requestRender();
+}
+// 剪 B站片段用的登录（可选）：不登录只能下 480P，登录后 1080P；和发布用的 B站账号分开
+async function loadBiliLogin(){try{S.biliLogin=await api('GET','/api/bili/login')}catch{S.biliLogin=null}requestRender()}
+function vBiliLogin(){
+  if(S.biliLogin===undefined){S.biliLogin=null;loadBiliLogin()}
+  const L=S.biliLogin;const run=S.biliLoginRun;
+  const busy=run&&!(run.status==='failed'||run.exported?.ok||run.exported?.ok===false);
+  const pill=!L?'<span class="pill"><i></i>读取中…</span>':L.loggedIn?'<span class="pill ok"><i></i>已登录 · 1080P</span>':'<span class="pill"><i></i>没登录 · 480P</span>';
+  let body='';
+  if(run&&run.status==='waiting')body=`<p class="hint">${esc(run.message)}</p><div><button class="btn primary" data-act="bl-done">我已登录</button></div>`;
+  else if(busy)body=`<p class="hint busy">${run.status==='done'?'登录成功，正在保存登录信息…':'正在确认登录状态…'}</p>`;
+  else if(L?.loggedIn)body=`<div class="kv">${L.uname?`<span>账号 <b>${esc(L.uname)}</b></span>`:''}${L.at?`<span>登录于 <b class="num">${esc(new Date(L.at).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}))}</b></span>`:''}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="bl-start">换个账号登录</button><button class="btn ghost" data-act="bl-check" ${S.biliLoginChecking?'disabled':''}>${S.biliLoginChecking?'检查中…':'检查登录'}</button><button class="btn ghost danger" data-act="bl-logout">退出登录</button></div>`;
+  else body=`${run?.status==='failed'||run?.exported?.ok===false?`<p class="err">${esc(run.exported?.message||run.message)}</p>`:''}<div><button class="btn" data-act="bl-start">扫码登录 B站</button></div>`;
+  return `<div class="panel grid" style="gap:10px"><div class="blk-head"><h3>剪 B站片段用的登录 <span class="faint" style="font-weight:400">可选</span></h3>${pill}</div>
+    ${body}
+    <p class="hint">调研时 Claude 会从 B站搜舞台直拍、纯享、名场面，剪成片段当素材。不登录只能下到 480P，放进成片会糊；登录后能下 1080P。和「账号矩阵」里发布用的 B站账号分开，建议用小号。简介里写了禁止二改、禁止转载的视频不会下载。登录信息只存在这台电脑上。</p></div>`;
+}
+async function biliLoginStart(){
+  try{S.biliLoginRun=await api('POST','/api/bili/login/start')}catch(e){toast(e.message||'打开登录窗口失败');return}
+  render();biliLoginPoll();
+}
+async function biliLoginPoll(){
+  const run=S.biliLoginRun;if(!run)return;
+  try{S.biliLoginRun=await api('GET','/api/bili/login/progress/'+encodeURIComponent(run.id))}catch{}
+  const r=S.biliLoginRun;const finished=r.status==='failed'||r.exported?.ok||r.exported?.ok===false;
+  if(finished){if(r.exported?.ok){toast('B站登录好了，以后剪片段用 1080P');S.biliLoginRun=null}await loadBiliLogin()}
+  else setTimeout(biliLoginPoll,2000);
   requestRender();
 }
 async function loadYtQuota(){try{S.ytQuota=await api('GET','/api/hs/youtube/quota')}catch{S.ytQuota=null}requestRender()}
@@ -1769,6 +1798,10 @@ document.addEventListener('click',e=>{
     case 'q-del':arm(b,'确认删除',()=>{const d=draft(b.dataset.ch||'x');d.settings.queries.splice(Number(k),1);d.dirty=true;S.qTest=null;render()});break;
     case 'q-test':qTest(Number(k),b.dataset.ch||'x');break;
     case 'ytl-start':ytLoginStart();break;
+    case 'bl-start':biliLoginStart();break;
+    case 'bl-done':api('POST','/api/bili/login/done').catch(e=>toast(e.message||'操作失败'));S.biliLoginRun={...S.biliLoginRun,status:'checking'};render();break;
+    case 'bl-check':S.biliLoginChecking=true;render();api('POST','/api/bili/login/check').then(r=>toast(r.ok?'登录有效，已更新登录信息':'登录已失效，重新扫码登录一次'),e=>toast(e.message||'检查失败')).finally(()=>{S.biliLoginChecking=false;loadBiliLogin()});break;
+    case 'bl-logout':arm(b,'确认退出',async()=>{try{await api('POST','/api/bili/login/logout');toast('已退出 B站素材登录')}catch(e){toast(e.message||'操作失败')}loadBiliLogin()});break;
     case 'ytl-done':api('POST','/api/youtube-login/done').catch(e=>toast(e.message||'操作失败'));S.ytLoginRun={...S.ytLoginRun,status:'checking'};render();break;
     case 'ytl-check':S.ytLoginChecking=true;render();api('POST','/api/youtube-login/check').then(r=>toast(r.ok?'登录有效，已更新登录信息':'登录已失效，重新登录一次'),e=>toast(e.message||'检查失败')).finally(()=>{S.ytLoginChecking=false;loadYtLogin()});break;
     case 'ytl-logout':arm(b,'确认退出',async()=>{try{await api('POST','/api/youtube-login/logout');toast('已退出 YouTube 登录')}catch(e){toast(e.message||'操作失败')}loadYtLogin()});break;
