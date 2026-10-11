@@ -48,6 +48,25 @@ async function findClose(page, at, words) {
   }, { at, words });
 }
 
+// 挡在前面的是不是弹窗、遮罩这类浮层（且不是把目标也包在里面的那个窗口）。
+// 有的按钮上本来就叠着自己组件里的透明元素（比如 B站「上传视频」上的上传框），那不算挡路，不清障也不问 Claude
+async function overlayInFront(page, target) {
+  const h = await target.elementHandle({ timeout: 2000 }).catch(() => null);
+  if (!h) return false;
+  return page.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    if (!hit || el.contains(hit) || hit.contains(el)) return false;
+    const cls = (x) => (typeof x.className === 'string' ? x.className : x.getAttribute?.('class') || '');
+    for (let x = hit; x && x !== document.body; x = x.parentElement) {
+      if (x.contains(el)) return false; // 目标和挡它的东西在同一个组件里
+      const cs = getComputedStyle(x);
+      if (x.getAttribute('role') === 'dialog' || x.getAttribute('aria-modal') === 'true' || /modal|dialog|popup|popover|mask|overlay|guide|tips?\b|drawer|layer/i.test(cls(x)) || (cs.position === 'fixed' && Number(cs.zIndex) >= 10)) return true;
+    }
+    return false;
+  }, h).catch(() => false);
+}
+
 // 第 1 层：规则清障。返回 true 表示清掉了什么
 async function clearByRules(page, target, log) {
   const box = await target.boundingBox().catch(() => null);
@@ -127,6 +146,7 @@ function patch(page) {
         if (tries >= 2 || !/intercepts pointer events/i.test(String(err.message))) throw err;
         ctx.busy = true;
         try {
+          if (!(await overlayInFront(this.page(), this))) throw err;
           const cleared = (await clearByRules(this.page(), this, ctx.log)) || (await clearByClaude(this.page(), this, ctx));
           if (!cleared) throw err;
         } finally { ctx.busy = false; }
