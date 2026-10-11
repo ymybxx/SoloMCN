@@ -4,6 +4,7 @@
 //
 //   node montage.mjs align  --master <音轨来源.mp4> <片段1.mp4> <片段2.mp4> ...   各片段相对主音轨的时间差，带可信度
 //   node montage.mjs beats  --master <音轨来源.mp4> [--from 秒] [--to 秒]              主音轨的 BPM 和每一拍的时间
+//   node montage.mjs fx     --spec montage.json                                         按段落地图给每一刀挑换装转场（扫描、残影、光门、甩切、脉冲、叠化），写进 cuts[].fx
 //   node montage.mjs sections --master <音轨来源>                                       段落地图：小节、乐句、每段能量（0 安静–3 高潮）、爆点
 //   node montage.mjs skips  --master <音轨来源> --within 90,150                     找能无缝砍掉的整数个八拍（成片超时长时用，写进 audio.skip）
 //   node montage.mjs track  --spec montage.json                                         认主角：每条片段里主角在哪、哪些时段拍到别人或太小（写进 autoExclude，配合 reframe 自动居中放大）
@@ -430,6 +431,46 @@ function plan(spec, dir) {
   return { cuts, beats: { bpm: bt.bpm, period: bt.period, first: bt.first }, structureMap: spec.structureMap };
 }
 
+// ---------- 换装转场：按段落地图给每一刀挑转场 ----------
+// 段落开头：扫描换装 / 节拍光门；爆点：节拍光门；高潮段：残影 / 甩切 / 色彩脉冲；推进段：偶尔甩切、脉冲；安静段：偶尔叠化；其余硬切。
+// 特效转场（不含叠化）不超过总刀数的 budget（默认 20%），扫描换装全片最多 4 次，同一种不连用。cut.fxManual 为 true 的不动。
+const FX_FRAMES = { scan: 8, echo: 9, gate: 8, whip: 6, pulse: 4, dissolve: 4, flash: 5 };
+function assignFx(spec) {
+  const cuts = [...spec.cuts].sort((a, b) => a.at - b.at);
+  const sm = spec.structureMap;
+  if (!sm) die('先按段落地图排切点（"structure": true 再 plan），才能自动挑转场');
+  const opt = spec.fx || {};
+  const budget = Math.round(cuts.length * (opt.budget ?? 0.2));
+  const caps = { scan: 4, ...(opt.caps || {}) };
+  const rand = rng((spec.auto?.seed || 1) * 7 + 3);
+  const secOf = (t) => sm.sections.find((x) => t >= x.from - 0.01 && t < x.to - 0.01) || sm.sections.at(-1);
+  const isStart = (t) => sm.sections.some((x) => Math.abs(x.from - t) < 0.06);
+  const isDrop = (t) => sm.drops.some((d) => Math.abs(d - t) < 0.06);
+  const used = {}; let special = 0, last = null;
+  const pick = (types) => types.filter((x) => x !== last && (used[x] || 0) < (caps[x] ?? Infinity));
+  for (const [i, c] of cuts.entries()) {
+    if (c.fxManual) { last = c.fx?.type || null; continue; }
+    delete c.fx;
+    if (i === 0) continue;
+    const sec = secOf(c.at);
+    let cand = [], prob = 0;
+    if (isDrop(c.at)) { cand = pick(['gate', 'scan']); prob = 1; }
+    else if (isStart(c.at)) { cand = pick(sec.energy >= 2 ? ['scan', 'gate'] : ['scan', 'dissolve']); prob = 0.9; }
+    else if (sec.energy === 3) { cand = pick(['echo', 'whip', 'pulse']); prob = 0.35; }
+    else if (sec.energy === 2) { cand = pick(['whip', 'pulse']); prob = 0.15; }
+    else { cand = pick(['dissolve']); prob = 0.25; }
+    if (!cand.length || rand() > prob) { last = null; continue; }
+    const type = cand[Math.floor(rand() * cand.length)];
+    if (type !== 'dissolve' && special >= budget) { last = null; continue; }
+    c.fx = { type, frames: FX_FRAMES[type] };
+    used[type] = (used[type] || 0) + 1;
+    if (type !== 'dissolve') special++;
+    last = type;
+  }
+  spec.cuts = cuts;
+  return { total: cuts.length, special, budget, used };
+}
+
 // 对比图：同一个主音轨时间，各片段的画面排在一起，看动作是不是同一拍（对齐对不对）、人在画面哪里（调 x / zoom）
 function compare(spec, dir, times, out) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'montage-cmp-'));
@@ -669,7 +710,7 @@ function render(spec, dir, out) {
   for (const p of P) {
     const active = [...cuts].reverse().find((c) => c.at <= p.from + 0.001);
     const inside = cuts.filter((c) => c.at > p.from + 0.001 && c.at < p.to - 0.001);
-    for (const c of [active, ...inside].filter(Boolean)) segs.push({ c, piece: p, out: p.out + Math.max(0, c.at - p.from) });
+    for (const c of [active, ...inside].filter(Boolean)) segs.push({ c, piece: p, out: p.out + Math.max(0, c.at - p.from), isStart: c.at >= p.from - 0.001 });
   }
   const list = [];
   const table = [];
@@ -690,7 +731,8 @@ function render(spec, dir, out) {
       const tr = JSON.parse(fs.readFileSync(path.join(dir, 'track', `${s.id}.json`), 'utf8')).samples
         .filter((x) => x.ok && x.w != null && x.t >= st - 0.3 && x.t <= st + dur + 0.5).map((x) => [r3(x.t - st), x.cx, x.cy, x.w, x.h]);
       const mid = tr.length ? tr[Math.floor(tr.length / 2)] : null;
-      jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [] });
+      jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [],
+        ...(c.fx && segs[k].isStart ? { fx: c.fx } : spec.cuts.some((x) => x.fx) ? { fx: { type: 'cut', frames: 1 } } : {}) });
       table.push({ at: r3(piece.from + (f0 / fps - piece.out)), out: r3(f0 / fps), dur: r3(dur), src: c.src, srcTime: r3(st), label: c.label ?? s.label ?? '' });
     }
     const job = {
@@ -702,6 +744,7 @@ function render(spec, dir, out) {
       mode: lock.mode || 'full', ease: lock.ease ?? 0.5, grade: lock.grade ?? lock.mode === 'cut', matchCut: lock.matchCut ?? (lock.mode === 'cut' ? 3 : 0),
       flash: { light: 0.6, strong: 1.5, frames: 5, punch: 0.06, ...(lock.flash || {}) },
       transition: { type: lock.transition, frames: lock.frames },
+      ...(spec.theme?.colors ? { theme: { colors: spec.theme.colors } } : {}),
       segments: jobSegs,
     };
     fs.writeFileSync(path.join(tmp, 'job.json'), JSON.stringify(job));
@@ -792,7 +835,13 @@ function render(spec, dir, out) {
   const pts = table.filter((_, i) => i % Math.max(1, Math.ceil(table.length / 40)) === 0).map((x) => x.out + Math.min(0.3, x.dur / 2));
   const sel = pts.map((t) => `between(t,${r3(t)},${r3(t + 1 / fps)})`).join('+');
   spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', out, '-vf', `select='${sel}',scale=384:-2,tile=8x${Math.ceil(pts.length / 8)}`, '-frames:v', '1', '-vsync', 'vfr', path.join(sheetDir, 'contact-sheet.jpg')]);
-  return { out, duration: r3(len), cuts: table.length, perSource: Object.fromEntries([...srcs.keys()].map((id) => [id, table.filter((x) => x.src === id).length])) };
+  // 转场体检：各类转场用了几次、特效占比、同一种有没有连用
+  const fxs = [...spec.cuts].sort((a, b) => a.at - b.at).map((c) => c.fx?.type || 'cut');
+  const fxCount = fxs.reduce((m, t) => ((m[t] = (m[t] || 0) + 1), m), {});
+  const specialN = fxs.filter((t) => !['cut', 'dissolve'].includes(t)).length;
+  const repeats = fxs.filter((t, i) => i > 0 && t === fxs[i - 1] && !['cut', 'dissolve'].includes(t)).length;
+  return { out, duration: r3(len), cuts: table.length, perSource: Object.fromEntries([...srcs.keys()].map((id) => [id, table.filter((x) => x.src === id).length])),
+    fx: { count: fxCount, specialShare: r3(specialN / Math.max(1, fxs.length)), repeats, ok: specialN / Math.max(1, fxs.length) <= 0.25 && repeats === 0 } };
 }
 
 // ---------- 入口 ----------
@@ -827,6 +876,13 @@ if (cmd === 'align') {
     fs.writeFileSync(path.resolve(dir, o.out || 'montage-fixed.json'), JSON.stringify(outSpec, null, 1));
   }
   console.log(JSON.stringify({ flagged: r.flagged.map((f) => ({ out: f.out, dur: f.dur, src: f.src, label: f.label, why: f.why })), changes: r.changes }, null, 1));
+} else if (cmd === 'fx') {
+  if (!o.spec) die('用法：montage.mjs fx --spec montage.json（按段落地图重新给每一刀挑转场，切点不动）');
+  const file = path.resolve(o.spec);
+  const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const r = assignFx(spec);
+  fs.writeFileSync(file, JSON.stringify(spec, null, 1));
+  console.log(JSON.stringify(r));
 } else if (cmd === 'sections') {
   if (!o.master) die('用法：montage.mjs sections --master <音轨来源> [--from 秒] [--to 秒]');
   const r = sections(o.master, { from: Number(o.from) || 0, to: o.to ? Number(o.to) : Infinity });
@@ -852,6 +908,7 @@ if (cmd === 'align') {
     spec.cuts = p.cuts;
     spec.beatsInfo = p.beats;
     if (p.structureMap) spec.structureMap = p.structureMap;
+    if (spec.structure && spec.fx !== false) console.log('转场：' + JSON.stringify(assignFx(spec)));
     fs.writeFileSync(file, JSON.stringify(spec, null, 1));
     console.log(`排好 ${p.cuts.length} 个切点（${p.beats.bpm} BPM），写回 ${o.spec}`);
     if (cmd === 'plan') process.exit(0);

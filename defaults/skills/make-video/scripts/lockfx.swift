@@ -17,13 +17,16 @@ struct Job: Decodable {
   struct Transition: Decodable { let type: String; let frames: Int }
   struct Hint: Decodable { let cx: Double; let cy: Double }
   // track：这一刀里认人得到的主角框 [相对这一刀开头的秒数, cx, cy, w, h]（素材坐标 0–1），用来认准是他
-  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let strong: Bool?; let keep: [[Double]]? }
+  // fx：这一刀开头的换装转场（cut 硬切 / dissolve 叠化 / scan 扫描换装 / echo 残影换装 / gate 节拍光门 / whip 动势甩切 / pulse 色彩脉冲 / flash 闪白），不填就用全局 transition
+  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let strong: Bool?; let keep: [[Double]]?; let fx: Transition? }
+  struct Theme: Decodable { let colors: [String]? }
   let size: [Int]; let fps: Double; let out: String
   let target: Target; let zoomMin: Double; let zoomMax: Double; let smooth: Double
   let background: Background?; let flash: Flash?; let transition: Transition?; let segments: [Segment]
   // mode：full 全程锁定（默认）/ cut 只在换装瞬间对齐，前后 ease 秒里平滑交还原机位
   // grade：各场统一调色；matchCut：换装时在前后几帧里挑新旧两场姿态最像的那一帧来切
   let mode: String?; let ease: Double?; let grade: Bool?; let matchCut: Int?
+  let theme: Theme?
 }
 
 func fail(_ m: String) -> Never { FileHandle.standardError.write((m + "\n").data(using: .utf8)!); exit(1) }
@@ -120,9 +123,27 @@ segReq.qualityLevel = .balanced
 segReq.outputPixelFormat = kCVPixelFormatType_OneComponent8
 
 let tType = job.transition?.type ?? (job.flash == nil ? "none" : "flash")
-// 渐变要用到上一刀切点之后的几帧：每一刀（最后一刀除外）多分析、多渲染 tail 帧，和下一刀开头叠化
-let tail = (tType == "dissolve" || tType == "mix") ? max(2, job.transition?.frames ?? 6) : 0
-func tailOf(_ si: Int) -> Int { si < job.segments.count - 1 ? tail : 0 }
+// 每一刀开头用什么转场：片段自己写了就用自己的，否则用全局的（mix = 平时叠化、强调的刀闪白）
+func fxOf(_ si: Int) -> (type: String, frames: Int) {
+  if let f = job.segments[si].fx { return (f.type, max(1, f.frames)) }
+  let t = tType == "mix" ? ((job.segments[si].strong ?? false) ? "flash" : "dissolve") : tType
+  return (t, max(2, job.transition?.frames ?? (job.flash?.frames ?? 6)))
+}
+// 叠化、扫描、残影、光门、甩切要用到上一刀切点之后的几帧：上一刀多分析、多渲染这些 tail 帧
+let NEEDS_TAIL: Set<String> = ["dissolve", "scan", "echo", "gate", "whip"]
+func tailOf(_ si: Int) -> Int {
+  guard si < job.segments.count - 1 else { return 0 }
+  let n = fxOf(si + 1)
+  return NEEDS_TAIL.contains(n.type) ? n.frames : 0
+}
+// 主题色（转场的光、残影的染色、色彩脉冲）：没给就用暖白和品红
+func ciColor(_ hex: String) -> CIColor {
+  var v: UInt64 = 0; Scanner(string: hex.replacingOccurrences(of: "#", with: "")).scanHexInt64(&v)
+  return CIColor(red: CGFloat((v >> 16) & 0xff) / 255, green: CGFloat((v >> 8) & 0xff) / 255, blue: CGFloat(v & 0xff) / 255)
+}
+let themeColors = (job.theme?.colors ?? []).map(ciColor)
+let C1 = themeColors.first ?? CIColor(red: 1, green: 0.93, blue: 0.82)
+let C2 = themeColors.dropFirst().first ?? CIColor(red: 1, green: 0.2, blue: 0.45)
 
 let M = max(0, job.matchCut ?? 0)
 struct Plan { var neckX: [Double]; var neckY: [Double]; var boxes: [CGRect?]; var poses: [[CGPoint?]?]; var torso: Double; var found: Int; var sw: Double; var sh: Double; var pre: Int; var file: String }
@@ -223,6 +244,86 @@ let natural = plans.map { p in p.torso * max(W / p.sw, H / p.sh) }.filter { $0 >
 let targetTorso = job.target.torso.map { $0 * H } ?? ((natural.sorted().dropFirst(Int(Double(natural.count) * 0.85)).first ?? natural.max() ?? H * 0.3) * job.zoomMin)
 
 var prevTail: [CVPixelBuffer] = []
+var prevGhost: [CIImage] = []
+let frameRectAll = CGRect(x: 0, y: 0, width: W, height: H)
+func solid(_ c: CIColor, _ a: Double) -> CIImage { CIImage(color: CIColor(red: c.red, green: c.green, blue: c.blue, alpha: CGFloat(a))).cropped(to: frameRectAll) }
+func additive(_ img: CIImage, _ over: CIImage) -> CIImage { over.applyingFilter("CIAdditionCompositing", parameters: [kCIInputBackgroundImageKey: img]).cropped(to: frameRectAll) }
+// 横向（上下方向）的柔边带子：中心在 y（左上原点），半宽 hw，颜色 c、强度 a
+func band(y: Double, hw: Double, _ c: CIColor, _ a: Double) -> CIImage {
+  let yc = H - y
+  let g = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: 0, y: yc), "inputPoint1": CIVector(x: 0, y: yc + hw), "inputColor0": CIColor(red: c.red * a, green: c.green * a, blue: c.blue * a), "inputColor1": CIColor.black])!.outputImage!
+  let g2 = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: 0, y: yc), "inputPoint1": CIVector(x: 0, y: yc - hw), "inputColor0": CIColor.white, "inputColor1": CIColor.black])!.outputImage!
+  return g.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: g2]).cropped(to: frameRectAll)
+}
+// 竖向的柔边光墙：中心在 x，半宽 hw
+func wall(x: Double, hw: Double, _ c: CIColor, _ a: Double) -> CIImage {
+  let g = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: x, y: 0), "inputPoint1": CIVector(x: x + hw, y: 0), "inputColor0": CIColor(red: c.red * a, green: c.green * a, blue: c.blue * a), "inputColor1": CIColor.black])!.outputImage!
+  let g2 = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: x, y: 0), "inputPoint1": CIVector(x: x - hw, y: 0), "inputColor0": CIColor.white, "inputColor1": CIColor.black])!.outputImage!
+  return g.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: g2]).cropped(to: frameRectAll)
+}
+func tailImg(_ t: [CVPixelBuffer], _ k: Int) -> CIImage? { t.isEmpty ? nil : CIImage(cvPixelBuffer: t[min(k, t.count - 1)]) }
+
+// 换装转场：k 是这一刀开头的第几帧，n 是转场长度；incoming 是新造型这一帧，prevTail 是旧造型切点之后的帧
+func transition(_ type: String, k: Int, n: Int, incoming: CIImage, prevTail: [CVPixelBuffer], ghosts: [CIImage], dir: Double) -> CIImage {
+  guard k < n else { return incoming }
+  let t = Double(k + 1) / Double(n + 1) // 0→1
+  switch type {
+  case "dissolve":
+    guard let old = tailImg(prevTail, k) else { return incoming }
+    return old.applyingFilter("CIDissolveTransition", parameters: [kCIInputTargetImageKey: incoming, kCIInputTimeKey: t])
+      .applyingFilter("CIBloom", parameters: [kCIInputRadiusKey: 14, kCIInputIntensityKey: sin(Double.pi * t) * 0.45]).cropped(to: frameRectAll)
+  case "scan":
+    // 扫描换装：一道主题色光带从上往下扫，光带上面已经是新造型，下面还是旧的
+    guard let old = tailImg(prevTail, k) else { return incoming }
+    let e = smooth01(t)
+    let y = -0.08 * H + e * 1.16 * H, f = H * 0.02
+    let mask = CIFilter(name: "CILinearGradient", parameters: ["inputPoint0": CIVector(x: 0, y: H - y + f), "inputPoint1": CIVector(x: 0, y: H - y - f), "inputColor0": CIColor.white, "inputColor1": CIColor.black])!.outputImage!.cropped(to: frameRectAll)
+    let o = incoming.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: old, kCIInputMaskImageKey: mask]).cropped(to: frameRectAll)
+    // 只让光带本身发光（整帧加柔光会把亮背景的舞台冲白）
+    let glow = band(y: y, hw: H * 0.07, C2, 0.5).applyingGaussianBlur(sigma: 18).cropped(to: frameRectAll)
+    return additive(additive(o, glow), band(y: y, hw: H * 0.018, C1, 0.9))
+  case "echo":
+    // 残影换装：旧造型的人像染上主题色，作为两层半透明残影跟着跳，逐渐淡掉
+    var o = incoming
+    let fade = 1 - t
+    // 残影拖在他动作方向的后面，越往后越淡、越偏
+    for (n, (lag, a)) in [(0, 0.42), (3, 0.22)].enumerated() {
+      let gi = k - lag
+      guard gi >= 0, gi < ghosts.count else { continue }
+      let off = -dir * W * 0.03 * Double(n + 1) * t
+      let g = ghosts[gi].transformed(by: CGAffineTransform(translationX: off, y: 0))
+        .applyingFilter("CIColorMonochrome", parameters: [kCIInputColorKey: n == 0 ? C1 : C2, kCIInputIntensityKey: 0.6])
+        .applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: a * fade)])
+      o = g.composited(over: o)
+    }
+    return o.cropped(to: frameRectAll)
+  case "gate":
+    // 节拍光门：主题色光墙从一侧推过来，光最亮的那一帧换场次
+    // 光只在中间一两帧最亮，前后很快退掉，不要整段发白
+    let peak = pow(sin(Double.pi * t), 3)
+    let base = (t < 0.5 ? tailImg(prevTail, k) : nil) ?? incoming
+    let x = dir > 0 ? (-0.3 + 1.6 * t) * W : (1.3 - 1.6 * t) * W
+    var o = base.applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: peak * 0.9])
+    let w = wall(x: x, hw: W * 0.22, C1, 0.75 * sin(Double.pi * t)).applyingGaussianBlur(sigma: 24).cropped(to: frameRectAll)
+    o = additive(o, w)
+    o = additive(o, solid(C2, 0.08 * peak))
+    return o
+  case "whip":
+    // 动势甩切：前半段旧画面顺着他的动作方向甩出去，后半段新画面从另一侧甩进来
+    let first = t < 0.5
+    let e = first ? smooth01(t * 2) : smooth01((1 - t) * 2)
+    let src = (first ? tailImg(prevTail, k) : nil) ?? incoming
+    let shift = dir * W * 0.18 * e * (first ? 1 : -1)
+    return src.clampedToExtent().transformed(by: CGAffineTransform(translationX: shift, y: 0))
+      .applyingFilter("CIMotionBlur", parameters: [kCIInputRadiusKey: 70 * e, kCIInputAngleKey: 0]).cropped(to: frameRectAll)
+  case "pulse":
+    // 色彩脉冲：硬切，新画面开头闪一下主题色（放大回弹在外面做）
+    let e = pow(1 - Double(k) / Double(n), 2)
+    return additive(incoming, solid(C2, 0.45 * e))
+  default:
+    return incoming
+  }
+}
 let cutMode = job.mode == "cut"
 let E = max(1.0, (job.ease ?? 0.5) * job.fps)
 func smooth01(_ x: Double) -> Double { let t = min(1, max(0, x)); return t * t * (3 - 2 * t) }
@@ -244,8 +345,17 @@ for (si, seg) in job.segments.enumerated() {
   let st2 = seg.start + Double(nudge[si]) / job.fps
   let src2 = FrameSource(file: seg.file, start: st2, dur: dur)
   var myTail: [CVPixelBuffer] = []
+  var myGhost: [CIImage] = []
   let strong = seg.strong ?? false
-  let useFlash = tType == "flash" || (tType == "mix" && strong)
+  let fx = si == 0 ? (type: "cut", frames: 0) : fxOf(si)
+  let useFlash = fx.type == "flash"
+  let nextEcho = si < job.segments.count - 1 && fxOf(si + 1).type == "echo"
+  // 甩切方向：上一刀结尾他往哪边动，就往哪边甩（看不出来就左右交替）
+  var whipDir = si % 2 == 0 ? 1.0 : -1.0
+  if si > 0 {
+    let a = plans[si - 1], e = a.pre + nudge[si - 1] + job.segments[si - 1].frames - 1
+    if e - 6 >= 0, e < a.neckX.count { let dx = a.neckX[e] - a.neckX[e - 6]; if abs(dx) > a.sw * 0.01 { whipDir = dx > 0 ? 1 : -1 } }
+  }
   for k in 0..<total {
     guard let buf = src2.frame(at: st2 + Double(k) / job.fps) else { continue }
     let j = min(neckX.count - 1, max(0, base + k))
@@ -270,6 +380,9 @@ for (si, seg) in job.segments.enumerated() {
     x0 = min(max(-W * over, x0), sw * S - W + W * over); y0 = min(max(-H * over, y0), sh * S - H + H * over)
     // 切点放大回弹
     var punch = 1.0, ev = 0.0
+    if fx.type == "pulse", k < fx.frames {
+      punch = 1 + 0.05 * pow(1 - Double(k) / Double(fx.frames), 2)
+    }
     if let fl = job.flash, useFlash, k < fl.frames {
       let e = pow(1 - Double(k) / Double(fl.frames), 2)
       ev = (strong ? fl.strong : fl.light) * e
@@ -323,15 +436,24 @@ for (si, seg) in job.segments.enumerated() {
       var tb: CVPixelBuffer?
       CVPixelBufferCreate(nil, Int(W), Int(H), kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary, &tb)
       if let tb = tb { ctx.render(out, to: tb, bounds: frameRect, colorSpace: rgb); myTail.append(tb) }
+      // 残影换装：把旧造型的人像抠出来留着（人像分割 ∩ 他身体周围），下一刀开头叠上去
+      if nextEcho {
+        try? VNImageRequestHandler(cvPixelBuffer: buf, options: [:]).perform([segReq])
+        if let m = segReq.results?.first?.pixelBuffer {
+          let mi = CIImage(cvPixelBuffer: m); let mm = mi.transformed(by: CGAffineTransform(scaleX: sw / mi.extent.width, y: sh / mi.extent.height))
+          let b = boxes[j] ?? CGRect(x: neckX[j] - sw * 0.12, y: neckY[j] - sh * 0.1, width: sw * 0.24, height: sh * 0.8)
+          let pad = b.insetBy(dx: -b.width * 0.25, dy: -b.height * 0.08)
+          let region = CIImage(color: .white).cropped(to: CGRect(x: pad.minX, y: sh - pad.maxY, width: pad.width, height: pad.height))
+            .composited(over: CIImage(color: .black).cropped(to: CGRect(x: 0, y: 0, width: sw, height: sh))).applyingGaussianBlur(sigma: sw * 0.015)
+          let mask = mm.applyingFilter("CIMultiplyCompositing", parameters: [kCIInputBackgroundImageKey: region]).cropped(to: CGRect(x: 0, y: 0, width: sw, height: sh))
+          let ghost = img.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: CIImage(color: .clear).cropped(to: img.extent), kCIInputMaskImageKey: mask])
+          let rendered = ctx.createCGImage(place(ghost).cropped(to: frameRect), from: frameRect).map { CIImage(cgImage: $0) }
+          myGhost.append(rendered ?? CIImage(color: .clear).cropped(to: frameRect))
+        }
+      }
       continue
     }
-    // 渐变：开头几帧从上一刀的 tail 叠化过来，中间加一点柔光
-    if !useFlash, k < prevTail.count {
-      let tm = Double(k + 1) / Double(prevTail.count + 1)
-      out = CIImage(cvPixelBuffer: prevTail[k]).applyingFilter("CIDissolveTransition", parameters: [kCIInputTargetImageKey: out, kCIInputTimeKey: tm]).cropped(to: frameRect)
-      let glow = sin(Double.pi * tm) * 0.45
-      out = out.applyingFilter("CIBloom", parameters: [kCIInputRadiusKey: 14, kCIInputIntensityKey: glow]).cropped(to: frameRect)
-    }
+    out = transition(fx.type, k: k, n: fx.frames, incoming: out, prevTail: prevTail, ghosts: prevGhost, dir: whipDir)
     while !vin.isReadyForMoreMediaData { usleep(2000) }
     var pb: CVPixelBuffer?
     CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &pb)
@@ -341,6 +463,7 @@ for (si, seg) in job.segments.enumerated() {
     outIndex += 1
   }
   prevTail = myTail
+  prevGhost = myGhost
   FileHandle.standardError.write("\r片段 \(si + 1)/\(job.segments.count)".data(using: .utf8)!)
 }
 vin.markAsFinished()
