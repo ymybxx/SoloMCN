@@ -228,8 +228,10 @@ export function createPublisher({ store, root }) {
     if (unbound.length) throw Object.assign(new Error(`这个账号还没绑定${unbound.map((p) => browsers[p].name).join('、')}，先去「账号矩阵」扫码登录，或者勾「手动发」`), { status: 400 });
 
     const portrait = isPortrait(abs(it.video.mp4));
-    // B站封面只收横版；YouTube 跟着视频走：竖屏视频会被当成 Shorts，缩略图按竖版截取，所以用竖版，横屏视频才用横版
-    const coverFor = (k) => ((k === 'bilibili' || (k === 'youtube' && !portrait)) && it.publish.coverWide) || it.publish.cover;
+    // B站封面只收横版；YouTube 跟着视频走：竖屏视频会被当成 Shorts，缩略图按竖版截取，所以用竖版，横屏视频才用横版。
+    // 小红书的封面也跟着视频方向：竖屏 3:4，横屏视频只能传横版，用 4:3（笔记卡片的横版比例），没有就用 16:9
+    const coverFor = (k) => (k === 'xhs' && !portrait && (it.publish.coverWide43 || it.publish.coverWide))
+      || ((k === 'bilibili' || (k === 'youtube' && !portrait)) && it.publish.coverWide) || it.publish.cover;
     // 第二张封面：抖音要竖封面 3:4 和横封面 4:3 两张，分别传
     const cover2For = (k) => (k === 'douyin' && it.publish.coverWide43) || null;
     const absOrNull = (f) => (f ? abs(f) : null);

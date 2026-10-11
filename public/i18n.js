@@ -145,7 +145,7 @@
     '我已发布': 'I\'ve published it', '这次不发了': 'Skip this time', '确认不发': 'Confirm skip', '已发布（手动）': 'Published (manual)',
     '1 打开发布页': '1 Open the upload page', '2 选视频': '2 Pick the video', '3 封面': '3 Cover', '3 竖封面': '3 Portrait cover', '横封面': 'Landscape cover',
     '在 App 里发也行': 'Or post from the app', '在 Finder 里显示': 'Show in Finder', '视频路径': 'Video path', '封面路径': 'Cover path',
-    '竖版 3:4': 'Portrait 3:4', '横版 16:9': 'Landscape 16:9', '横版 4:3 · 在封面设置里切到横封面再传': 'Landscape 4:3 · switch to the landscape cover in the cover dialog',
+    '竖版 3:4': 'Portrait 3:4', '横版 16:9': 'Landscape 16:9', '横版 4:3': 'Landscape 4:3', '横版 4:3 · 在封面设置里切到横封面再传': 'Landscape 4:3 · switch to the landscape cover in the cover dialog',
     '一个个粘贴后按回车': 'Paste one at a time and press Enter', '合集': 'Collection', '手动发布的步骤在「发布」下面': 'Manual publishing steps are under Publish',
     '话题（空格分隔）': 'Hashtags (space-separated)',
     // ---- 账号矩阵 ----

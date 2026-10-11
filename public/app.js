@@ -519,7 +519,7 @@ function vManualCard(it,p,r){
   const steps=[
     row('1 打开发布页',r.url?`<span class="faint">${esc(r.url.replace(/^https?:\/\//,'').slice(0,46))}</span>`:'<span class="faint">在 App 里发也行</span>',r.url?`<a class="btn sm" href="${esc(r.url)}" target="_blank" rel="noopener">打开</a>`:''),
     row('2 选视频',`<span class="faint">${esc(String(r.video||'').split('/').pop())}</span>`,`<button class="btn sm" data-act="reveal" data-file="${esc(r.video||'')}">在 Finder 里显示</button>${copy(r.video,'视频路径')}`),
-    r.cover&&p!=='x'?coverRow(r.cover,r.cover2?'3 竖封面':'3 封面',/wide/.test(r.cover)?'横版 16:9':'竖版 3:4'):'',
+    r.cover&&p!=='x'?coverRow(r.cover,r.cover2?'3 竖封面':'3 封面',/wide43/.test(r.cover)?'横版 4:3':/wide/.test(r.cover)?'横版 16:9':'竖版 3:4'):'',
     r.cover2&&p!=='x'?coverRow(r.cover2,'横封面','横版 4:3 · 在封面设置里切到横封面再传'):'',
     p==='x'?row('标题','<span class="faint">推特不用标题</span>',''):row('标题',esc(v.title||'—'),copy(v.title,'标题')),
     p==='x'?row('推文',`<span class="ms-clip">${esc(tweetText(v.desc,tags))}</span>`,copy(tweetText(v.desc,tags),'推文')):row(p==='bilibili'?'简介':'正文',`<span class="ms-clip">${esc(v.desc||'—')}</span>`,copy(v.desc,'正文')),
