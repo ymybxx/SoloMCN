@@ -398,6 +398,9 @@ ${mine}`;
   if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts.length === 3 && method === 'GET') {
     return sendJson(res, 200, lab.files(parts[1]) || { dir: null, files: [] });
   }
+  if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts[3] === 'ask' && parts.length === 5 && method === 'GET') {
+    try { return sendJson(res, 200, lab.askStatus(parts[1], parts[4])); } catch (err) { return sendError(res, err.status || 500, 'not_found', err.message); }
+  }
   if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && method === 'POST') {
     const body = await readBody(req);
     const id = parts[1];

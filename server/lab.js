@@ -377,7 +377,8 @@ export function createLab({ root, store }) {
     windows.delete(site);
   }
 
-  async function ask(itemId, { kind, site, url, message, amount }) {
+  // wait=false：建好请求马上返回编号，之后用 askStatus 查。一个请求一直挂着等人，会被 Node 自带 fetch 的 5 分钟限制掐断
+  async function ask(itemId, { kind, site, url, message, amount, wait = true }) {
     const it = item(itemId);
     if (!ASK_KINDS[kind]) throw bad('kind 只能是 login、payment、spend、other');
     if (it.labAsk?.status === 'waiting' && asks.has(it.labAsk.id)) throw bad('已经有一个请求在等人处理');
@@ -392,11 +393,20 @@ export function createLab({ root, store }) {
       openWindow(name, req.url);
     }
     await store.update('items', itemId, { labAsk: req, updatedAt: Date.now() });
-    const result = await new Promise((resolve) => {
+    const done = new Promise((resolve) => {
       asks.set(req.id, { itemId, resolve, kind, site: name });
       setTimeout(() => answer(itemId, req.id, 'timeout').catch(() => {}), ASK_TIMEOUT_MS);
     });
-    return { result, kind, site: name };
+    if (wait === false) return { id: req.id, result: null, kind, site: name };
+    return { result: await done, kind, site: name };
+  }
+
+  // 查一个请求处理了没有：result 为 null 表示还在等
+  function askStatus(itemId, id) {
+    const a = item(itemId).labAsk;
+    if (!a || a.id !== id) throw Object.assign(new Error('没有这个请求'), { status: 404 });
+    const waiting = a.status === 'waiting' && asks.has(id);
+    return { id, result: waiting ? null : a.status === 'waiting' ? 'expired' : a.status, kind: a.kind, site: a.site };
   }
 
   async function answer(itemId, id, result) {
@@ -610,6 +620,6 @@ export function createLab({ root, store }) {
     return { done };
   }
 
-  return { dirOf, sockDir, prepare, record, addMedia, removeMedia, pruneMissing, browse, ask, answer, clearStale, files,
+  return { dirOf, sockDir, prepare, record, addMedia, removeMedia, pruneMissing, browse, ask, answer, askStatus, clearStale, files,
     shared, toolsDir, settings, setSettings, toolbox, readNotes, writeNotes, appendNotes, storage, removeTool, slimLab, removeLab, afterRun, cleanup };
 }

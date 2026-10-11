@@ -873,7 +873,17 @@ server.registerTool(
       amount: z.string().max(120).optional().describe('spend 时要花多少，比如 “20 点（账号余额 200 点）” 或 “9.9 美元”'),
     },
   },
-  tool(async ({ item_id, ...body }) => call('POST', `/api/items/${item_id}/lab/ask`, body, 42 * 60_000)),
+  // 先建请求拿编号，再每 3 秒查一次（一个请求挂着等太久会被 fetch 的 5 分钟限制掐断，用户点了也收不到）
+  tool(async ({ item_id, ...body }) => {
+    const r = await call('POST', `/api/items/${item_id}/lab/ask`, { ...body, wait: false });
+    const end = Date.now() + 42 * 60_000;
+    for (;;) {
+      await new Promise((ok) => setTimeout(ok, 3000));
+      const s = await call('GET', `/api/items/${item_id}/lab/ask/${r.id}`).catch(() => null);
+      if (s?.result) return { result: s.result === 'expired' ? 'timeout' : s.result, kind: r.kind, site: r.site };
+      if (Date.now() > end) return { result: 'timeout', kind: r.kind, site: r.site };
+    }
+  }),
 );
 
 server.registerTool(
