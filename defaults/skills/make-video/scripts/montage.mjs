@@ -379,6 +379,16 @@ function compare(spec, dir, times, out) {
 // 用 persons.swift（macOS Vision 人体检测）每 0.5 秒取一帧找人；不做人脸识别：
 // 直拍的镜头跟着主角走，主角又一直是同一个造型，所以用「整个人的外观（发色、衣服）」+「离画面中心多近」+「前后帧连贯」认人。
 const SWIFT = path.join(path.dirname(new URL(import.meta.url).pathname), 'persons.swift');
+const LOCKFX = path.join(path.dirname(new URL(import.meta.url).pathname), 'lockfx.swift');
+function lockfxBin() {
+  const st = fs.statSync(LOCKFX);
+  const bin = path.join(os.tmpdir(), `montage-lockfx-${Math.round(st.mtimeMs)}`);
+  if (!fs.existsSync(bin)) {
+    const r = spawnSync('swiftc', ['-O', LOCKFX, '-o', bin], { encoding: 'utf8' });
+    if (r.status !== 0) die(`编译 lockfx.swift 失败（要装 Xcode 命令行工具）：${r.stderr}`);
+  }
+  return bin;
+}
 function personsBin() {
   const st = fs.statSync(SWIFT);
   const bin = path.join(os.tmpdir(), `montage-persons-${Math.round(st.mtimeMs)}`);
@@ -587,7 +597,43 @@ function render(spec, dir, out) {
   }
   const list = [];
   const table = [];
-  for (let k = 0; k < segs.length; k++) {
+  const joined = path.join(tmp, 'joined.mp4');
+  const lock = spec.lock ? { transition: 'dissolve', frames: 6, ...(spec.lock === true ? {} : spec.lock) } : null;
+  if (lock) {
+    // 原地换装：交给 lockfx 逐帧锁定主角、处理背景、做过渡，直接出整条无声画面
+    scanPeople(spec, dir);
+    const jobSegs = [];
+    for (let k = 0; k < segs.length; k++) {
+      const { c, piece } = segs[k];
+      const s = srcs.get(c.src) || die(`切点 ${c.at} 用了不存在的片段 ${c.src}`);
+      const f0 = Math.round(segs[k].out * fps);
+      const f1 = k + 1 < segs.length ? Math.round(segs[k + 1].out * fps) : total;
+      if (f1 <= f0) continue;
+      const st = piece.from + (f0 / fps - piece.out) + (c.offset ?? s.offset) + (c.nudge || 0);
+      const dur = (f1 - f0) / fps;
+      const tr = JSON.parse(fs.readFileSync(path.join(dir, 'track', `${s.id}.json`), 'utf8')).samples
+        .filter((x) => x.ok && x.w != null && x.t >= st - 0.3 && x.t <= st + dur + 0.5).map((x) => [r3(x.t - st), x.cx, x.cy, x.w, x.h]);
+      const mid = tr.length ? tr[Math.floor(tr.length / 2)] : null;
+      jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [] });
+      table.push({ at: r3(piece.from + (f0 / fps - piece.out)), out: r3(f0 / fps), dur: r3(dur), src: c.src, srcTime: r3(st), label: c.label ?? s.label ?? '' });
+    }
+    const job = {
+      size: [W, H], fps, out: joined,
+      target: { x: lock.x ?? 0.5, y: lock.y ?? 0.3, ...(lock.torso ? { torso: lock.torso } : {}) },
+      zoomMin: lock.zoomMin ?? 1.1, zoomMax: lock.zoomMax ?? 1.45, smooth: lock.smooth ?? 0.3,
+      background: lock.background === false ? null : { blur: 14, dim: 0.55, desat: 0.35, ...(lock.background || {}) },
+      flash: { light: 0.6, strong: 1.5, frames: 5, punch: 0.06, ...(lock.flash || {}) },
+      transition: { type: lock.transition, frames: lock.frames },
+      segments: jobSegs,
+    };
+    fs.writeFileSync(path.join(tmp, 'job.json'), JSON.stringify(job));
+    const r = spawnSync(lockfxBin(), [path.join(tmp, 'job.json')], { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'inherit'] });
+    if (r.status !== 0) die('原地换装渲染失败（lockfx）');
+    const rep = JSON.parse(r.stdout);
+    fs.mkdirSync(path.join(dir, 'review'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'review', 'lock-report.json'), JSON.stringify(rep, null, 1));
+  }
+  for (let k = 0; !lock && k < segs.length; k++) {
     const { c, piece } = segs[k];
     const s = srcs.get(c.src) || die(`切点 ${c.at} 用了不存在的片段 ${c.src}`);
     // 用帧号算起止，避免累计误差
@@ -624,12 +670,21 @@ function render(spec, dir, out) {
     list.push(`file '${seg}'`);
     table.push({ at: r3(piece.from + (f0 / fps - piece.out)), out: r3(f0 / fps), dur: r3((f1 - f0) / fps), src: c.src, srcTime: r3(st), label: label || '' });
   }
-  fs.writeFileSync(path.join(tmp, 'list.txt'), list.join('\n'));
-  const joined = path.join(tmp, 'joined.mp4');
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', path.join(tmp, 'list.txt'), '-c', 'copy', joined]);
+  if (!lock) {
+    fs.writeFileSync(path.join(tmp, 'list.txt'), list.join('\n'));
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', path.join(tmp, 'list.txt'), '-c', 'copy', joined]);
+  }
 
   // 片头片尾字、整体标题
   const overlays = [];
+  // 原地换装的场次小字在这里统一画（普通路线是每段各自画）
+  if (lock && spec.labels !== false && FONT) {
+    for (const [i, x] of table.entries()) {
+      if (!x.label || (i > 0 && table[i - 1].label === x.label)) continue;
+      let j = i; while (j + 1 < table.length && table[j + 1].label === x.label) j++;
+      overlays.push(`drawtext=fontfile='${FONT}':text='${esc(x.label)}':x=${Math.round(W * 0.03)}:y=h-${Math.round(H * 0.075)}-th:fontsize=${Math.round(H * 0.03)}:fontcolor=white@0.92:shadowcolor=black@0.6:shadowx=2:shadowy=2:enable='between(t,${x.out},${r3(table[j].out + table[j].dur)})'`);
+    }
+  }
   for (const t of spec.texts || []) {
     if (!FONT) break;
     const size = Math.round(H * (t.size || 0.06));
