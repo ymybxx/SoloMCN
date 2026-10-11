@@ -196,6 +196,7 @@ const TOOL_NAMES = {
   bilibili_search: '搜索 B站视频',
   bilibili_video: '读取 B站视频',
   bilibili_highlights: '找 B站高能时刻',
+  bilibili_preview: '预览 B站视频画面',
   capture_bilibili: '剪 B站片段',
   youtube_videos: '读取 YouTube 视频',
   youtube_comments: '读取 YouTube 评论',
@@ -210,7 +211,7 @@ const TOOL_NAMES_EN = {
   get_item: 'Read item and profile', save_script: 'Save script', save_precheck: 'Save precheck', get_published: 'Read published stats',
   save_analysis: 'Save review', save_video: 'Save video', save_research: 'Save research', capture_source: 'Capture page',
   x_search: 'Search X', x_user_tweets: 'Read X user', x_list_timeline: 'Read X list', x_pool_status: 'Check X account pool',
-  youtube_search: 'Search YouTube', bilibili_search: 'Search Bilibili', bilibili_video: 'Read Bilibili videos', bilibili_highlights: 'Find Bilibili highlights', capture_bilibili: 'Clip Bilibili video', youtube_videos: 'Read YouTube videos', youtube_comments: 'Read YouTube comments',
+  youtube_search: 'Search YouTube', bilibili_search: 'Search Bilibili', bilibili_video: 'Read Bilibili videos', bilibili_highlights: 'Find Bilibili highlights', bilibili_preview: 'Preview Bilibili video', capture_bilibili: 'Clip Bilibili video', youtube_videos: 'Read YouTube videos', youtube_comments: 'Read YouTube comments',
   youtube_transcript: 'Read YouTube captions', get_teardown: 'Read teardown', save_teardown: 'Save teardown',
 };
 const CHANNEL_NAMES_EN = { x: 'X', youtube: 'YouTube', douyin: 'Douyin', weibo: 'Weibo', bilibili: 'Bilibili', zhihu: 'Zhihu', baidu: 'Baidu', toutiao: 'Toutiao', 'bilibili-video': 'Bilibili videos', hackernews: 'Hacker News' };

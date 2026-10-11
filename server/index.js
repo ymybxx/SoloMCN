@@ -295,6 +295,16 @@ ${mine}`;
     try {
       if (parts[1] === 'search' && method === 'GET') return sendJson(res, 200, await bili.search({ q: q.get('q'), order: q.get('order') || 'totalrank', limit: Number(q.get('limit')) || 20, days: Number(q.get('days')) || 0, duration: Number(q.get('duration')) || 0 }));
       if (parts[1] === 'videos' && method === 'GET') return sendJson(res, 200, await bili.videos(String(q.get('ids') || '').split(',').filter(Boolean)));
+      if (parts[1] === 'preview' && method === 'GET') {
+        // 拼图写进这条内容的实验目录：调研的 Claude 只能读那里
+        const itemId = q.get('item') || '';
+        if (!ID_RE.test(itemId) || !store.get('items', itemId)) return sendError(res, 400, 'bad_request', '找不到这条内容');
+        const dir = path.join(lab.dirOf(itemId), 'bili-preview');
+        await fs.mkdir(dir, { recursive: true });
+        const name = `${String(q.get('video') || '').match(/BV[0-9A-Za-z]{10}/)?.[0] || 'video'}-${Date.now().toString(36)}.jpg`;
+        const r = await bili.preview(q.get('video'), path.join(dir, name), { count: Number(q.get('count')) || 24 });
+        return sendJson(res, 200, { ...r, file: path.join(dir, name), labFile: path.join('bili-preview', name) });
+      }
       if (parts[1] === 'highlights' && method === 'GET') return sendJson(res, 200, await bili.highlights(q.get('video'), { window: Number(q.get('window')) || 5, top: Number(q.get('top')) || 8 }));
     } catch (err) {
       return sendError(res, err.status || 502, 'bili_failed', err.message);

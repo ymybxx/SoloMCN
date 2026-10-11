@@ -670,6 +670,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  'bilibili_preview',
+  {
+    title: '预览 B站视频画面',
+    description:
+      '不下载视频，用 B站自带的进度条缩略图拼一张带时间码的画面图（默认 24 格），存进这条内容的实验目录，用读文件工具打开看。' +
+      '下载之前先用它看：是哪一场、什么造型（发色、衣服）、主角在不在画面中间、横屏还是竖屏、有没有大段不是主角的镜头。',
+    inputSchema: {
+      item_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('内容 id'),
+      video: BILI_VIDEO,
+      count: z.number().int().min(4).max(48).optional().describe('拼几格，默认 24'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  tool(async ({ item_id, video, count = 24 }) => {
+    const r = await call('GET', `/api/bili/preview?${new URLSearchParams({ item: item_id, video, count: String(count) })}`, null, 90_000);
+    return { image: r.file, title: r.title, duration: r.duration, frames: r.frames, tip: '用读文件工具打开 image 看画面；格子从左到右、从上到下，对应 frames 里的时间' };
+  }),
+);
+
+server.registerTool(
   'capture_bilibili',
   {
     title: '收集素材：剪 B站视频片段',

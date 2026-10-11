@@ -185,6 +185,43 @@ export function createBiliSource({ root }) {
     return { bvid: d.bvid, title: d.title, p: page.page, duration: mmss(page.duration), danmaku: items.length, moments };
   }
 
+  // ---------- 预览：B站自带的进度条缩略图，拼成一张带时间的图 ----------
+  // 下载之前先看造型、机位、主角在不在画面里；out 是要写的 jpg 路径
+  async function preview(v, out, { count = 24 } = {}) {
+    const { d, p } = await view(v);
+    const page = d.pages?.find((x) => x.page === (p || 1)) || d.pages?.[0];
+    const shot = await get('/x/player/videoshot', { bvid: d.bvid, cid: page?.cid || d.cid, index: 1 });
+    const sprites = (shot.image || []).map((u) => (u.startsWith('//') ? `https:${u}` : u));
+    if (!sprites.length) throw new Error('这条视频没有进度条缩略图');
+    const per = shot.img_x_len * shot.img_y_len, W = shot.img_x_size, H = shot.img_y_size;
+    const times = (shot.index || []).slice(1); // 第 0 个是占位
+    const total = Math.min(times.length || per * sprites.length, per * sprites.length);
+    const n = Math.max(4, Math.min(48, count, total));
+    const picks = Array.from({ length: n }, (_, i) => Math.floor((i * (total - 1)) / Math.max(1, n - 1)));
+    const tmp = fs.mkdtempSync(path.join(path.dirname(out), '.preview-'));
+    try {
+      const files = [];
+      for (const [si, url] of sprites.entries()) {
+        if (!picks.some((k) => Math.floor(k / per) === si)) continue;
+        const buf = Buffer.from(await fetch(url, { headers: { 'user-agent': UA, referer: 'https://www.bilibili.com/' }, signal: AbortSignal.timeout(30_000) }).then((r) => r.arrayBuffer()));
+        fs.writeFileSync(path.join(tmp, `s${si}.jpg`), buf);
+      }
+      const font = ['/System/Library/Fonts/PingFang.ttc', '/System/Library/Fonts/Supplemental/Arial.ttf'].find((f) => fs.existsSync(f));
+      for (const [i, k] of picks.entries()) {
+        const si = Math.floor(k / per), j = k % per;
+        const x = (j % shot.img_x_len) * W, y = Math.floor(j / shot.img_x_len) * H;
+        const label = mmss(times[k] ?? 0);
+        const vf = `crop=${W}:${H}:${x}:${y},scale=320:-2${font ? `,drawtext=fontfile='${font}':text='${label.replace(':', '\\:')}':x=6:y=6:fontsize=20:fontcolor=yellow:shadowcolor=black:shadowx=1:shadowy=1` : ''}`;
+        await new Promise((ok, no) => execFile('ffmpeg', ['-v', 'error', '-y', '-i', path.join(tmp, `s${si}.jpg`), '-vf', vf, path.join(tmp, `t${String(i).padStart(3, '0')}.jpg`)], (e) => (e ? no(e) : ok())));
+      }
+      const cols = 6;
+      await new Promise((ok, no) => execFile('ffmpeg', ['-v', 'error', '-y', '-pattern_type', 'glob', '-i', path.join(tmp, 't*.jpg'), '-vf', `tile=${cols}x${Math.ceil(n / cols)}`, '-frames:v', '1', out], (e) => (e ? no(e) : ok())));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+    return { bvid: d.bvid, title: d.title, duration: mmss(page?.duration || d.duration), frames: picks.map((k) => mmss(times[k] ?? 0)) };
+  }
+
   // ---------- 剪一段存成素材 ----------
   // 返回 { file, part, url, title, quality, start, end }，file 相对项目根目录
   function clip(args) {
@@ -300,6 +337,7 @@ export function createBiliSource({ root }) {
     search,
     videos,
     highlights,
+    preview,
     clip,
     login: {
       status: () => { const l = login(); return { ...acc.status(ACC), loggedIn: !!l?.cookie, uname: l?.uname, at: l?.at }; },
