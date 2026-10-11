@@ -163,7 +163,9 @@
     '参考图': 'Reference', '基准': 'Base', '重画': 'Redraw', '表情本身': 'Expression', '张嘴': 'Mouth open', '半闭眼': 'Eyes half closed', '闭眼': 'Eyes closed',
     '平时显示的样子': 'Shown most of the time', '说话时跟着配音开合': 'Opens and closes with the voice', '眨眼的中间帧': 'Middle frame of a blink', '眨眼闭上的那一帧': 'Closed frame of a blink',
     '重画这个表情（4 张）': 'Redraw this expression (4 images)', '重画这张': 'Redraw this one', '点开看这个表情的 4 张': 'Open to see the 4 images of this expression', '重画失败': 'Could not redraw',
-    '确认重画？': 'Redraw?', '给角色起个名字': 'Name the character', '选一张 PNG、JPG 或 WebP 图片': 'Pick a PNG, JPG or WebP image',
+    '确认重画？': 'Redraw?', '修改意见': 'Feedback', '让 Claude 按意见改': 'Let Claude revise', '退回上一版': 'Restore previous version', '确认退回上一版？': 'Restore the previous version?',
+    '只改你提到的地方，其余保持不变；改之前的脚本会自动留底。': 'Only what you mention is changed; the previous script is kept.', '先写一下要改哪里': 'Write what to change first', '已退回上一版': 'Previous version restored',
+    'Claude 开始按意见改脚本，改完会自动存回': 'Claude is revising the script and will save it when done', '给角色起个名字': 'Name the character', '选一张 PNG、JPG 或 WebP 图片': 'Pick a PNG, JPG or WebP image',
     '角色建好了，点「生成」出整套表情': 'Character created. Click Generate for the full expression set', '新建失败': 'Could not create',
     '讲解': 'Explaining', '得意': 'Smug', '惊讶': 'Surprised', '疑惑': 'Puzzled', '无奈': 'Shrug', '吐槽': 'Roasting', '认真': 'Serious', '开心': 'Happy', '视觉风格': 'Visual style', '一句话定位': 'One-line positioning',
     '固定结构': 'Structure', '适合的题材': 'Topics', '主打情绪': 'Emotions', '配音音色': 'Voice',
@@ -391,6 +393,7 @@
   // 带数字、名字的句式：(.+?) 抓到的部分会再翻译一遍
   const num = (x, k) => { const v = parseFloat(x) * k; return v >= 1e9 ? +(v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? +(v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? +(v / 1e3).toFixed(1) + 'k' : String(Math.round(v)); };
   const PATTERNS = [
+    [/^留底 (\d+) 版$/, '$1 saved versions'],
     [/^正在思考… 已 (\d+) 字$/, 'Thinking… $1 chars'], [/^正在说… 已 (\d+) 字$/, 'Writing a reply… $1 chars'], [/^正在写：(.+) · 已 (\d+) 字$/, (m, a, n) => `Writing: ${tr(a)} · ${n} chars`],
     [/^生成缺的 (\d+) 张（约 \$([\d.]+)）$/, 'Generate the missing $1 (about $$$2)'], [/^确认生成 (\d+) 张？约 \$([\d.]+)$/, 'Generate $1 images? About $$$2'],
     [/^生成中：(\d+)\/(\d+) 张$/, 'Generating: $1/$2'], [/^已有 (\d+)\/(\d+) 张$/, '$1/$2 ready'], [/^整套 (\d+) 张都齐了$/, 'All $1 images ready'],

@@ -76,7 +76,7 @@ function applyLocal(col){
 function drawerSigOf(id,it){
   const rs=itemRun('script',id),rc=itemRun('check',id),rv=itemRun('video',id),rr=itemRun('revise',id),re=itemRun('research',id),any=runningRun(),anyV=runningVideo();
   const pb=it.publish||{};
-  return [it.labAsk?.id,it.labAsk?.status,(it.assets||[]).map(a=>a.id).join(','),pb.gen?.status,pb.cover,JSON.stringify(Object.fromEntries(Object.entries(pb.results||{}).map(([k,v])=>[k,v.status]))),!!pb.platforms,re?.id,re?.status,it.research?.at,rs?.id,rs?.status,rc?.id,rc?.status,rv?.id,rv?.status,rr?.id,rr?.status,any?.id,anyV?.id,it.stage,JSON.stringify(it.precheck||null),JSON.stringify(it.video||null)].join('|');
+  return [(it.scriptHistory||[]).length,it.labAsk?.id,it.labAsk?.status,(it.assets||[]).map(a=>a.id).join(','),pb.gen?.status,pb.cover,JSON.stringify(Object.fromEntries(Object.entries(pb.results||{}).map(([k,v])=>[k,v.status]))),!!pb.platforms,re?.id,re?.status,it.research?.at,rs?.id,rs?.status,rc?.id,rc?.status,rv?.id,rv?.status,rr?.id,rr?.status,any?.id,anyV?.id,it.stage,JSON.stringify(it.precheck||null),JSON.stringify(it.video||null)].join('|');
 }
 let drawerSig='';
 function syncDrawer(){
@@ -432,6 +432,20 @@ function vVideo(it,id){
     <p class="hint">文件：${esc(v.mp4)}。想在 HyperFrames 里继续改：在 ${esc(v.project)} 目录运行 <code>npx hyperframes preview</code></p>`;
 }
 // 调研：按钮、报告（正文里的 [n] 点开就是对应来源）
+// 看完脚本提意见，让 Claude 只改提到的地方；旧版本自动留底，可以退回上一版
+function vScriptRevise(id,it){
+  const run=itemRun('script',id),busy=run?.status==='running'||!!runningRun();
+  const hist=it.scriptHistory||[];
+  return `<div class="revise">
+    <div class="field"><label for="scriptFb">修改意见</label>
+      <textarea id="scriptFb" rows="3" placeholder="比如：第 22–24 镜把 REA 被沙盒挡住那段删掉；第 25 镜之前加一句为什么名字丢了还能找回逻辑">${esc(S.scriptFb?.[id]||'')}</textarea></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn primary" data-act="script-revise" ${busy||!aiReady()?'disabled':''} title="${busy?'Claude 正在忙，等它结束':''}">让 Claude 按意见改</button>
+      ${hist.length?`<button class="btn" data-act="script-undo" title="${esc(fmtTime(hist[0].at))} 被覆盖的那一版">退回上一版</button><span class="faint">留底 ${hist.length} 版</span>`:''}
+    </div>
+    <p class="hint">只改你提到的地方，其余保持不变；改之前的脚本会自动留底。</p>
+  </div>`;
+}
 function researchActions(id,it){
   const run=itemRun('research',id);
   if(run?.status==='running')return `<button class="btn" data-act="agent-stop" data-id="${esc(run.id)}">停止</button><button class="btn" disabled>调研中…</button>`;
@@ -1647,6 +1661,7 @@ function renderDrawer(){
         <div id="scriptRun">${modeOf('script')==='agent'?vRunMini(itemRun('script',id)):''}</div>
         ${modeOf('script')==='agent'?vSay(itemRun('script',id)):''}
         <p class="hint ${busyS?'busy':''}" id="scriptHint">${busyS?'Claude 正在写脚本，通常 20–60 秒开始出字。':modeOf('script')==='agent'?'后台 Agent 会先读账号人设，需要时上网查热点背景，写完自动存回这里。可以关掉详情去做别的。':'脚本会自动保存。'}</p>
+        ${d.script&&modeOf('script')==='agent'?vScriptRevise(id,it):''}
       </div>
       </div>
       <div class="dcol" id="dcolR">
@@ -1690,7 +1705,7 @@ async function agentItemTask(task,extra={}){
   try{
     await store.update('items',id,{title:S.draft.title,hook:S.draft.hook,angle:S.draft.angle,script:S.draft.script,updatedAt:Date.now()});
     await api('POST','/api/agent/run',{task,itemId:id,...extra});
-    toast(task==='research'?'Claude 开始调研，一般 3–10 分钟，报告会存到这张卡片上':task==='script'?'Claude 开始写脚本，写完会自动存回，可以先去做别的':task==='video'?'Claude 开始生成视频，一般要 20–60 分钟，可以先去做别的':'Claude 开始预审');
+    toast(task==='research'?'Claude 开始调研，一般 3–10 分钟，报告会存到这张卡片上':task==='script'?(extra.feedback?'Claude 开始按意见改脚本，改完会自动存回':'Claude 开始写脚本，写完会自动存回，可以先去做别的'):task==='video'?'Claude 开始生成视频，一般要 20–60 分钟，可以先去做别的':'Claude 开始预审');
   }catch(e){toast(e.message||'启动失败')}
 }
 async function aiScript(){
@@ -1784,6 +1799,12 @@ document.addEventListener('click',e=>{
       b.disabled=true;api('POST',`/api/agent/runs/${encodeURIComponent(id)}/say`,{text}).then(()=>{if(S.say)delete S.say[id];if(inp)inp.value='';toast('已插话：它会打断当前这一步，按你说的调整后继续')}).catch(e=>toast(e.message||'插话失败')).finally(()=>{b.disabled=false});break}
     case 'video-mark':{const v=document.querySelector('.vplayer');const ta=$('#videoFb');if(!v||!ta)break;const tag=`[${v.currentTime.toFixed(1)} 秒] `;
       ta.value=(ta.value&&!ta.value.endsWith('\n')?ta.value+'\n':ta.value)+tag;S.videoFb={...(S.videoFb||{}),[S.open]:ta.value};ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);break}
+    case 'script-revise':{const fb=(S.scriptFb?.[S.open]||'').trim();if(fb.length<2){toast('先写一下要改哪里');break}
+      const iid=S.open;b.disabled=true;agentItemTask('script',{feedback:fb}).then(()=>{if(S.scriptFb)delete S.scriptFb[iid];renderDrawer()});break}
+    case 'script-undo':arm(b,'确认退回上一版？',async()=>{const it=local.items[S.open];const h=it?.scriptHistory||[];if(!h.length)return;
+      // 当前这版也留底，退回之后还能再回来
+      const cur={script:it.script||'',at:Date.now()};await store.update('items',S.open,{script:h[0].script,scriptHistory:[cur,...h.slice(1)].slice(0,5),updatedAt:Date.now()});
+      S.draft.script=h[0].script;renderDrawer();toast('已退回上一版')});break;
     case 'video-revise':{const fb=(S.videoFb?.[S.open]||'').trim();const imgs=(S.videoImgs?.[S.open]||[]).map(x=>x.path);if(fb.length<2&&!imgs.length){toast('先写一下要改哪里，或附一张图');break}
       const iid=S.open;b.disabled=true;api('POST','/api/agent/run',{task:'revise',itemId:iid,feedback:fb,images:imgs}).then(()=>{if(S.videoFb)delete S.videoFb[iid];if(S.videoImgs)delete S.videoImgs[iid];toast('Claude 开始修改，改好会生成新的一版');renderDrawer()}).catch(e=>{b.disabled=false;toast(e.message||'启动失败')});break}
     case 'video-grab':grabFrame(b);break;
@@ -1898,6 +1919,7 @@ document.addEventListener('input',e=>{
   const t=e.target;
   if(t.id==='skillText'&&S.skillCur){S.skillDraft={...(S.skillDraft||{}),[S.skillCur.name]:t.value};const sv=document.querySelector('[data-act="skill-save"]');if(sv)sv.disabled=t.value===S.skillCur.content;return}
   if(t.id==='videoFb'){S.videoFb={...(S.videoFb||{}),[S.open]:t.value};return}
+  if(t.id==='scriptFb'){S.scriptFb={...(S.scriptFb||{}),[S.open]:t.value};return}
   if(t.id==='accQ'){S.accQ=t.value;const q=t.value.trim().toLowerCase();document.querySelectorAll('.acc-row').forEach(r=>{r.hidden=!!q&&!r.dataset.search.includes(q)});return}
   if(t.id==='localPath'){S.localPath={...(S.localPath||{}),[S.open]:t.value};return}
   if(t.id==='localGuide'){S.localGuide={...(S.localGuide||{}),[S.open]:t.value};return}

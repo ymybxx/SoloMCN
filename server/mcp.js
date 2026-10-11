@@ -709,12 +709,15 @@ server.registerTool(
   'save_script',
   {
     title: '保存脚本',
-    description: '把写好的分镜脚本存到内容卡片上（会覆盖原有脚本）。还在「选题」阶段的内容会自动推进到「脚本」阶段。',
+    description: '把写好的分镜脚本存到内容卡片上（会覆盖原有脚本，旧脚本自动留底）。还在「选题」阶段的内容会自动推进到「脚本」阶段。',
     inputSchema: { item_id: ITEM_ID, script: z.string().min(50).max(30000).describe('完整的分镜脚本，纯文本') },
   },
   tool(async ({ item_id, script }) => {
     const it = await call('GET', `/api/items/${item_id}`);
-    await call('PATCH', `/api/items/${item_id}`, { script, stage: (it.stage || 'idea') === 'idea' ? 'script' : it.stage, updatedAt: Date.now() });
+    // 覆盖前把旧脚本留底（最近 5 份），按意见改坏了可以在卡片上退回上一版
+    const old = (it.script || '').trim();
+    const scriptHistory = old && old !== script.trim() ? [{ script: it.script, at: Date.now() }, ...(it.scriptHistory || [])].slice(0, 5) : it.scriptHistory || [];
+    await call('PATCH', `/api/items/${item_id}`, { script, scriptHistory, stage: (it.stage || 'idea') === 'idea' ? 'script' : it.stage, updatedAt: Date.now() });
     return { saved: true, length: script.length };
   }),
 );
