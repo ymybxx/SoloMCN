@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // 解说员：把角色库里的表情差分做成会动的角色层，叠到成片上。
-// 用法：node presenter.mjs --spec presenter/spec.json [--overlay renders/video.mp4]
-//   不带 --overlay：只渲染角色层（presenter/frames/*.png，透明背景）
-//   带 --overlay：渲染后叠到这个成片上；原片先改名为 *-base.mp4，叠好的写回原文件名
+// 用法：node presenter.mjs --spec presenter/spec.json [--overlay renders/video.mp4] [--workers 4] [--force]
+//   不带 --overlay：只画角色层（presenter/frames/*.png，透明背景）。配音和表情定下来就可以在后台先画
+//   带 --overlay：叠到这个成片上；原片先改名为 *-base.mp4，叠好的写回原文件名
+//   参数、配音、角色图都没变时，直接复用画好的角色层（几秒），不重画；--force 强制重画
+//   画幅：spec 里写了 width/height 就用它；没写就读 --overlay 成片的尺寸，再没有就读项目 index.html 的 data-width/height
 //
 // 让一张立绘「活」起来的做法：
 //   - 张嘴、半闭眼、闭眼图只取和表情图不同的那一小块（嘴、眼），当补丁叠上去，身体和头发边缘不受影响
@@ -12,6 +14,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -26,7 +30,21 @@ if (!specPath) fail('用法：node presenter.mjs --spec presenter/spec.json [--o
 let spec;
 try { spec = JSON.parse(fs.readFileSync(specPath, 'utf8')); } catch (e) { fail(`读不了参数文件：${e.message}`); }
 
-const FPS = Number(spec.fps) || 30, W = Number(spec.width) || 1080, H = Number(spec.height) || 1920;
+// 画幅：spec → 成片 → 项目 index.html。默认值会画错（横屏片按竖屏画），所以宁可报错
+function frameSize() {
+  if (Number(spec.width) > 0 && Number(spec.height) > 0) return [Number(spec.width), Number(spec.height)];
+  if (overlay && fs.existsSync(overlay)) {
+    const [w, h] = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', overlay]).toString().trim().split(',').map(Number);
+    if (w > 0 && h > 0) return [w, h];
+  }
+  const idx = path.resolve('index.html');
+  if (fs.existsSync(idx)) {
+    const html = fs.readFileSync(idx, 'utf8'), w = html.match(/data-width="(\d+)"/), h = html.match(/data-height="(\d+)"/);
+    if (w && h) return [Number(w[1]), Number(h[1])];
+  }
+  fail('不知道画幅：在 spec 里写 "width" 和 "height"（和成片一样，例如横屏 1920、1080）');
+}
+const FPS = Number(spec.fps) || 30, [W, H] = frameSize();
 const charDir = path.isAbsolute(spec.character || '') ? spec.character : path.join(ROOT, spec.character || '');
 if (!fs.existsSync(path.join(charDir, 'character.json'))) fail(`找不到角色目录：${spec.character}（用 get_item 返回的 presenter.dir）`);
 const duration = Number(spec.duration);
@@ -83,11 +101,7 @@ const layout = (spec.layout || [{ at: 0 }]).map((l) => ({
   bottom: Math.min(1.05, Math.max(0.4, Number(l.bottom) || 0.83)),
 })).sort((a, b) => a.at - b.at);
 
-const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--use-angle=metal', '--enable-gpu-rasterization'] });
-const page = await browser.newPage({ viewport: { width: W, height: H } });
-await page.setContent(`<html><body style="margin:0;background:transparent"><canvas id="c" width="${W}" height="${H}"></canvas></body></html>`);
-
-const report = await page.evaluate(async ({ IMGS, env, accents, cues, layout, FPS, W, H }) => {
+const setup = async ({ IMGS, env, accents, cues, layout, FPS, W, H }) => {
   const load = (src) => new Promise((r, j) => { const i = new Image(); i.onload = () => r(i); i.onerror = j; i.src = src; });
   const img = {};
   for (const [k, v] of Object.entries(IMGS)) img[k] = await load(v);
@@ -211,21 +225,56 @@ const report = await page.evaluate(async ({ IMGS, env, accents, cues, layout, FP
     ctx.clearRect(0, 0, W, H); ctx.drawImage(glc, 0, 0);
   };
   return { notes, accents: accents.length };
-}, { IMGS, env, accents, cues, layout, FPS, W, H });
+};
 
-fs.rmSync(outDir, { recursive: true, force: true });
-fs.mkdirSync(outDir, { recursive: true });
-const el = await page.$('#c');
-const t0 = Date.now();
-for (let f = 0; f < nFrames; f++) {
-  await page.evaluate((f) => window.renderFrame(f), f);
-  await el.screenshot({ path: path.join(outDir, `${String(f).padStart(5, '0')}.png`), omitBackground: true });
+// ---------- 画角色层（参数没变就复用）----------
+const files = (dir, pre) => fs.readdirSync(dir).filter((f) => f.startsWith(pre)).sort();
+const stamp = (f) => { const st = fs.statSync(f); return `${path.basename(f)}:${st.size}:${Math.round(st.mtimeMs)}`; };
+const key = createHash('sha1').update(JSON.stringify({
+  v: 2, W, H, FPS, duration, cues, layout,
+  voices: voices.map((v) => [stamp(path.resolve(v.file)), Number(v.start || 0)]),
+  chars: exprs.flatMap((e) => files(charDir, `${e}-`).map((f) => stamp(path.join(charDir, f)))),
+})).digest('hex');
+const keyFile = path.join(outDir, '.key');
+const have = fs.existsSync(keyFile) && fs.readFileSync(keyFile, 'utf8') === key && fs.existsSync(path.join(outDir, `${String(nFrames - 1).padStart(5, '0')}.png`));
+const result = { frames: nFrames, size: `${W}x${H}`, dir: outDir };
+if (have && !process.argv.includes('--force')) {
+  result.reused = true;
+} else {
+  fs.rmSync(outDir, { recursive: true, force: true });
+  fs.mkdirSync(outDir, { recursive: true });
+  // 多个页面并行画：每帧的画面只由帧号决定，互不依赖，按连续的帧段分给各个页面
+  const workers = Math.max(1, Math.min(8, Number(arg('--workers')) || Math.min(4, Math.floor(os.cpus().length / 2))));
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--use-angle=metal', '--enable-gpu-rasterization'] });
+  const t0 = Date.now();
+  const per = Math.ceil(nFrames / workers);
+  const notes = new Set();
+  await Promise.all(Array.from({ length: workers }, async (_, w) => {
+    const from = w * per, to = Math.min(nFrames, from + per);
+    if (from >= to) return;
+    const page = await browser.newPage({ viewport: { width: W, height: H } });
+    await page.setContent(`<html><body style="margin:0;background:transparent"><canvas id="c" width="${W}" height="${H}"></canvas></body></html>`);
+    const r = await page.evaluate(setup, { IMGS, env, accents, cues, layout, FPS, W, H });
+    r.notes.forEach((n) => notes.add(n));
+    const el = await page.$('#c');
+    for (let f = from; f < to; f++) {
+      await page.evaluate((f) => window.renderFrame(f), f);
+      await el.screenshot({ path: path.join(outDir, `${String(f).padStart(5, '0')}.png`), omitBackground: true });
+    }
+    await page.close();
+  }));
+  await browser.close();
+  fs.writeFileSync(keyFile, key);
+  Object.assign(result, { workers, seconds: Math.round((Date.now() - t0) / 1000), notes: [...notes] });
 }
-await browser.close();
-const result = { frames: nFrames, dir: outDir, seconds: Math.round((Date.now() - t0) / 1000), notes: report.notes };
+
+
+
 
 if (overlay) {
   if (!fs.existsSync(overlay)) fail(`找不到成片：${overlay}`);
+  const [vw, vh] = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', overlay]).toString().trim().split(',').map(Number);
+  if (vw !== W || vh !== H) fail(`角色层是 ${W}x${H}，成片是 ${vw}x${vh}：把 spec 的 width/height 改成和成片一样（或删掉让它自己读），再跑一次`);
   // 原片存成 *-base.mp4。video.mp4 是上次叠出来的（标记里的大小和时间对得上）就从原片重叠；对不上说明重新渲染过，用新的当原片
   const base = overlay.replace(/\.mp4$/, '-base.mp4'), mark = overlay + '.presenter';
   const st = fs.statSync(overlay), sig = `${st.size}:${Math.round(st.mtimeMs)}`;

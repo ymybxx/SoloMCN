@@ -62,7 +62,7 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
 - **Step 3.1 配音**：按 `/voice-over` 技能做（用哪种配音、怎么挑音色、怎么登记进 `audio_meta.json` 和对齐字幕都写在那里）。
 - **BGM 和音效**：按脚本【BGM 与音效】的情绪和节点来。HyperFrames 已登录、还有额度时用它的曲库和音效；取不到就按下文「代码合成配乐和音效」自己做，不要让成片没有声音。不用来路不明的音乐。
 - **Step 4 画面设计**：每个 frame 的 time-coded shot sequence 按下文「画面质量」第 3–5 条写。
-- **Step 6**：`lint`、`check`、`snapshot` 通过后**直接渲染**，不要运行 `preview`，不要等用户审片——点「生成视频」就是渲染的确认。渲染命令：`npx hyperframes render --skill=faceless-explainer --quality high --output renders/video.mp4`。渲染完按下文「渲染后：体检和审片」检查一轮。
+- **Step 6**：`lint`、`check`、`snapshot` 通过、审片改完后**直接渲染**，不要运行 `preview`，不要等用户审片——点「生成视频」就是渲染的确认。渲染命令：`npx hyperframes render --skill=faceless-explainer --quality high --output renders/video.mp4`。渲染之前先按下文「渲染前：审片」审一轮、改完；渲染完叠解说员、按「渲染后：体检」量一下。
 - 某一步失败：按流程里的说明修最小的那处再重试。修不好就停下，最后的汇报里写清楚卡在哪一步、错误是什么。
 - **等待耗时的命令**：直接在前台运行，等它跑完（命令行工具的超时可以设到 10 分钟）。流程里写着用 `&` 放到后台的命令，紧接着用 `wait` 等它结束，或者干脆在前台跑。**不要用 `sleep` 空等**，会被拦下。
 - **收尾前不留后台任务**：登记视频、写最终汇报之前，确认自己用后台方式启动的命令（`&`、后台 Bash）都已经结束，没结束且不再需要的直接停掉。还有后台任务没完，这次运行就会一直挂着显示「生成中」。
@@ -105,28 +105,39 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
    ```json
    {
      "character": "<presenter.dir>",
+     "width": 1080, "height": 1920,
      "duration": 57.3,
      "voices": [ {"file": "assets/voice/01.wav", "start": 0}, {"file": "assets/voice/02.wav", "start": 3.98} ],
      "cues": [ {"at": 0, "expr": "talk"}, {"at": 9.4, "expr": "surprised"}, {"at": 11.2, "expr": "talk"} ],
      "layout": [ {"at": 0, "side": "right", "size": 0.34}, {"at": 20.9, "hidden": true}, {"at": 26.5, "side": "right", "size": 0.34} ]
    }
    ```
+   - `width`/`height`：和成片一样（看 BRIEF 的 `aspect`：竖屏 1080×1920，横屏 1920×1080）。
    - `voices`：`audio_meta.json` 里每个镜头的配音文件，`start` 是那个镜头的起点（STORYBOARD 同步后的时长累加）。嘴型和点头按它们的音量走。
    - `cues`：什么时候换什么表情，只用 `presenter.expressions` 里有的。讲解（`talk`）打底；惊讶（`surprised`）用在反转、意外的数字；得意（`smug`）用在「我们做到了」；疑惑（`think`）用在抛问题；无奈（`shrug`）、吐槽（`roast`）用在槽点；认真（`serious`）用在提醒和风险；开心（`cheer`）用在成功。3–8 秒换一次，跟着台词情绪走，不要每句都换。
    - `layout`：默认右侧、`size` 0.34（角色图高占画面三分之一）、底边在字幕条上方。`hidden: true` 让她滑出去，下一条再滑回来；每次出场至少 4 秒，别频繁进出。内容在右边的镜头可以换到 `"side": "left"`。
-3. **叠上去**：渲染出 `renders/video.mp4` 之后、体检之前，运行 `node <本技能目录>/scripts/presenter.mjs --spec presenter/spec.json --overlay renders/video.mp4`。它把没叠的原片存成 `renders/video-base.mp4`，叠好的写回 `renders/video.mp4`；之后重渲了再跑一次就行，它认得出新渲染的片子。体检和审片都看叠好的。
-4. **审片加一条**：解说员有没有挡住内容的关键部分、表情和台词情绪对不对得上。挡住了就改那一段的 `layout`（退场或换边）重叠，不用重渲整片。
+3. **先在后台画好**：配音做完、`sync-durations` 之后就写好 spec，**放到后台**运行 `node <本技能目录>/scripts/presenter.mjs --spec presenter/spec.json`（用后台 Bash，不要等它），然后接着做镜头。它只依赖配音、表情和位置，和镜头的制作同时进行，不占总时间。
+4. **审片时一起看**：渲染前的审片拼图会把她叠进去（见下文「渲染前：审片」）。挡住了内容、表情和台词情绪对不上，就改 spec 里那一段的 `layout` 或 `cues`，再在后台跑一次（只重画变了的这一版，几分钟）。
+5. **叠上去**：先确认第 3 步那个后台任务已经结束（没结束就等它，两个同时跑会互相覆盖），渲染出 `renders/video.mp4` 后运行 `node <本技能目录>/scripts/presenter.mjs --spec presenter/spec.json --overlay renders/video.mp4`。spec、配音、角色图都没变时它直接复用画好的角色层，几秒就叠完；变了会自动重画。它把没叠的原片存成 `renders/video-base.mp4`，叠好的写回 `renders/video.mp4`。尺寸和成片对不上会直接报错，按提示改 spec。
 
 不要在画面里另外再画一个角色，也不要用代码画她；她只来自角色库的图。
 
-## 渲染后：体检和审片
+## 渲染前：审片
 
-渲染完、登记之前做一轮，**最多改一轮**，改不完的记进 notes：
+所有镜头做完、`lint` 和 `check` 通过后，**渲染之前**审一轮，**最多改一轮**，改不完的记进 notes。改完再渲染，整片只渲染一次。
 
-1. **体检**：`node <本技能目录>/scripts/film-check.mjs renders/video.mp4 --cuts <各镜头起点秒数，逗号分隔，按 STORYBOARD 同步后的时长累加，不含 0>`。它量三样：镜头内快速运动太少（像翻 PPT）、中段空画面、蓝紫底太多。结果只当线索。
-2. **抽帧**：`mkdir -p review && ffmpeg -i renders/video.mp4 -vf "fps=1/2,scale=360:-2,tile=6x3" review/sheet-%02d.jpg`，每 2 秒一帧拼成几张大图。
-3. **派一个没参与制作的子代理审片**：只给它 `review/sheet-*.jpg`、`snapshots/contact-sheet.jpg`、体检结果和 `user_script.txt`，让它对着上面「六种做坏方式」和这几条挑问题：文字被裁切或重叠、字幕挡住关键画面、主角或主物不在画里、角色前后不一致、屏上数字和台词不一致、某一段一直不动。每条写时间码（第几张图第几格 × 2 秒）、问题、改法，写进 `review/审片.md`。不要让它看工程代码，它只看成片。
-4. **改**：只改明确的问题（体检的红灯、审片里有时间码的硬伤），改对应 frame 的 HTML，`lint`、`check` 通过后重渲一次，再跑一次体检。审片里偏口味的意见不改，记进 notes。
+1. **截图**：每个镜头在 15%、50%、85% 三个时刻各截一张（推镜裁字、遮挡这类问题常出在镜头运动中途），时间按 STORYBOARD 同步后的镜头起点和时长算：`npx hyperframes snapshot --at <逗号分隔的秒数> --no-end -o review/shots`。
+2. **拼图**：`node <本技能目录>/scripts/review-sheets.mjs --snapshots review/shots --presenter presenter/frames --out review`（没有解说员就不带 `--presenter`；她还没画完就先等那个后台任务）。它把同一时刻的解说员叠上去、标好时间码，拼成 `review/sheet-*.jpg`，并打印每张图的时间。
+3. **派没参与制作的子代理审片**：拼图超过 4 张时，按时间分成 2–3 段，**同时**派 2–3 个子代理各审一段。每个只给它那几张 `review/sheet-*.jpg` 和对应时段的台词（`user_script.txt` 里那几镜），**只看这几张拼图，不要逐帧另外截图或打开单张截图**，有疑问的格子最多放大看 3 张。对着上面「六种做坏方式」和这几条挑问题：文字被裁切或重叠、字幕挡住关键画面、主角或主物不在画里、解说员挡住内容或表情和台词对不上、屏上数字和台词不一致、某一段一直不动。每条写时间码、问题、改法，汇总写进 `review/审片.md`。不要让它看工程代码。
+4. **改**：只改明确的硬伤（有时间码的那些），改对应 frame 的 HTML 或解说员 spec，`lint`、`check` 通过后再渲染。偏口味的意见不改，记进 notes。
+
+## 渲染后：体检
+
+渲染并叠好解说员后：
+
+1. **体检**：`node <本技能目录>/scripts/film-check.mjs renders/video.mp4 --cuts <各镜头起点秒数，逗号分隔，按 STORYBOARD 同步后的时长累加，不含 0>`。它量三样：镜头内快速运动太少（像翻 PPT）、中段空画面、蓝紫底太多。几秒就出结果，只当线索。
+2. **只有体检报空画面时才回头改**（某一段整帧什么都没有，通常是素材没加载或时间轴错位）：改了要重渲。快速运动偏少、蓝紫偏多这类记进 notes，不为它重渲。
+3. 再生成一次 `snapshots/contact-sheet.jpg` 给登记用。
 
 ## 代码合成配乐和音效
 
@@ -203,7 +214,7 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
 - `project`：`videos/<目录>`
 - `contact_sheet`：`videos/<目录>/snapshots/contact-sheet.jpg`（有的话）
 - `duration_s`：成片时长
-- `notes`：用的音色、选的设计预设、配乐来源（曲库，或代码合成的 mood/bpm/seed）、素材来源及替换记录、体检结果和审片改了什么、没改的审片意见、其他后台制作记录
+- `notes`：用的音色、选的设计预设、配乐来源（曲库，或代码合成的 mood/bpm/seed）、素材来源及替换记录、审片改了什么、没改的审片意见、体检结果、其他后台制作记录
 
 ## 5. 汇报
 
