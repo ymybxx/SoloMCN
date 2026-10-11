@@ -6,6 +6,7 @@
 //   node montage.mjs beats  --master <音轨来源.mp4> [--from 秒] [--to 秒]              主音轨的 BPM 和每一拍的时间
 //   node montage.mjs skips  --master <音轨来源> --within 90,150                     找能无缝砍掉的整数个八拍（成片超时长时用，写进 audio.skip）
 //   node montage.mjs track  --spec montage.json                                         认主角：每条片段里主角在哪、哪些时段拍到别人或太小（写进 autoExclude，配合 reframe 自动居中放大）
+//   node montage.mjs audit  --spec montage.json [--fix [--only 5.4,22.5] --out x.json] 成片体检：哪几刀画面不是主角（会有误报，先看图）；--fix 只把这几刀（或 --only 指定的成片时间）换成同一时刻认得出主角的另一场
 //   node montage.mjs compare --spec montage.json --at 30,60,90                         同一时刻各片段的画面拼成对比图（查对齐、调构图）
 //   node montage.mjs plan   --spec montage.json                                         按 spec 排切点，写回 spec 的 cuts（不渲染）
 //   node montage.mjs render --spec montage.json [--out renders/video.mp4]               渲染成片，顺带出切点表和缩略图拼图
@@ -477,6 +478,67 @@ function targetAt(dir, s, ct) {
   return { cx: med('cx'), cy: med('cy'), h: med('h') };
 }
 
+// ---------- 体检：已经渲染好的成片里，哪几刀画面不是主角 ----------
+// 不改剪辑，只对照 track 的结果逐刀查；--fix 时只把有问题的那几刀换成同一时刻认得出主角的另一场，其余原样
+const STRONG = new Set(['不像主角，可能拍到别人了', '发色对不上，可能是穿同款衣服的队友', '画面焦点在别人身上', '主角太小']);
+function cutHealth(dir, src, t0, t1) {
+  const file = path.join(dir, 'track', `${src}.json`);
+  if (!fs.existsSync(file)) return null;
+  const all = JSON.parse(fs.readFileSync(file, 'utf8')).samples;
+  let xs = all.filter((x) => x.t >= t0 - 0.05 && x.t <= t1 + 0.05);
+  if (!xs.length) xs = all.filter((x) => Math.abs(x.t - (t0 + t1) / 2) <= 0.5);
+  if (!xs.length) return null;
+  const strong = xs.filter((x) => !x.ok && STRONG.has(x.why)).length;
+  const bad = xs.filter((x) => !x.ok).length;
+  // 构图：主角全身入画、站在中间最好；顶天立地的近景（头脚都出框）和偏到一边的扣分
+  const okx = xs.filter((x) => x.ok);
+  const frame = okx.length ? okx.reduce((a, x) => a + (x.h > 0.95 ? 0.3 : 0) + Math.abs(x.cx - 0.5), 0) / okx.length : 0.5;
+  return { n: xs.length, ok: xs.length - bad, strong, frame, why: [...new Set(xs.filter((x) => !x.ok).map((x) => x.why))] };
+}
+
+function audit(spec, dir, table, { fix = false, only = null } = {}) {
+  const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
+  const flagged = [];
+  for (const [i, c] of table.entries()) {
+    const h = cutHealth(dir, c.src, c.srcTime, c.srcTime + c.dur);
+    if (!h) continue;
+    // 一半以上的取样明确是别人 / 太小，或者整刀都认不出主角
+    if (h.strong * 2 >= h.n || h.ok === 0) flagged.push({ i, out: c.out, dur: c.dur, at: c.at, src: c.src, label: c.label, why: h.why });
+  }
+  if (!fix) return { flagged };
+  // only：人看过之后指定要换的几刀（成片时间，秒）；体检会有误报，也会漏掉被路人挡住的镜头
+  const todo = only ? table.map((c, i) => ({ c, i })).filter(({ c }) => only.some((t) => Math.abs(t - c.out) < 0.06 || (t > c.out && t < c.out + c.dur))).map(({ c, i }) => ({ i, out: c.out, dur: c.dur, at: c.at, src: c.src, label: c.label, why: ['人工指定'] })) : flagged;
+  const cuts = [...spec.cuts].sort((a, b) => a.at - b.at);
+  const used = new Map();
+  for (const c of table) used.set(c.src, (used.get(c.src) || 0) + 1);
+  const changes = [];
+  const cur = table.map((c) => c.src); // 边换边更新，前后刀按换过之后的算，免得相邻两刀换成同一场
+  // 候选少的刀先挑，免得相邻两刀抢同一个替补
+  const options = (f) => srcs.filter((s) => s.id !== f.src && (() => { const off = usable(s, f.at, f.at + f.dur); if (off == null) return false; const h = cutHealth(dir, s.id, f.at + off, f.at + f.dur + off); return h && h.ok / h.n >= 0.6; })()).length;
+  todo.sort((a, b) => options(a) - options(b));
+  for (const f of todo) {
+    // 成片里的这一刀对应 spec 里哪个切点（同一切点被砍点分成两刀时一起换）
+    // 切点表里的时间按帧取过整，和 spec 里的切点差零点零几秒：取最近的、且不晚于这一刀结束的那个
+    const k = cuts.reduce((best, c, j) => (c.at < f.at + f.dur - 0.05 && (best < 0 || Math.abs(c.at - f.at) < Math.abs(cuts[best].at - f.at)) ? j : best), -1);
+    if (k < 0) continue;
+    const prev = cur[f.i - 1], next = cur[f.i + 1];
+    const cand = srcs.filter((s) => s.id !== f.src && s.id !== prev && s.id !== next).map((s) => {
+      const off = usable(s, f.at, f.at + f.dur);
+      if (off == null) return null;
+      const h = cutHealth(dir, s.id, f.at + off, f.at + f.dur + off);
+      if (!h || h.ok / h.n < 0.6) return null;
+      return { s, off, score: h.ok / h.n - h.frame - (used.get(s.id) || 0) * 0.01 };
+    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    if (!cand.length) { changes.push({ out: f.out, from: f.src, to: null, note: '没有能换的场次，原样保留' }); continue; }
+    const pick = cand[0];
+    changes.push({ out: f.out, from: f.src, to: pick.s.id });
+    cur[f.i] = pick.s.id;
+    used.set(pick.s.id, (used.get(pick.s.id) || 0) + 1);
+    cuts[k] = { ...cuts[k], src: pick.s.id, offset: pick.off, fixed: true };
+  }
+  return { flagged, changes, cuts };
+}
+
 // ---------- 渲染 ----------
 function esc(t) { return String(t).replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\u2019").replace(/%/g, '\\%'); }
 
@@ -594,6 +656,20 @@ if (cmd === 'align') {
   const rep = track(spec, dir, { step: Number(o.step) || 0.5 });
   fs.writeFileSync(file, JSON.stringify(spec, null, 1));
   console.log(JSON.stringify(rep, null, 1));
+} else if (cmd === 'audit') {
+  if (!o.spec) die('用法：montage.mjs audit --spec montage.json [--cuts renders/video-cuts.json] [--fix --out montage-fixed.json]');
+  const file = path.resolve(o.spec); const dir = path.dirname(file);
+  const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const s of spec.sources) s.duration ??= duration(path.resolve(dir, s.file));
+  if (!spec.sources.every((s) => s.use === false || fs.existsSync(path.join(dir, 'track', `${s.id}.json`)))) track(spec, dir);
+  const table = JSON.parse(fs.readFileSync(path.resolve(dir, o.cuts || 'renders/video-cuts.json'), 'utf8'));
+  const r = audit(spec, dir, table, { fix: !!o.fix, only: o.only ? String(o.only).split(',').map(Number) : null });
+  if (o.fix) {
+    const outSpec = { ...spec, cuts: r.cuts };
+    for (const s of outSpec.sources) delete s.autoExclude; // 只换问题刀，不改其余的选择
+    fs.writeFileSync(path.resolve(dir, o.out || 'montage-fixed.json'), JSON.stringify(outSpec, null, 1));
+  }
+  console.log(JSON.stringify({ flagged: r.flagged.map((f) => ({ out: f.out, dur: f.dur, src: f.src, label: f.label, why: f.why })), changes: r.changes }, null, 1));
 } else if (cmd === 'skips') {
   if (!o.master) die('用法：montage.mjs skips --master <音轨来源> [--within 90,150] [--min 5] [--max 30] [--step 8]');
   const w = o.within ? String(o.within).split(',').map(Number) : [0, Infinity];
