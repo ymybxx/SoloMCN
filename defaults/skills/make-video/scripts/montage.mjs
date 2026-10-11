@@ -300,6 +300,12 @@ function plan(spec, dir) {
   const pins = [...(spec.pins || [])].sort((x, y) => x.from - y.from); // 指定某段用某个片段（名场面、定格）
   const per = (t) => (auto.sections || []).find((x) => t >= x.from && t < x.to)?.beatsPerCut ?? auto.beatsPerCut ?? 4;
   const rand = rng(auto.seed || 1);
+  // 挑场次时顺带看画面：主角在这一刀里清不清楚、在不在中间（人体检测的结果缓存在 track/，第一次要几分钟）。
+  // 只当偏好，不排除素材、不放大；"preferClear": false 关掉
+  const clear = spec.preferClear === false ? null : (scanPeople(spec, dir), (s, off, a, b) => {
+    const h = cutHealth(dir, s.id, a + off, b + off);
+    return h ? h.ok / h.n - h.frame : null;
+  });
   const cuts = [];
   const used = new Map();
   const recent = [];
@@ -323,13 +329,21 @@ function plan(spec, dir) {
     const stopAt = grid.findIndex((t) => t > at + 0.01 && t >= end - 0.01);
     const nextPin = pins.find((p) => p.from > at + 0.01 && p.from < end);
     if (nextPin) end = nextPin.from;
-    // 挑一个覆盖这一段、最近两段没用过、总共用得最少的片段（同样少的随机挑）
+    // 挑一个覆盖这一段、最近两段没用过的片段：出场次数不能比最少的多出 1 次以上（8 套造型轮得匀），
+    // 在这里面挑主角最清楚、最居中的；差不多清楚的，挑用得少的，再一样就随机
     const cover = srcs.map((s) => ({ s, off: usable(s, at, end) })).filter((x) => x.off != null);
     if (!cover.length) die(`${r3(at)}–${r3(end)} 秒没有片段能覆盖，检查对齐结果或缩短 audio 范围`);
     const fresh = cover.filter((x) => !recent.slice(-2).includes(x.s.id));
     const pool = fresh.length ? fresh : cover.filter((x) => x.s.id !== recent.at(-1)).length ? cover.filter((x) => x.s.id !== recent.at(-1)) : cover;
     const min = Math.min(...pool.map((x) => used.get(x.s.id) || 0));
-    const cand = pool.filter((x) => (used.get(x.s.id) || 0) === min);
+    let cand = pool.filter((x) => (used.get(x.s.id) || 0) <= min + (clear ? 1 : 0));
+    if (clear) {
+      for (const x of cand) x.q = clear(x.s, x.off, at, end) ?? 0;
+      const best = Math.max(...cand.map((x) => x.q));
+      cand = cand.filter((x) => x.q >= best - 0.1);
+      const fewest = Math.min(...cand.map((x) => used.get(x.s.id) || 0));
+      cand = cand.filter((x) => (used.get(x.s.id) || 0) === fewest);
+    }
     const pick = cand[Math.floor(rand() * cand.length)];
     used.set(pick.s.id, (used.get(pick.s.id) || 0) + 1);
     cuts.push({ at: r3(at), src: pick.s.id, offset: pick.off });
@@ -435,6 +449,16 @@ function trackSource(file, step = 0.5) {
       return { ...base, ok: true };
     }),
   };
+}
+
+// 只做人体检测、缓存到 track/<id>.json，不改 spec（排切点挑场次、体检都用它）
+function scanPeople(spec, dir, { step = 0.5 } = {}) {
+  fs.mkdirSync(path.join(dir, 'track'), { recursive: true });
+  for (const s of spec.sources) {
+    if (s.offset == null || s.use === false) continue;
+    const file = path.join(dir, 'track', `${s.id}.json`);
+    if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify(trackSource(path.resolve(dir, s.file), step)));
+  }
 }
 
 // 对每条片段跑一遍，结果存到 track/<id>.json；把连续的坏帧变成 autoExclude（主音轨时间）

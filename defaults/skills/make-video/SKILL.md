@@ -235,7 +235,7 @@ angle: <脚本自身的结构：listicle / concept / how-to / narrative>
    - `auto`：每几拍切一次（`beatsPerCut`），`sections` 给副歌、鼓点密的地方加快到 2 拍；`pins`：脚本里要停住的名场面，指定用哪一场、从几秒到几秒。拍点用 `beats` 子命令看（`node montage.mjs beats --master <主音轨素材>`，会给 BPM 和候选），时间都是主音轨时间。
 4. **认主角（可选，默认不做）**：`node montage.mjs track --spec montage.json` 会认出每条直拍里的主角，把拍到别人、被挡的时段写进 `autoExclude`；再加 `"reframe": true` 会按主角位置放大居中。代价是排除偏保守、可选镜头变少，放大后画面变软，整片切点也会跟着变。**默认按正常方式剪，靠第 8 步审片只修出问题的几刀**；只有素材几乎全是多人远景、主角经常不在画面中间时才用这一步。
 5. **查对齐和构图**：`node montage.mjs compare --spec montage.json --at <5–8 个时间点，覆盖主歌、副歌、舞蹈段>`，生成 `review/compare.jpg`：每一行是同一时刻、每一列是一条片段。读这张图：同一行的动作应该是同一拍的同一个动作；对不上的片段（动作明显不同步）先在 notes 记下，把它 `use: false` 或用 `exclude` 去掉那一段；主角不在中间的调 `x`/`zoom`，再出一次对比图确认。
-6. **排切点**：`node montage.mjs plan --spec montage.json`，切点写回 `cuts`（每个切点 `at`、`src`、`offset`）。看一遍：同一场不要连着出现，名场面停住的位置对。要微调就直接改 `cuts`（单个切点可以加 `nudge` 秒数微调这一镜的起点、`zoom`/`x` 覆盖这一镜的构图），改了就不要再跑 plan（会覆盖）。`pins` 指定的那一场在那段被 `autoExclude` 排除了（主角被挡），plan 会报错：换一场能用的，或者挪一下时间。
+6. **排切点**：`node montage.mjs plan --spec montage.json`，切点写回 `cuts`（每个切点 `at`、`src`、`offset`）。挑场次时会顺带看画面：在不和最近两刀同场、各场出场次数差不多的前提下，优先选主角清楚、站在中间的那场（第一次要做人体检测，几分钟，结果缓存在 `track/`）。这只是偏好，不排除素材、不放大，剪完照样要第 8 步审片；`"preferClear": false` 可以关掉。看一遍：同一场不要连着出现，名场面停住的位置对。要微调就直接改 `cuts`（单个切点可以加 `nudge` 秒数微调这一镜的起点、`zoom`/`x` 覆盖这一镜的构图），改了就不要再跑 plan（会覆盖）。`pins` 指定的那一场在那段被 `autoExclude` 排除了（主角被挡），plan 会报错：换一场能用的，或者挪一下时间。
 7. **渲染**：`node montage.mjs render --spec montage.json --out renders/video.mp4`。顺带写出 `renders/video-cuts.json`（切点表）和 `snapshots/contact-sheet.jpg`。
 8. **审片（多人画面必须做，只修出问题的刀）**：
    - `node montage.mjs audit --spec montage.json` 列出可疑的刀（画面里可能是别人、主角被挡、太小）。它第一次跑会顺带做人体检测，几分钟。
