@@ -124,13 +124,34 @@ export function createYt({ dataDir }) {
         return { ok: true, dryRun: true, screenshot: await acc.shot(page, 'dryrun') };
       }
       await done.click({ timeout: 15_000 });
-      // 发布后弹「视频已发布」或「正在处理视频」（还在转码时），两种都算成功；上传对话框关闭也算
-      await Promise.race([
-        page.getByText(/视频已发布|正在处理视频|Video published|Video processing/).first().waitFor({ state: 'visible', timeout: 120_000 }),
-        dialog.locator('#done-button').first().waitFor({ state: 'detached', timeout: 120_000 }),
-      ]);
-      log('发布成功');
-      return { ok: true };
+      // 发布要等明确的信号：上传对话框真正关掉，或者弹出带视频链接的「视频已发布」窗口。
+      // 之前按页面文字判断，会被对话框里本来就有的字提前满足，紧接着关浏览器，发布请求被打断、视频留在草稿。
+      // 检查还没做完时 YouTube 会再弹一个确认框（仍要发布 / Publish anyway），这是本来就要做的发布，点掉它
+      const deadline = Date.now() + 180_000;
+      let link = null;
+      for (;;) {
+        const st = await page.evaluate(() => {
+          const vis = (el) => el && el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden';
+          const up = document.querySelector('ytcp-uploads-dialog');
+          const uploadsOpen = vis(up?.querySelector('#dialog') || up) && !!up?.querySelector('#done-button');
+          const share = [...document.querySelectorAll('ytcp-video-share-dialog, ytcp-uploads-still-processing-dialog, tp-yt-paper-dialog')].find((d) => vis(d) && !d.closest('ytcp-uploads-dialog') && !d.querySelector('ytcp-uploads-dialog, #done-button') && /视频已发布|正在处理|Video published|processing/i.test(d.innerText));
+          const a = share?.querySelector('a[href*="youtu.be"], a[href*="youtube.com/watch"], a[href*="youtube.com/shorts"]');
+          const confirm = [...document.querySelectorAll('ytcp-button, tp-yt-paper-button, button')].find((b) => vis(b) && /^(仍要发布|仍然发布|继续发布|Publish anyway)$/.test(b.innerText.trim()));
+          return { uploadsOpen, shared: !!share, link: a?.href || null, confirm: !!confirm };
+        });
+        if (st.confirm) {
+          log('YouTube 要求确认（检查还没做完），点「仍要发布」');
+          await page.locator('ytcp-button, tp-yt-paper-button, button').filter({ hasText: /^(仍要发布|仍然发布|继续发布|Publish anyway)$/ }).first().click({ timeout: 10_000 });
+        }
+        if (st.shared || !st.uploadsOpen) { link = st.link; break; }
+        if (Date.now() > deadline) throw new Error('点了发布，但 3 分钟内上传对话框没关、也没出现「视频已发布」，视频可能还在草稿里，去 YouTube 工作室看一下');
+        await page.waitForTimeout(1500);
+      }
+      // 再等几秒让发布请求发完，再关浏览器
+      await settle(page, 8000);
+      await page.waitForTimeout(3000);
+      log(link ? `发布成功：${link}` : '发布成功');
+      return { ok: true, url: link || undefined };
     } catch (err) {
       err.screenshot = await acc.shot(page);
       throw err;

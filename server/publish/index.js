@@ -254,8 +254,8 @@ export function createPublisher({ store, root }) {
         let result;
         try {
           const info = it.publish.platforms[p] || {};
-          await browsers[p].publish(it.accountId, { mp4: abs(it.video.mp4), cover: absOrNull(coverFor(p)), cover2: absOrNull(cover2For(p)), title: info.title, desc: info.desc, tags: info.tags, collection: collectionFor(p) }, log);
-          result = { status: 'done', steps, error: null, screenshot: null, at: Date.now() };
+          const out = await browsers[p].publish(it.accountId, { mp4: abs(it.video.mp4), cover: absOrNull(coverFor(p)), cover2: absOrNull(cover2For(p)), title: info.title, desc: info.desc, tags: info.tags, collection: collectionFor(p) }, log);
+          result = { status: 'done', steps, error: null, screenshot: null, at: Date.now(), ...(out?.url ? { url: out.url } : {}) };
         } catch (err) {
           result = { status: 'failed', steps, error: err.message.split('\n')[0].slice(0, 300), screenshot: err.screenshot ? path.relative(root, err.screenshot) : null, at: Date.now() };
         }
