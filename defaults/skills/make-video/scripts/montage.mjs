@@ -339,6 +339,8 @@ function findSkips(master, { within = [0, Infinity], min = 5, max = 30, top = 6,
 }
 
 function plan(spec, dir) {
+  // 全局挑换装点（丝滑换装）：写了 schedule 就交给它
+  if (spec.schedule) { const r = schedule(spec, dir); console.log('全局挑点：' + JSON.stringify({ cuts: r.cuts })); return { cuts: spec.cuts, beats: {}, structureMap: spec.structureMap }; }
   const master = path.resolve(dir, spec.audio.file);
   const from = spec.audio.start ?? 0, to = spec.audio.end ?? duration(master);
   const auto = spec.auto || {};
@@ -389,48 +391,7 @@ function plan(spec, dir) {
   // 统一大小：主角在各场里的身体大小（骨架算的，占画面高的比例）。全程锁定时只用能缩放到同一大小的镜头，
   // 目标大小选「能覆盖最多镜头」的那个，写进 lock.torso 给渲染用
   let sizeOk = null, edgeOk = null;
-  if (motion && spec.lock?.mode === 'full') {
-    const zMin = spec.lock.zoomMin ?? 1.15, zMax = spec.lock.zoomMax ?? 1.6;
-    const all = Object.values(motion).flatMap((P) => P.samples.filter((x) => x.ok).map((x) => x.torso)).sort((a, b) => a - b);
-    let T = spec.lock.torso, bestN = -1;
-    if (!T) for (let i = 0; i < all.length; i += Math.max(1, Math.floor(all.length / 200))) {
-      const c = all[i] * zMin, lo = c / zMax, hi = c / zMin;
-      const n = all.filter((v) => v >= lo && v <= hi).length;
-      if (n > bestN) { bestN = n; T = c; }
-    }
-    spec.lock.torso = r3(T);
-    // 能不能锁住：这段里大部分时刻，主角能缩放到统一大小，而且放大后裁切框能把他放到画面中间（不会顶到原画边上）
-    const ty = spec.lock.y ?? 0.3, aspect = 16 / 9;
-    // 切点前后 0.25 秒（a 附近）这一小段能不能放到正中：换装那一刻最要紧，比整段的比例更严（偏差只允许 5%）
-    const fitAt = (x, tol) => {
-      if (!x?.ok || x.joints.filter(Boolean).length < (spec.lock.minJoints ?? 7)) return false;
-      const z = T / x.torso;
-      if (z < zMin * 0.92 || z > zMax * 1.08) return false;
-      const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
-      return nx >= 0.5 / zc - tol && nx <= 1 - 0.5 / zc + tol && ny >= ty / zc - tol && ny <= 1 - (1 - ty) / zc + tol;
-    };
-    edgeOk = (s, off, t) => {
-      const xs = motion[s.id].samples.filter((x) => Math.abs(x.t - (t + off)) <= 0.25);
-      return xs.length >= 3 && xs.filter((x) => fitAt(x, 0.05)).length / xs.length >= 0.8;
-    };
-    sizeOk = (s, off, a, b) => {
-      if (!edgeOk(s, off, a) || !edgeOk(s, off, b)) return false;
-      const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off);
-      if (xs.length < 3) return false;
-      const ok = xs.filter((x) => {
-        if (!x.ok) return false;
-        // 被挡住：12 个主要关节里看得见的少于 7 个，多半是前面有人挡着他
-        if (x.joints.filter(Boolean).length < (spec.lock.minJoints ?? 7)) return false;
-        const z = T / x.torso;
-        if (z < zMin * 0.92 || z > zMax * 1.08) return false;
-        const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
-        // 允许偏离画面中心一点（posTol，默认 8%）：素材里他常常不在正中，强求正中会把很多场都筛掉
-        const tol = spec.lock.posTol ?? 0.08;
-        return nx >= 0.5 / zc - tol && nx <= 1 - 0.5 / zc + tol && ny >= ty / zc - tol && ny <= 1 - (1 - ty) / zc + tol;
-      }).length;
-      return ok / xs.length >= 0.65;
-    };
-  }
+  if (motion && spec.lock?.mode === 'full') { const L = lockFns(spec, motion); sizeOk = L.sizeOk; edgeOk = L.edgeOk; spec.lock.torso = L.T; }
   const cuts = [];
   const used = new Map();
   const recent = [];
@@ -546,6 +507,177 @@ function assignFx(spec) {
   }
   spec.cuts = cuts;
   return { total: cuts.length, special, budget, used };
+}
+
+// 能不能锁住主角（全程锁定用）：统一大小 T、某一刻能不能放到画面正中、某一段能不能用
+function lockFns(spec, motion) {
+  let sizeOk, edgeOk;
+  const zMin = spec.lock.zoomMin ?? 1.15, zMax = spec.lock.zoomMax ?? 1.6;
+  const all = Object.values(motion).flatMap((P) => P.samples.filter((x) => x.ok).map((x) => x.torso)).sort((a, b) => a - b);
+  let T = spec.lock.torso, bestN = -1;
+  if (!T) for (let i = 0; i < all.length; i += Math.max(1, Math.floor(all.length / 200))) {
+    const c = all[i] * zMin, lo = c / zMax, hi = c / zMin;
+    const n = all.filter((v) => v >= lo && v <= hi).length;
+    if (n > bestN) { bestN = n; T = c; }
+  }
+  // 能不能锁住：这段里大部分时刻，主角能缩放到统一大小，而且放大后裁切框能把他放到画面中间（不会顶到原画边上）
+  const ty = spec.lock.y ?? 0.3, aspect = 16 / 9;
+  // 切点前后 0.25 秒（a 附近）这一小段能不能放到正中：换装那一刻最要紧，比整段的比例更严（偏差只允许 5%）
+  const fitAt = (x, tol) => {
+    if (!x?.ok || x.joints.filter(Boolean).length < (spec.lock.minJoints ?? 7)) return false;
+    const z = T / x.torso;
+    if (z < zMin * 0.92 || z > zMax * 1.08) return false;
+    const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
+    return nx >= 0.5 / zc - tol && nx <= 1 - 0.5 / zc + tol && ny >= ty / zc - tol && ny <= 1 - (1 - ty) / zc + tol;
+  };
+  edgeOk = (s, off, t) => {
+    const xs = motion[s.id].samples.filter((x) => Math.abs(x.t - (t + off)) <= 0.25);
+    return xs.length >= 3 && xs.filter((x) => fitAt(x, 0.05)).length / xs.length >= 0.8;
+  };
+  sizeOk = (s, off, a, b) => {
+    if (!edgeOk(s, off, a) || !edgeOk(s, off, b)) return false;
+    const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off);
+    if (xs.length < 3) return false;
+    const ok = xs.filter((x) => {
+      if (!x.ok) return false;
+      // 被挡住：12 个主要关节里看得见的少于 7 个，多半是前面有人挡着他
+      if (x.joints.filter(Boolean).length < (spec.lock.minJoints ?? 7)) return false;
+      const z = T / x.torso;
+      if (z < zMin * 0.92 || z > zMax * 1.08) return false;
+      const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
+      // 允许偏离画面中心一点（posTol，默认 8%）：素材里他常常不在正中，强求正中会把很多场都筛掉
+      const tol = spec.lock.posTol ?? 0.08;
+      return nx >= 0.5 / zc - tol && nx <= 1 - 0.5 / zc + tol && ny >= ty / zc - tol && ny <= 1 - (1 - ty) / zc + tol;
+    }).length;
+    return ok / xs.length >= 0.65;
+  };
+    // 某一刻他在成片里能被放到哪些位置：按统一大小缩放后，裁切框能在原画范围里移动，脖子能落到的区间
+  const reach = (s, off, t) => {
+    const xs = motion[s.id].samples.filter((x) => Math.abs(x.t - (t + off)) <= 0.25 && x.ok && x.joints.filter(Boolean).length >= (spec.lock.minJoints ?? 7));
+    if (xs.length < 3) return null;
+    let x0 = -Infinity, x1 = Infinity, y0 = -Infinity, y1 = Infinity;
+    for (const x of xs) {
+      const z = T / x.torso;
+      if (z < zMin * 0.92 || z > zMax * 1.08) return null;
+      const zc = Math.min(zMax, Math.max(zMin, z));
+      x0 = Math.max(x0, x.neck[0] * zc - (zc - 1)); x1 = Math.min(x1, x.neck[0] * zc);
+      y0 = Math.max(y0, x.neck[1] * zc - (zc - 1)); y1 = Math.min(y1, x.neck[1] * zc);
+    }
+    return x0 <= x1 && y0 <= y1 ? { x0, x1, y0, y1 } : null;
+  };
+  // 这一段能不能用（不要求放到正中）：大部分时刻大小对得上、没被挡
+  const usableSeg = (s, off, a, b) => {
+    const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off);
+    if (xs.length < 3) return false;
+    const ok = xs.filter((x) => x.ok && x.joints.filter(Boolean).length >= (spec.lock.minJoints ?? 7) && T / x.torso >= zMin * 0.92 && T / x.torso <= zMax * 1.08).length;
+    return ok / xs.length >= 0.65;
+  };
+  return { T: r3(T), sizeOk, edgeOk, reach, usableSeg };
+}
+
+// ---------- 全局挑换装点：只在两场动作几乎一样的那一拍换（动态规划） ----------
+// 状态：当前用哪一场、上一场是谁、这一套已经停了几拍。每拍可以「继续」或「换到另一场」：
+// 换的代价 = 两场在这一拍附近的动作差（前后各挪 0.3 秒找最像的接点）- 换装奖励；差太大不许换。
+// 这一拍这场锁不住（偏到边上、被挡、大小对不上）就不能停在这场。停太久扣分，逼着在合适的地方换。
+function schedule(spec, dir) {
+  const master = path.resolve(dir, spec.audio.file);
+  const from = spec.audio.start ?? 0, to = spec.audio.end ?? duration(master);
+  const opt = { minHold: 4, maxHold: 24, softHold: 12, thr: 0.14, bonus: 0.12, ...(spec.schedule || {}) };
+  const bt = spec.beats || beats(master);
+  const B = bt.beats.filter((t) => t >= from - 0.01 && t < to - 0.2);
+  // 按段落能量定节奏：高潮最少停 4 拍、换装奖励高一点；推进段 6 拍；安静、平稳段 8 拍
+  const sm = sections(master, { from, to });
+  spec.structureMap = { bpm: sm.bpm, sections: sm.sections, drops: sm.drops };
+  const energyAt = (t) => (sm.sections.find((x) => t >= x.from - 0.01 && t < x.to - 0.01) || sm.sections.at(-1)).energy;
+  const minHoldAt = B.map((t) => { const e = energyAt(t); return Math.max(opt.minHold, e >= 3 ? 4 : e === 2 ? 6 : 8); });
+  const bonusAt = B.map((t) => opt.bonus + (energyAt(t) >= 2 ? 0.04 : 0));
+  const motion = posesOf(spec, dir);
+  const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
+  const L = lockFns(spec, motion);
+  // 每一拍每一场能不能停：这一拍到下一拍之间锁得住
+  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); return off != null && L.usableSeg(s, off, t, e) ? off : null; }));
+  // 造型要轮得全：能用的时间越少的场次，换进去时奖励越多（不然这几场一次都排不上）
+  const okN = okAt.map((r) => r.filter((v) => v != null).length), okMax = Math.max(...okN);
+  const rare = okN.map((n) => (opt.variety ?? 0.06) * (1 - n / okMax));
+  // 换装那一刻两边能不能放到同一个位置：两边能到达的区间有交集，而且交集在画面舒服的区域里（不贴边）
+  const comfy = { x0: 0.3, x1: 0.7, y0: 0.15, y1: 0.5 };
+  const meet = (ra, rb) => ra && rb && Math.max(ra.x0, rb.x0, comfy.x0) <= Math.min(ra.x1, rb.x1, comfy.x1) && Math.max(ra.y0, rb.y0, comfy.y0) <= Math.min(ra.y1, rb.y1, comfy.y1);
+  // 每一拍每对场次的接点：动作差和新场次要挪多少
+  const sw = new Map();
+  const swCost = (a, b, i) => {
+    const key = `${a},${b},${i}`;
+    if (sw.has(key)) return sw.get(key);
+    const oa = okAt[a][i - 1] ?? okAt[a][i], ob = okAt[b][i];
+    let r = { cost: Infinity };
+    if (oa != null && ob != null) {
+      const m = bestShift(motion[srcs[a].id], B[i] + oa, motion[srcs[b].id], B[i] + ob);
+      // 动作差 thr 以内正常；到 thrMax 也能换但贵一些（实在找不到更像的才用）
+      if (Number.isFinite(m.dist) && m.dist <= (opt.thrMax ?? 0.18) && meet(L.reach(srcs[a], oa, B[i]), L.reach(srcs[b], ob + m.shift, B[i]))) {
+        r = { cost: m.dist - opt.bonus + Math.max(0, m.dist - opt.thr) * 2, shift: m.shift, dist: m.dist };
+      }
+    }
+    sw.set(key, r);
+    return r;
+  };
+  const N = srcs.length, H = opt.maxHold;
+  const idx = (s, p, h) => (s * (N + 1) + p) * (H + 1) + h; // p = N 表示没有上一场
+  let cur = new Float64Array(N * (N + 1) * (H + 1)).fill(Infinity);
+  const back = [];
+  for (let s = 0; s < N; s++) if (okAt[s][0] != null) cur[idx(s, N, 1)] = 0;
+  for (let i = 1; i < B.length; i++) {
+    const nxt = new Float64Array(cur.length).fill(Infinity);
+    const bk = new Int32Array(cur.length).fill(-1);
+    const hold = (h) => (h > opt.softHold ? (h - opt.softHold) * 0.05 : 0);
+    for (let s = 0; s < N; s++) for (let p = 0; p <= N; p++) for (let h = 1; h <= H; h++) {
+      const c = cur[idx(s, p, h)];
+      if (!Number.isFinite(c)) continue;
+      // 继续用这一场
+      {
+        // 停到上限以后还能继续停（找不到合适的换装点时），只是每拍扣分越来越多
+        const pen = okAt[s][i] == null ? 1 : 0;
+        const v = c + pen + hold(h + 1);
+        const k = idx(s, p, Math.min(H, h + 1));
+        if (v < nxt[k]) { nxt[k] = v; bk[k] = idx(s, p, h); }
+      }
+      // 换到另一场（停够 minHold 拍、不回到上一场）
+      if (h >= minHoldAt[i]) for (let q = 0; q < N; q++) {
+        if (q === s || q === p) continue;
+        const r = swCost(s, q, i);
+        if (!Number.isFinite(r.cost)) continue;
+        const v = c + r.cost + opt.bonus - bonusAt[i] - rare[q];
+        const k = idx(q, s, 1);
+        if (v < nxt[k]) { nxt[k] = v; bk[k] = idx(s, p, h); }
+      }
+    }
+    back.push(bk); cur = nxt;
+  }
+  let best = -1, bv = Infinity;
+  for (let k = 0; k < cur.length; k++) if (cur[k] < bv) { bv = cur[k]; best = k; }
+  if (best < 0 || process.env.SCHED_DEBUG) {
+    console.error('每场能停的拍数：' + srcs.map((x, k) => `${x.id}:${okAt[k].filter((v) => v != null).length}/${B.length}`).join(' '));
+    let n = 0; const into = new Array(N).fill(0);
+    for (let i = 1; i < B.length; i++) for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) if (a !== b && Number.isFinite(swCost(a, b, i).cost)) { n++; into[b]++; }
+    console.error(`能换的（拍 × 场次对）：${n}；能换进各场的次数：` + srcs.map((x, k) => `${x.id}:${into[k]}`).join(' '));
+  }
+  if (best < 0) die('这一段找不到能一直锁住主角的排法（素材都偏到边上或被挡），换一段试试');
+  // 回溯
+  const path_ = [best];
+  for (let i = back.length - 1; i >= 0; i--) path_.unshift(back[i][path_[0]]);
+  const decode = (k) => { const h = k % (H + 1); const r = (k - h) / (H + 1); const p = r % (N + 1); return { s: (r - p) / (N + 1), p, h }; };
+  const cuts = [];
+  for (let i = 0; i < path_.length; i++) {
+    const d = decode(path_[i]);
+    if (i === 0 || d.h === 1) {
+      const sObj = srcs[d.s];
+      const r = i > 0 ? swCost(decode(path_[i - 1]).s, d.s, i) : null;
+      cuts.push({ at: r3(i === 0 ? from : B[i]), src: sObj.id, offset: okAt[d.s][i] ?? sObj.offset, ...(r?.shift ? { nudge: r.shift } : {}), ...(r ? { motion: r3(r.dist) } : {}) });
+    }
+  }
+  // 换装默认用人形变形过渡（5 帧），可以用 schedule.fx 改（比如 "cut" 硬切）
+  for (const [k, c] of cuts.entries()) if (k > 0 && opt.fx !== 'cut') c.fx = { type: opt.fx || 'morph', frames: opt.fxFrames || 5 };
+  spec.cuts = cuts;
+  spec.lock.torso = L.T;
+  return { cuts: cuts.length, cost: r3(bv), motions: cuts.filter((c) => c.motion != null).map((c) => c.motion) };
 }
 
 // 对比图：同一个主音轨时间，各片段的画面排在一起，看动作是不是同一拍（对齐对不对）、人在画面哪里（调 x / zoom）
@@ -688,11 +820,15 @@ function posesOf(spec, dir) {
   }
   return all;
 }
+// 按真实时间二分查找（素材帧率不同，采样间隔不一定正好 0.1 秒，不能用下标推算）
 function poseAt(P, t) {
   if (!P) return null;
-  const i = Math.round((t - P.t0) / P.step);
-  for (const d of [0, -1, 1]) { const x = P.samples[i + d]; if (x && Math.abs(x.t - t) <= 0.07) return x.ok ? x : null; }
-  return null;
+  const xs = P.samples;
+  let lo = 0, hi = xs.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (xs[m].t < t) lo = m + 1; else hi = m; }
+  let best = null;
+  for (const i of [lo - 1, lo]) { const x = xs[i]; if (x && (!best || Math.abs(x.t - t) < Math.abs(best.t - t))) best = x; }
+  return best && Math.abs(best.t - t) <= 0.07 && best.ok ? best : null;
 }
 function poseDist(a, b) {
   let sum = 0, n = 0;
@@ -1009,8 +1145,9 @@ function render(spec, dir, out) {
   // 转场体检：各类转场用了几次、特效占比、同一种有没有连用
   const fxs = [...spec.cuts].sort((a, b) => a.at - b.at).map((c) => c.fx?.type || 'cut');
   const fxCount = fxs.reduce((m, t) => ((m[t] = (m[t] || 0) + 1), m), {});
-  const specialN = fxs.filter((t) => !['cut', 'dissolve'].includes(t)).length;
-  const repeats = fxs.filter((t, i) => i > 0 && t === fxs[i - 1] && !['cut', 'dissolve'].includes(t)).length;
+  const BASIC = ['cut', 'dissolve', 'morph']; // 人形变形是换装的基本衔接，不算特效
+  const specialN = fxs.filter((t) => !BASIC.includes(t)).length;
+  const repeats = fxs.filter((t, i) => i > 0 && t === fxs[i - 1] && !BASIC.includes(t)).length;
   return { out, duration: r3(len), cuts: table.length, perSource: Object.fromEntries([...srcs.keys()].map((id) => [id, table.filter((x) => x.src === id).length])),
     fx: { count: fxCount, specialShare: r3(specialN / Math.max(1, fxs.length)), repeats, ok: specialN / Math.max(1, fxs.length) <= 0.25 && repeats === 0 } };
 }
@@ -1047,6 +1184,14 @@ if (cmd === 'align') {
     fs.writeFileSync(path.resolve(dir, o.out || 'montage-fixed.json'), JSON.stringify(outSpec, null, 1));
   }
   console.log(JSON.stringify({ flagged: r.flagged.map((f) => ({ out: f.out, dur: f.dur, src: f.src, label: f.label, why: f.why })), changes: r.changes }, null, 1));
+} else if (cmd === 'schedule') {
+  if (!o.spec) die('用法：montage.mjs schedule --spec montage.json（全局挑换装点，写进 cuts）');
+  const file = path.resolve(o.spec); const dir = path.dirname(file);
+  const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const s of spec.sources) s.duration ??= duration(path.resolve(dir, s.file));
+  const r = schedule(spec, dir);
+  fs.writeFileSync(file, JSON.stringify(spec, null, 1));
+  console.log(JSON.stringify(r));
 } else if (cmd === 'check') {
   if (!o.spec) die('用法：montage.mjs check --spec montage.json [--video renders/video.mp4] [--cuts renders/video-cuts.json]');
   const file = path.resolve(o.spec); const dir = path.dirname(file);

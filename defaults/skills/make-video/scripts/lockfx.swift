@@ -67,7 +67,9 @@ final class FrameSource {
 }
 
 // ---------- 分析：每帧找主角的脖子、躯干长度、身体范围和人像遮罩 ----------
-struct Body { var neck: CGPoint; var torso: Double; var box: CGRect; var pose: [CGPoint?] } // 素材像素坐标，原点左上；pose 是各关节相对脖子、按身体大小归一后的位置
+// kp：对齐用的 8 个点（脖子、左右肩、左右胯、鼻子、左右眼），素材像素坐标
+struct Body { var neck: CGPoint; var torso: Double; var box: CGRect; var pose: [CGPoint?]; var kp: [CGPoint?] }
+let KP_JOINTS: [VNHumanBodyPoseObservation.JointName] = [.neck, .leftShoulder, .rightShoulder, .leftHip, .rightHip, .nose, .leftEye, .rightEye] // 素材像素坐标，原点左上；pose 是各关节相对脖子、按身体大小归一后的位置
 let POSE_JOINTS: [VNHumanBodyPoseObservation.JointName] = [.leftShoulder, .rightShoulder, .leftElbow, .rightElbow, .leftWrist, .rightWrist, .leftHip, .rightHip, .leftKnee, .rightKnee, .leftAnkle, .rightAnkle]
 // 两个姿态差多少：共同认到的关节平均距离（按身体大小归一），共同关节太少就当差很多
 func poseDist(_ a: [CGPoint?], _ b: [CGPoint?]) -> Double {
@@ -96,7 +98,8 @@ func bodies(_ obs: [VNHumanBodyPoseObservation], _ w: Double, _ h: Double) -> [B
     let xs = all.map { $0.x }, ys = all.map { $0.y }
     let box = CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
     let pose = POSE_JOINTS.map { j in p(j).map { CGPoint(x: ($0.x - neck.x) / torso, y: ($0.y - neck.y) / torso) } }
-    return torso > 8 ? Body(neck: neck, torso: torso, box: box, pose: pose) : nil
+    let kp = KP_JOINTS.map { p($0) }
+    return torso > 8 ? Body(neck: neck, torso: torso, box: box, pose: pose, kp: kp) : nil
   }
 }
 
@@ -130,7 +133,7 @@ func fxOf(_ si: Int) -> (type: String, frames: Int) {
   return (t, max(2, job.transition?.frames ?? (job.flash?.frames ?? 6)))
 }
 // 叠化、扫描、残影、光门、甩切要用到上一刀切点之后的几帧：上一刀多分析、多渲染这些 tail 帧
-let NEEDS_TAIL: Set<String> = ["dissolve", "scan", "echo", "gate", "whip"]
+let NEEDS_TAIL: Set<String> = ["dissolve", "scan", "echo", "gate", "whip", "morph"]
 func tailOf(_ si: Int) -> Int {
   guard si < job.segments.count - 1 else { return 0 }
   let n = fxOf(si + 1)
@@ -146,7 +149,7 @@ let C1 = themeColors.first ?? CIColor(red: 1, green: 0.93, blue: 0.82)
 let C2 = themeColors.dropFirst().first ?? CIColor(red: 1, green: 0.2, blue: 0.45)
 
 let M = max(0, job.matchCut ?? 0)
-struct Plan { var neckX: [Double]; var neckY: [Double]; var boxes: [CGRect?]; var poses: [[CGPoint?]?]; var torso: Double; var found: Int; var sw: Double; var sh: Double; var pre: Int; var file: String }
+struct Plan { var neckX: [Double]; var neckY: [Double]; var boxes: [CGRect?]; var poses: [[CGPoint?]?]; var kps: [[CGPoint?]?]; var torso: Double; var found: Int; var sw: Double; var sh: Double; var pre: Int; var file: String }
 var plans: [Plan] = []
 var colorSamples: [String: [[Double]]] = [:] // 每条素材抽样的平均颜色，统一调色用
 // 第一遍：每一刀逐帧找主角。前后各多分析 matchCut 帧，给动作卡点微调留余地
@@ -211,7 +214,7 @@ for (si, seg) in job.segments.enumerated() {
   func smoothed(_ v: [Double]) -> [Double] { v.indices.map { i in let lo = max(0, i - r), hi = min(v.count - 1, i + r); return v[lo...hi].reduce(0, +) / Double(hi - lo + 1) } }
   // 这一刀的身体大小取偏大的读数（第 75 百分位），弯腰、转身那几帧量小了不算
   let ts = known.map { $0.1.torso }.sorted()
-  plans.append(Plan(neckX: smoothed(neckX), neckY: smoothed(neckY), boxes: boxes, poses: picked.map { $0?.pose }, torso: ts.isEmpty ? 0 : ts[min(ts.count - 1, Int(Double(ts.count) * 0.75))], found: known.count, sw: sw, sh: sh, pre: pre, file: seg.file))
+  plans.append(Plan(neckX: smoothed(neckX), neckY: smoothed(neckY), boxes: boxes, poses: picked.map { $0?.pose }, kps: picked.map { $0?.kp }, torso: ts.isEmpty ? 0 : ts[min(ts.count - 1, Int(Double(ts.count) * 0.75))], found: known.count, sw: sw, sh: sh, pre: pre, file: seg.file))
   FileHandle.standardError.write("\r分析 \(si + 1)/\(job.segments.count)".data(using: .utf8)!)
 }
 // 动作卡点微调：每一刀的开头在 ±matchCut 帧里挑和上一刀最后一帧姿态最像的
@@ -327,6 +330,79 @@ func transition(_ type: String, k: Int, n: Int, incoming: CIImage, prevTail: [CV
 // 全程锁定时把位置、大小接力下去：上一刀最后一帧他在成片里实际在哪、多大，新一刀开头就先放到同一个地方、同样大小，
 // 再在约 1 秒里慢慢回到统一的位置和大小（上一刀如果因为原画不够没能放到正中，新一刀也不会突然跳到正中）
 var carry: (x: Double, y: Double, s: Double)? = nil // 脖子在成片里的位置、身体大小（躯干像素）
+var carryKP: [CGPoint?] = [] // 上一刀最后一帧 8 个点在成片里的位置（精细对齐用）
+var prevTailKP: [[CGPoint?]] = [] // 上一刀切点之后几帧的 8 个点（人形变形过渡用）
+// 相似变换拟合：把素材里的点 p 变到成片里的点 q（缩放 + 旋转 + 平移，最小二乘）
+func fitSimilarity(_ p: [CGPoint?], _ q: [CGPoint?]) -> (s: Double, ang: Double, pc: CGPoint, qc: CGPoint)? {
+  let pairs = zip(p, q).compactMap { a, b in (a != nil && b != nil) ? (a!, b!) : nil }
+  guard pairs.count >= 3 else { return nil }
+  let n = Double(pairs.count)
+  let pc = CGPoint(x: pairs.map { $0.0.x }.reduce(0, +) / n, y: pairs.map { $0.0.y }.reduce(0, +) / n)
+  let qc = CGPoint(x: pairs.map { $0.1.x }.reduce(0, +) / n, y: pairs.map { $0.1.y }.reduce(0, +) / n)
+  var a = 0.0, b = 0.0, c = 0.0
+  for (u, v) in pairs {
+    let px = u.x - pc.x, py = u.y - pc.y, qx = v.x - qc.x, qy = v.y - qc.y
+    a += px * qx + py * qy; b += px * qy - py * qx; c += px * px + py * py
+  }
+  guard c > 1 else { return nil }
+  return (hypot(a, b) / c, atan2(b, a), pc, qc)
+}
+// 人形变形过渡：旧画面、新画面各自按对应点往中间位置扭一点，再按 t 混合（只在 CPU 上算这几帧）
+func morphBlend(old: CVPixelBuffer, new newImg: CIImage, kOld: [CGPoint?], kNew: [CGPoint?], t: Double) -> CIImage? {
+  let pts = zip(kOld, kNew).compactMap { a, b in (a != nil && b != nil) ? (a!, b!) : nil }
+  guard pts.count >= 3 else { return nil }
+  let w = Int(W), h = Int(H)
+  var nb: CVPixelBuffer?
+  CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary, &nb)
+  var ob: CVPixelBuffer?
+  CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary, &ob)
+  guard let nbuf = nb, let obuf = ob else { return nil }
+  ctx.render(newImg, to: nbuf, bounds: CGRect(x: 0, y: 0, width: W, height: H), colorSpace: rgb)
+  let mids = pts.map { (CGPoint(x: $0.0.x + ($0.1.x - $0.0.x) * t, y: $0.0.y + ($0.1.y - $0.0.y) * t), $0.0, $0.1) }
+  let sig2 = pow(H * 0.12, 2) * 2
+  CVPixelBufferLockBaseAddress(old, .readOnly); CVPixelBufferLockBaseAddress(nbuf, .readOnly); CVPixelBufferLockBaseAddress(obuf, [])
+  defer { CVPixelBufferUnlockBaseAddress(old, .readOnly); CVPixelBufferUnlockBaseAddress(nbuf, .readOnly); CVPixelBufferUnlockBaseAddress(obuf, []) }
+  let rbO = CVPixelBufferGetBytesPerRow(old), rbN = CVPixelBufferGetBytesPerRow(nbuf), rbX = CVPixelBufferGetBytesPerRow(obuf)
+  let pO = CVPixelBufferGetBaseAddress(old)!.assumingMemoryBound(to: UInt8.self)
+  let pN = CVPixelBufferGetBaseAddress(nbuf)!.assumingMemoryBound(to: UInt8.self)
+  let pX = CVPixelBufferGetBaseAddress(obuf)!.assumingMemoryBound(to: UInt8.self)
+  // 位移场先在粗网格上算（每 8 像素一个点），再双线性插值
+  let gs = 8, gw = w / gs + 2, gh = h / gs + 2
+  var dO = [Float](repeating: 0, count: gw * gh * 2), dN = [Float](repeating: 0, count: gw * gh * 2)
+  for gy in 0..<gh { for gx in 0..<gw {
+    let x = Double(gx * gs), y = Double(gy * gs)
+    var sw = 0.15, ox = 0.0, oy = 0.0, nx = 0.0, ny = 0.0
+    for (m, a, b) in mids {
+      let wt = exp(-(pow(x - m.x, 2) + pow(y - m.y, 2)) / sig2)
+      sw += wt; ox += wt * (a.x - m.x); oy += wt * (a.y - m.y); nx += wt * (b.x - m.x); ny += wt * (b.y - m.y)
+    }
+    let i = (gy * gw + gx) * 2
+    dO[i] = Float(ox / sw); dO[i + 1] = Float(oy / sw); dN[i] = Float(nx / sw); dN[i + 1] = Float(ny / sw)
+  } }
+  @inline(__always) func sample(_ p: UnsafeMutablePointer<UInt8>, _ rb: Int, _ x: Float, _ y: Float, _ c: Int) -> Float {
+    let xc = min(Float(w - 2), max(0, x)), yc = min(Float(h - 2), max(0, y))
+    let x0 = Int(xc), y0 = Int(yc), fx = xc - Float(x0), fy = yc - Float(y0)
+    let a = Float(p[y0 * rb + x0 * 4 + c]), b = Float(p[y0 * rb + (x0 + 1) * 4 + c])
+    let c2 = Float(p[(y0 + 1) * rb + x0 * 4 + c]), d = Float(p[(y0 + 1) * rb + (x0 + 1) * 4 + c])
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c2 * (1 - fx) + d * fx) * fy
+  }
+  let tf = Float(t)
+  for y in 0..<h {
+    let gyf = Float(y) / Float(gs), gy0 = Int(gyf), fy = gyf - Float(gy0)
+    for x in 0..<w {
+      let gxf = Float(x) / Float(gs), gx0 = Int(gxf), fx = gxf - Float(gx0)
+      let i00 = (gy0 * gw + gx0) * 2, i10 = i00 + 2, i01 = i00 + gw * 2, i11 = i01 + 2
+      func lerp2(_ d: [Float], _ o: Int) -> Float { (d[i00 + o] * (1 - fx) + d[i10 + o] * fx) * (1 - fy) + (d[i01 + o] * (1 - fx) + d[i11 + o] * fx) * fy }
+      let oxs = Float(x) + lerp2(dO, 0), oys = Float(y) + lerp2(dO, 1)
+      let nxs = Float(x) + lerp2(dN, 0), nys = Float(y) + lerp2(dN, 1)
+      for c in 0..<4 {
+        let v = sample(pO, rbO, oxs, oys, c) * (1 - tf) + sample(pN, rbN, nxs, nys, c) * tf
+        pX[y * rbX + x * 4 + c] = UInt8(max(0, min(255, v)))
+      }
+    }
+  }
+  return CIImage(cvPixelBuffer: obuf)
+}
 let carryFrames = max(1.0, job.fps * 1.0)
 let cutMode = job.mode == "cut"
 let E = max(1.0, (job.ease ?? 0.5) * job.fps)
@@ -360,13 +436,32 @@ for (si, seg) in job.segments.enumerated() {
     let a = plans[si - 1], e = a.pre + nudge[si - 1] + job.segments[si - 1].frames - 1
     if e - 6 >= 0, e < a.neckX.count { let dx = a.neckX[e] - a.neckX[e - 6]; if abs(dx) > a.sw * 0.01 { whipDir = dx > 0 ? 1 : -1 } }
   }
+  var myTailKP: [[CGPoint?]] = []
+  // 这一刀开头的 8 个点 → 上一刀结尾的 8 个点（成片坐标），拟合一次
+  var fineFit: (s: Double, ang: Double, pc: CGPoint, qc: CGPoint)? = nil
+  if si > 0, !carryKP.isEmpty, job.mode != "cut" {
+    let j0 = min(p.kps.count - 1, max(0, base))
+    if let k0 = (0...3).lazy.compactMap({ d -> [CGPoint?]? in p.kps[min(p.kps.count - 1, j0 + d)] }).first { fineFit = fitSimilarity(k0, carryKP) }
+  }
   for k in 0..<total {
     guard let buf = src2.frame(at: st2 + Double(k) / job.fps) else { continue }
     let j = min(neckX.count - 1, max(0, base + k))
     // 裁切框：让脖子落在目标位置，框不出原画
     var S = S
+    var ang = 0.0 // 旋转（弧度），精细对齐时才有
     var x0 = neckX[j] * S - job.target.x * W, y0 = neckY[j] * S - job.target.y * H
-    if !cutMode, let c = carry, si > 0, p.torso > 0 {
+    // 精细对齐：新一刀开头用 8 个点（脖子、肩、胯、鼻子、眼睛）拟合位置、大小、倾斜，和上一刀结尾重合，再约 1 秒回到标准位置
+    let kpHere: [CGPoint?]? = (0...2).lazy.compactMap { d -> [CGPoint?]? in let jj = min(p.kps.count - 1, j + d); return p.kps[jj] }.first
+    if !cutMode, si > 0, k < Int(carryFrames), !carryKP.isEmpty, let kp0 = fineFit, let kh = kpHere, kh[0] != nil {
+      let w = smooth01(1 - Double(k) / carryFrames)
+      S = min(s0 * job.zoomMax, max(s0 * job.zoomMin * 0.9, S + (kp0.s - S) * w))
+      ang = max(-0.08, min(0.08, kp0.ang)) * w
+      // 这一帧他的脖子按拟合变换会落在哪，和标准位置之间按 w 插值
+      let nx = neckX[j] - kp0.pc.x, ny = neckY[j] - kp0.pc.y
+      let fxp = kp0.qc.x + kp0.s * (cos(kp0.ang) * nx - sin(kp0.ang) * ny), fyp = kp0.qc.y + kp0.s * (sin(kp0.ang) * nx + cos(kp0.ang) * ny)
+      let wantX = job.target.x * W + (fxp - job.target.x * W) * w, wantY = job.target.y * H + (fyp - job.target.y * H) * w
+      x0 = neckX[j] * S - wantX; y0 = neckY[j] * S - wantY
+    } else if !cutMode, let c = carry, si > 0, p.torso > 0 {
       let w = smooth01(1 - Double(k) / carryFrames)
       let Sc = c.s / p.torso // 让他和上一刀结尾一样大
       S = min(s0 * job.zoomMax, max(s0 * job.zoomMin, S + (Sc - S) * w))
@@ -391,6 +486,13 @@ for (si, seg) in job.segments.enumerated() {
     x0 = min(max(-W * over, x0), sw * S - W + W * over); y0 = min(max(-H * over, y0), sh * S - H + H * over)
     // 记下这一刀结尾（切点前最后一帧）他实际在哪、多大，给下一刀接力
     if k == seg.frames - 1, p.torso > 0 { carry = (neckX[j] * S - x0, neckY[j] * S - y0, p.torso * S) }
+    // 这一帧 8 个点在成片里的位置（缩放平移后再绕脖子转 ang）
+    let pivX = neckX[j] * S - x0, pivY = neckY[j] * S - y0
+    let kpOut: [CGPoint?] = (kpHere ?? []).map { q in q.map { pt in
+      let ux = pt.x * S - x0 - pivX, uy = pt.y * S - y0 - pivY
+      return CGPoint(x: pivX + cos(ang) * ux - sin(ang) * uy, y: pivY + sin(ang) * ux + cos(ang) * uy) } }
+    if k == seg.frames - 1 { carryKP = kpOut }
+    if k >= seg.frames { myTailKP.append(kpOut) }
     // 切点放大回弹
     var punch = 1.0, ev = 0.0
     if fx.type == "pulse", k < fx.frames {
@@ -409,13 +511,15 @@ for (si, seg) in job.segments.enumerated() {
     func place(_ i: CIImage) -> CIImage {
       var t = CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -sh) // 翻成左上原点
       t = t.concatenating(CGAffineTransform(scaleX: S, y: S)).concatenating(CGAffineTransform(translationX: -x0, y: -y0))
+      if ang != 0 { t = t.concatenating(CGAffineTransform(translationX: -pivX, y: -pivY)).concatenating(CGAffineTransform(rotationAngle: ang)).concatenating(CGAffineTransform(translationX: pivX, y: pivY)) }
       // 放大回弹以目标位置为中心
       let cx = job.target.x * W, cy = job.target.y * H
       t = t.concatenating(CGAffineTransform(translationX: -cx, y: -cy)).concatenating(CGAffineTransform(scaleX: punch, y: punch)).concatenating(CGAffineTransform(translationX: cx, y: cy))
       return i.transformed(by: t).transformed(by: CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -H)) // 翻回左下原点
     }
     let frameRect = CGRect(x: 0, y: 0, width: W, height: H)
-    var out = place(img.transformed(by: .identity)).cropped(to: frameRect)
+    // 有旋转时，转出去露出的角用原画边缘像素补（角度小，只有几像素）
+    var out = place(ang != 0 ? img.clampedToExtent() : img).cropped(to: frameRect)
     var maskImg: CIImage? = nil
     if job.background != nil {
       try? VNImageRequestHandler(cvPixelBuffer: buf, options: [:]).perform([segReq])
@@ -466,7 +570,12 @@ for (si, seg) in job.segments.enumerated() {
       }
       continue
     }
-    out = transition(fx.type, k: k, n: fx.frames, incoming: out, prevTail: prevTail, ghosts: prevGhost, dir: whipDir)
+    if fx.type == "morph", k < fx.frames, k < prevTail.count, k < prevTailKP.count {
+      let t = smooth01(Double(k + 1) / Double(fx.frames + 1))
+      out = morphBlend(old: prevTail[k], new: out, kOld: prevTailKP[k], kNew: kpOut, t: t) ?? transition("dissolve", k: k, n: fx.frames, incoming: out, prevTail: prevTail, ghosts: prevGhost, dir: whipDir)
+    } else {
+      out = transition(fx.type, k: k, n: fx.frames, incoming: out, prevTail: prevTail, ghosts: prevGhost, dir: whipDir)
+    }
     while !vin.isReadyForMoreMediaData { usleep(2000) }
     var pb: CVPixelBuffer?
     CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &pb)
@@ -476,6 +585,7 @@ for (si, seg) in job.segments.enumerated() {
     outIndex += 1
   }
   prevTail = myTail
+  prevTailKP = myTailKP
   prevGhost = myGhost
   FileHandle.standardError.write("\r片段 \(si + 1)/\(job.segments.count)".data(using: .utf8)!)
 }
