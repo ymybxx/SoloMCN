@@ -4,6 +4,7 @@
 //
 //   node montage.mjs align  --master <音轨来源.mp4> <片段1.mp4> <片段2.mp4> ...   各片段相对主音轨的时间差，带可信度
 //   node montage.mjs beats  --master <音轨来源.mp4> [--from 秒] [--to 秒]              主音轨的 BPM 和每一拍的时间
+//   node montage.mjs sections --master <音轨来源>                                       段落地图：小节、乐句、每段能量（0 安静–3 高潮）、爆点
 //   node montage.mjs skips  --master <音轨来源> --within 90,150                     找能无缝砍掉的整数个八拍（成片超时长时用，写进 audio.skip）
 //   node montage.mjs track  --spec montage.json                                         认主角：每条片段里主角在哪、哪些时段拍到别人或太小（写进 autoExclude，配合 reframe 自动居中放大）
 //   node montage.mjs audit  --spec montage.json [--fix [--only 5.4,22.5] --out x.json] 成片体检：哪几刀画面不是主角（会有误报，先看图）；--fix 只把这几刀（或 --only 指定的成片时间）换成同一时刻认得出主角的另一场
@@ -220,6 +221,56 @@ function beats(master, { from = 0, to = Infinity } = {}) {
   return { bpm: Math.round(600 / period) / 10, period: r3(period), first: r3(first), candidates: cand.sort((a, b) => b.s - a.s).slice(0, 5), beats: list };
 }
 
+// ---------- 段落地图：小节、乐句、能量、爆点 ----------
+// 换装落在小节第一拍（强拍）上，密度跟着段落能量走。小节按 4 拍、乐句按 4 小节算（舞蹈的「两个八拍」）。
+function rms(file) {
+  const out = spawnSync('ffmpeg', ['-v', 'error', '-i', file, '-vn', '-ac', '1', '-ar', String(RATE), '-f', 'f32le', '-'], { maxBuffer: 1 << 30 });
+  const x = new Float32Array(out.stdout.buffer, out.stdout.byteOffset, out.stdout.length / 4);
+  return (a, b) => { const i0 = Math.max(0, Math.floor(a * RATE)), i1 = Math.min(x.length, Math.floor(b * RATE)); let s = 0; for (let i = i0; i < i1; i++) s += x[i] * x[i]; return 10 * Math.log10(1e-9 + s / Math.max(1, i1 - i0)); };
+}
+
+function sections(master, { from = 0, to = Infinity } = {}) {
+  const bt = beats(master);
+  const env = envelope(master);
+  const level = rms(master);
+  const B = bt.beats;
+  // 小节第一拍：4 种相位里，低频起音最强的那种
+  let best = 0, bestS = -Infinity;
+  for (let ph = 0; ph < 4; ph++) {
+    let s = 0;
+    for (let i = ph; i < B.length; i += 4) { const k = Math.round(B[i] * ENV_HZ); for (let d = -2; d <= 2; d++) s += Math.max(0, env[k + d] || 0); }
+    if (s > bestS) { bestS = s; best = ph; }
+  }
+  const bars = [];
+  for (let i = best; i + 4 < B.length + 1; i += 4) bars.push(B[i]);
+  const end = Math.min(to, B.at(-1) + bt.period);
+  // 每个乐句（4 小节）的响度，按全曲分位数分成 0–3 级
+  const phrases = [];
+  for (let i = 0; i < bars.length; i += 4) {
+    const a = bars[i], b = bars[i + 4] ?? end;
+    if (b <= from || a >= end) continue;
+    phrases.push({ from: r3(Math.max(a, from)), to: r3(Math.min(b, end)), db: level(Math.max(a, from), Math.min(b, end)) });
+  }
+  const sorted = phrases.map((p) => p.db).sort((x, y) => x - y);
+  const q = (f) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * f))];
+  const [q1, q2, q3] = [q(0.25), q(0.5), q(0.8)];
+  for (const p of phrases) p.energy = p.db >= q3 ? 3 : p.db >= q2 ? 2 : p.db >= q1 ? 1 : 0;
+  // 相邻同级的乐句合成段落；能量比上一句跳升 2 级以上的起点记为爆点
+  const secs = [];
+  for (const p of phrases) {
+    const cur = secs.at(-1);
+    if (cur && cur.energy === p.energy) cur.to = p.to;
+    else secs.push({ from: p.from, to: p.to, energy: p.energy });
+  }
+  const drops = phrases.filter((p, i) => i > 0 && p.energy - phrases[i - 1].energy >= 2).map((p) => p.from);
+  const names = ['安静', '平稳', '推进', '高潮'];
+  return {
+    bpm: bt.bpm, period: bt.period, firstDownbeat: bars[0], bars: bars.filter((t) => t >= from - 0.01 && t <= end),
+    sections: secs.map((x) => ({ ...x, label: names[x.energy] })), drops,
+    phrases: phrases.map(({ db, ...p }) => ({ ...p, db: Math.round(db * 10) / 10 })),
+  };
+}
+
 // ---------- 排切点 ----------
 function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32); }
 
@@ -298,7 +349,32 @@ function plan(spec, dir) {
   const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
   if (srcs.length < 2) die('能用的片段少于 2 个（先 align 填好 offset）');
   const pins = [...(spec.pins || [])].sort((x, y) => x.from - y.from); // 指定某段用某个片段（名场面、定格）
-  const per = (t) => (auto.sections || []).find((x) => t >= x.from && t < x.to)?.beatsPerCut ?? auto.beatsPerCut ?? 4;
+  let per = (t) => (auto.sections || []).find((x) => t >= x.from && t < x.to)?.beatsPerCut ?? auto.beatsPerCut ?? 4;
+  // 按段落地图排（"structure": true，或写成 {"pace": {"0": 8, "1": 8, "2": 8, "3": 4}, "dropBurst": 2}）：
+  // 切点都落在小节第一拍，每段按能量定几拍换一次，爆点之后那一句加快
+  if (spec.structure) {
+    const st = typeof spec.structure === 'object' ? spec.structure : {};
+    const pace = { 0: 8, 1: 8, 2: 8, 3: 4, ...(st.pace || {}) };
+    const sm = sections(master, { from, to });
+    spec.structureMap = { bpm: sm.bpm, sections: sm.sections, drops: sm.drops };
+    const B = bt.beats, first = B.findIndex((t) => Math.abs(t - sm.firstDownbeat) < 0.02);
+    const times = new Set([r3(from)]);
+    for (const sec of sm.sections) {
+      for (let i = Math.max(0, first); i < B.length && B[i] < sec.to - 0.01; i++) {
+        if (B[i] < sec.from - 0.01 || (i - first) % 4) continue; // 只要小节第一拍
+        const burst = sm.drops.some((d) => B[i] >= d - 0.01 && B[i] < d + 16 * bt.period - 0.01);
+        const step = burst ? (st.dropBurst ?? 2) : pace[sec.energy] ?? 4;
+        const k = (i - Math.max(0, first)) % Math.max(4, step); // 8 拍一换：只取偶数小节
+        if (step >= 4 && k) continue;
+        times.add(r3(B[i]));
+        if (step < 4) for (let j = 1; j * step < 4 && B[i + j * step]; j++) times.add(r3(B[i + j * step]));
+      }
+    }
+    const pieceStarts = P.map((pp) => r3(pp.from));
+    grid.length = 0;
+    grid.push(...[...times, ...pieceStarts].filter((t) => inPiece(t)).sort((a, b) => a - b).filter((t, i, a) => i === 0 || t - a[i - 1] > 0.05));
+    per = () => 1;
+  }
   const rand = rng(auto.seed || 1);
   // 挑场次时顺带看画面：主角在这一刀里清不清楚、在不在中间（人体检测的结果缓存在 track/，第一次要几分钟）。
   // 只当偏好，不排除素材、不放大；"preferClear": false 关掉
@@ -351,7 +427,7 @@ function plan(spec, dir) {
     if (nextPin) { while (i < grid.length && grid[i] < nextPin.from - 0.01) i++; if (Math.abs((grid[i] ?? Infinity) - nextPin.from) > 0.05) grid.splice(i, 0, nextPin.from); }
     else i = stopAt === -1 ? grid.length : stopAt;
   }
-  return { cuts, beats: { bpm: bt.bpm, period: bt.period, first: bt.first } };
+  return { cuts, beats: { bpm: bt.bpm, period: bt.period, first: bt.first }, structureMap: spec.structureMap };
 }
 
 // 对比图：同一个主音轨时间，各片段的画面排在一起，看动作是不是同一拍（对齐对不对）、人在画面哪里（调 x / zoom）
@@ -621,7 +697,9 @@ function render(spec, dir, out) {
       size: [W, H], fps, out: joined,
       target: { x: lock.x ?? 0.5, y: lock.y ?? 0.3, ...(lock.torso ? { torso: lock.torso } : {}) },
       zoomMin: lock.zoomMin ?? 1.1, zoomMax: lock.zoomMax ?? 1.45, smooth: lock.smooth ?? 0.3,
-      background: lock.background === false ? null : { blur: 14, dim: 0.55, desat: 0.35, ...(lock.background || {}) },
+      // 背景虚化：全程锁定默认开（旧版本的效果），换装瞬间对齐默认关（保留舞台）
+      background: lock.background === false || (lock.background === undefined && lock.mode === 'cut') ? null : { blur: 14, dim: 0.55, desat: 0.35, ...(lock.background || {}) },
+      mode: lock.mode || 'full', ease: lock.ease ?? 0.5, grade: lock.grade ?? lock.mode === 'cut', matchCut: lock.matchCut ?? (lock.mode === 'cut' ? 3 : 0),
       flash: { light: 0.6, strong: 1.5, frames: 5, punch: 0.06, ...(lock.flash || {}) },
       transition: { type: lock.transition, frames: lock.frames },
       segments: jobSegs,
@@ -749,6 +827,10 @@ if (cmd === 'align') {
     fs.writeFileSync(path.resolve(dir, o.out || 'montage-fixed.json'), JSON.stringify(outSpec, null, 1));
   }
   console.log(JSON.stringify({ flagged: r.flagged.map((f) => ({ out: f.out, dur: f.dur, src: f.src, label: f.label, why: f.why })), changes: r.changes }, null, 1));
+} else if (cmd === 'sections') {
+  if (!o.master) die('用法：montage.mjs sections --master <音轨来源> [--from 秒] [--to 秒]');
+  const r = sections(o.master, { from: Number(o.from) || 0, to: o.to ? Number(o.to) : Infinity });
+  console.log(JSON.stringify({ ...r, bars: `${r.bars.length} 小节（第一个强拍 ${r.firstDownbeat}s）`, phrases: o.all ? r.phrases : `${r.phrases.length} 句（加 --all 列出）` }, null, 1));
 } else if (cmd === 'skips') {
   if (!o.master) die('用法：montage.mjs skips --master <音轨来源> [--within 90,150] [--min 5] [--max 30] [--step 8]');
   const w = o.within ? String(o.within).split(',').map(Number) : [0, Infinity];
@@ -769,6 +851,7 @@ if (cmd === 'align') {
     const p = plan(spec, dir);
     spec.cuts = p.cuts;
     spec.beatsInfo = p.beats;
+    if (p.structureMap) spec.structureMap = p.structureMap;
     fs.writeFileSync(file, JSON.stringify(spec, null, 1));
     console.log(`排好 ${p.cuts.length} 个切点（${p.beats.bpm} BPM），写回 ${o.spec}`);
     if (cmd === 'plan') process.exit(0);

@@ -2,7 +2,7 @@
 // 只用 macOS 自带的 Vision（人体姿态、人像分割）和 Core Image，不做人脸识别。montage.mjs 的 render 在 spec 里有 "lock" 时调用它。
 //   lockfx <job.json>
 // job: { size:[W,H], fps, out, target:{x,y,torso}, zoomMin, zoomMax, smooth, background:{blur,dim,desat}|null,
-//        flash:{light,strong,frames,punch}, transition:{type:dissolve|flash|mix,frames}, segments:[{file,start,frames,hint:{cx,cy}|null,strong,keep:[[x,y,w,h]]}] }
+//        flash:{light,strong,frames,punch}, transition:{type:dissolve|flash|mix,frames}, mode:full|cut, ease, grade, matchCut, segments:[{file,start,frames,hint:{cx,cy}|null,strong,keep:[[x,y,w,h]]}] }
 // target.x/y 是脖子在成片里的位置（0–1，左上为原点），torso 是脖子到胯的长度占成片高度的比例（不填就按全片自动定）；keep 是要保持清楚的区域（素材坐标 0–1，比如底部水印）。
 import AVFoundation
 import CoreImage
@@ -21,6 +21,9 @@ struct Job: Decodable {
   let size: [Int]; let fps: Double; let out: String
   let target: Target; let zoomMin: Double; let zoomMax: Double; let smooth: Double
   let background: Background?; let flash: Flash?; let transition: Transition?; let segments: [Segment]
+  // mode：full 全程锁定（默认）/ cut 只在换装瞬间对齐，前后 ease 秒里平滑交还原机位
+  // grade：各场统一调色；matchCut：换装时在前后几帧里挑新旧两场姿态最像的那一帧来切
+  let mode: String?; let ease: Double?; let grade: Bool?; let matchCut: Int?
 }
 
 func fail(_ m: String) -> Never { FileHandle.standardError.write((m + "\n").data(using: .utf8)!); exit(1) }
@@ -61,7 +64,14 @@ final class FrameSource {
 }
 
 // ---------- 分析：每帧找主角的脖子、躯干长度、身体范围和人像遮罩 ----------
-struct Body { var neck: CGPoint; var torso: Double; var box: CGRect } // 素材像素坐标，原点左上
+struct Body { var neck: CGPoint; var torso: Double; var box: CGRect; var pose: [CGPoint?] } // 素材像素坐标，原点左上；pose 是各关节相对脖子、按身体大小归一后的位置
+let POSE_JOINTS: [VNHumanBodyPoseObservation.JointName] = [.leftShoulder, .rightShoulder, .leftElbow, .rightElbow, .leftWrist, .rightWrist, .leftHip, .rightHip, .leftKnee, .rightKnee, .leftAnkle, .rightAnkle]
+// 两个姿态差多少：共同认到的关节平均距离（按身体大小归一），共同关节太少就当差很多
+func poseDist(_ a: [CGPoint?], _ b: [CGPoint?]) -> Double {
+  var s = 0.0, n = 0
+  for (p, q) in zip(a, b) { if let p = p, let q = q { s += hypot(p.x - q.x, p.y - q.y); n += 1 } }
+  return n >= 5 ? s / Double(n) : .infinity
+}
 func bodies(_ obs: [VNHumanBodyPoseObservation], _ w: Double, _ h: Double) -> [Body] {
   obs.compactMap { o in
     guard let pts = try? o.recognizedPoints(.all) else { return nil }
@@ -82,7 +92,8 @@ func bodies(_ obs: [VNHumanBodyPoseObservation], _ w: Double, _ h: Double) -> [B
     let all = pts.values.filter { $0.confidence > 0.2 }.map { CGPoint(x: $0.location.x * w, y: (1 - $0.location.y) * h) }
     let xs = all.map { $0.x }, ys = all.map { $0.y }
     let box = CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
-    return torso > 8 ? Body(neck: neck, torso: torso, box: box) : nil
+    let pose = POSE_JOINTS.map { j in p(j).map { CGPoint(x: ($0.x - neck.x) / torso, y: ($0.y - neck.y) / torso) } }
+    return torso > 8 ? Body(neck: neck, torso: torso, box: box, pose: pose) : nil
   }
 }
 
@@ -113,24 +124,33 @@ let tType = job.transition?.type ?? (job.flash == nil ? "none" : "flash")
 let tail = (tType == "dissolve" || tType == "mix") ? max(2, job.transition?.frames ?? 6) : 0
 func tailOf(_ si: Int) -> Int { si < job.segments.count - 1 ? tail : 0 }
 
-struct Plan { var neckX: [Double]; var neckY: [Double]; var boxes: [CGRect?]; var torso: Double; var found: Int; var sw: Double; var sh: Double }
+let M = max(0, job.matchCut ?? 0)
+struct Plan { var neckX: [Double]; var neckY: [Double]; var boxes: [CGRect?]; var poses: [[CGPoint?]?]; var torso: Double; var found: Int; var sw: Double; var sh: Double; var pre: Int; var file: String }
 var plans: [Plan] = []
-// 第一遍：每一刀逐帧找主角
+var colorSamples: [String: [[Double]]] = [:] // 每条素材抽样的平均颜色，统一调色用
+// 第一遍：每一刀逐帧找主角。前后各多分析 matchCut 帧，给动作卡点微调留余地
 for (si, seg) in job.segments.enumerated() {
-  let total = seg.frames + tailOf(si)
-  let dur = Double(total) / job.fps
-  let src = FrameSource(file: seg.file, start: seg.start, dur: dur)
+  let pre = si > 0 ? M : 0
+  let total = pre + seg.frames + tailOf(si) + M
+  let t0 = seg.start - Double(pre) / job.fps
+  let src = FrameSource(file: seg.file, start: t0, dur: Double(total) / job.fps)
   let sw = Double(src.size.width), sh = Double(src.size.height)
   var picked: [Body?] = []
   var prev: Body? = nil
   for k in 0..<total {
-    guard let buf = src.frame(at: seg.start + Double(k) / job.fps) else { picked.append(nil); continue }
+    guard let buf = src.frame(at: t0 + Double(k) / job.fps) else { picked.append(nil); continue }
+    if job.grade == true, k % 6 == 0 {
+      var px = [Float](repeating: 0, count: 4)
+      let avg = CIImage(cvPixelBuffer: buf).applyingFilter("CIAreaAverage", parameters: [kCIInputExtentKey: CIVector(cgRect: CGRect(x: 0, y: 0, width: sw, height: sh))])
+      ctx.render(avg, toBitmap: &px, rowBytes: 16, bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: rgb)
+      colorSamples[seg.file, default: []].append([Double(px[0]), Double(px[1]), Double(px[2])])
+    }
     let h = VNImageRequestHandler(cvPixelBuffer: buf, options: [:])
     try? h.perform([poseReq])
     let cands = bodies(poseReq.results ?? [], sw, sh)
     // 认人：附近 0.3 秒内有认人框时，只认脖子落在框里的那个人（框的上半部分），离框顶中间最近的；
     // 没有框就和上一帧连贯；第一帧还没有参照，就用画面中间偏大的人
-    let tsec = Double(k) / job.fps
+    let tsec = Double(k - pre) / job.fps
     let tb = (seg.track ?? []).filter { $0.count == 5 && abs($0[0] - tsec) <= 0.3 }.min { abs($0[0] - tsec) < abs($1[0] - tsec) }
     var best: Body? = nil
     if let tb = tb {
@@ -170,35 +190,80 @@ for (si, seg) in job.segments.enumerated() {
   func smoothed(_ v: [Double]) -> [Double] { v.indices.map { i in let lo = max(0, i - r), hi = min(v.count - 1, i + r); return v[lo...hi].reduce(0, +) / Double(hi - lo + 1) } }
   // 这一刀的身体大小取偏大的读数（第 75 百分位），弯腰、转身那几帧量小了不算
   let ts = known.map { $0.1.torso }.sorted()
-  plans.append(Plan(neckX: smoothed(neckX), neckY: smoothed(neckY), boxes: boxes, torso: ts.isEmpty ? 0 : ts[min(ts.count - 1, Int(Double(ts.count) * 0.75))], found: known.count, sw: sw, sh: sh))
+  plans.append(Plan(neckX: smoothed(neckX), neckY: smoothed(neckY), boxes: boxes, poses: picked.map { $0?.pose }, torso: ts.isEmpty ? 0 : ts[min(ts.count - 1, Int(Double(ts.count) * 0.75))], found: known.count, sw: sw, sh: sh, pre: pre, file: seg.file))
   FileHandle.standardError.write("\r分析 \(si + 1)/\(job.segments.count)".data(using: .utf8)!)
+}
+// 动作卡点微调：每一刀的开头在 ±matchCut 帧里挑和上一刀最后一帧姿态最像的
+var nudge = [Int](repeating: 0, count: job.segments.count)
+if M > 0 {
+  for si in 1..<job.segments.count {
+    let a = plans[si - 1], b = plans[si]
+    let outIdx = a.pre + nudge[si - 1] + job.segments[si - 1].frames - 1
+    guard outIdx >= 0, outIdx < a.poses.count, let pa = a.poses[outIdx] else { continue }
+    var best = (0, Double.infinity)
+    for n in -M...M {
+      let j = b.pre + n
+      guard j >= 0, j < b.poses.count, let pb = b.poses[j] else { continue }
+      // 不动更好：同样像的时候倾向不挪（每挪一帧加一点代价）
+      let d = poseDist(pa, pb) + Double(abs(n)) * 0.02
+      if d < best.1 { best = (n, d) }
+    }
+    if best.1.isFinite { nudge[si] = best.0 }
+  }
+}
+// 统一调色：各条素材的平均颜色往全体平均靠 70%，每个通道最多调 ±15%
+var gains: [String: [Double]] = [:]
+if job.grade == true, !colorSamples.isEmpty {
+  let means = colorSamples.mapValues { xs in (0..<3).map { c in xs.map { $0[c] }.reduce(0, +) / Double(xs.count) } }
+  let target = (0..<3).map { c in means.values.map { $0[c] }.reduce(0, +) / Double(means.count) }
+  for (f, m) in means { gains[f] = (0..<3).map { c in min(1.15, max(0.87, pow(target[c] / max(m[c], 0.01), 0.7))) } }
 }
 // 统一大小：每一刀不放大时主角躯干在成片里多长；目标取偏大的那头（第 85 百分位 × 最小放大），大的少放大，小的多放大
 let natural = plans.map { p in p.torso * max(W / p.sw, H / p.sh) }.filter { $0 > 0 }
 let targetTorso = job.target.torso.map { $0 * H } ?? ((natural.sorted().dropFirst(Int(Double(natural.count) * 0.85)).first ?? natural.max() ?? H * 0.3) * job.zoomMin)
 
 var prevTail: [CVPixelBuffer] = []
+let cutMode = job.mode == "cut"
+let E = max(1.0, (job.ease ?? 0.5) * job.fps)
+func smooth01(_ x: Double) -> Double { let t = min(1, max(0, x)); return t * t * (3 - 2 * t) }
 for (si, seg) in job.segments.enumerated() {
   let total = seg.frames + tailOf(si)
   let dur = Double(total) / job.fps
   let p = plans[si]
+  let base = p.pre + nudge[si]
   let sw = p.sw, sh = p.sh
   let neckX = p.neckX, neckY = p.neckY, boxes = p.boxes
   let s0 = max(W / sw, H / sh)
   var z = p.torso > 0 ? targetTorso / (p.torso * s0) : 1.15
   z = min(job.zoomMax, max(job.zoomMin, z))
   let S = s0 * z
-  report.append(["i": si, "found": p.found, "frames": seg.frames, "zoom": (z * 100).rounded() / 100])
+  report.append(["i": si, "found": p.found, "frames": seg.frames, "zoom": (z * 100).rounded() / 100, "nudge": nudge[si]])
+  let gain = gains[seg.file]
 
   // 第二遍：渲染
-  let src2 = FrameSource(file: seg.file, start: seg.start, dur: dur)
+  let st2 = seg.start + Double(nudge[si]) / job.fps
+  let src2 = FrameSource(file: seg.file, start: st2, dur: dur)
   var myTail: [CVPixelBuffer] = []
   let strong = seg.strong ?? false
   let useFlash = tType == "flash" || (tType == "mix" && strong)
   for k in 0..<total {
-    guard let buf = src2.frame(at: seg.start + Double(k) / job.fps) else { continue }
+    guard let buf = src2.frame(at: st2 + Double(k) / job.fps) else { continue }
+    let j = min(neckX.count - 1, max(0, base + k))
     // 裁切框：让脖子落在目标位置，框不出原画
-    var x0 = neckX[k] * S - job.target.x * W, y0 = neckY[k] * S - job.target.y * H
+    var S = S
+    var x0 = neckX[j] * S - job.target.x * W, y0 = neckY[j] * S - job.target.y * H
+    if cutMode {
+      // 只在换装瞬间对齐：开头 E 帧从对齐过渡到原机位，结尾 E 帧从原机位过渡到对齐；第一刀开头、最后一刀结尾不对齐
+      let wIn = si == 0 ? 0 : smooth01(1 - Double(k) / E)
+      let wOut = si == job.segments.count - 1 ? 0 : (k >= seg.frames ? 1 : smooth01(1 - Double(seg.frames - 1 - k) / E))
+      let w = max(wIn, wOut)
+      let Sn = s0, Sa = s0 * z
+      S = Sn + (Sa - Sn) * w
+      // 原机位下脖子在成片里的位置 -> 目标位置，按 w 插值，再反推裁切框
+      let natX = neckX[j] * Sn - (sw * Sn - W) / 2, natY = neckY[j] * Sn - (sh * Sn - H) / 2
+      let wantX = natX + (job.target.x * W - natX) * w, wantY = natY + (job.target.y * H - natY) * w
+      x0 = neckX[j] * S - wantX; y0 = neckY[j] * S - wantY
+    }
     // 有背景虚化时，裁切框可以超出原画（最多画面的 30%），超出的部分用虚化后的边缘补上，主角照样钉在原位；
     // 没有背景虚化就只能在原画范围里移动
     let over = job.background != nil ? 0.3 : 0.0
@@ -211,7 +276,10 @@ for (si, seg) in job.segments.enumerated() {
       punch = 1 + (strong ? fl.punch : fl.punch * 0.4) * e
     }
     // Core Image 原点在左下：先把素材坐标翻成左上原点再缩放、平移
-    let img = CIImage(cvPixelBuffer: buf)
+    var img = CIImage(cvPixelBuffer: buf)
+    if let g = gain {
+      img = img.applyingFilter("CIColorMatrix", parameters: ["inputRVector": CIVector(x: g[0], y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: g[1], z: 0, w: 0), "inputBVector": CIVector(x: 0, y: 0, z: g[2], w: 0)])
+    }
     func place(_ i: CIImage) -> CIImage {
       var t = CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -sh) // 翻成左上原点
       t = t.concatenating(CGAffineTransform(scaleX: S, y: S)).concatenating(CGAffineTransform(translationX: -x0, y: -y0))
@@ -229,7 +297,7 @@ for (si, seg) in job.segments.enumerated() {
     }
     if let bg = job.background, let m = maskImg {
       // 主角遮罩 = 人像分割 ∩ 他身体周围的区域（羽化），周围的人在这个区域外就被当背景
-      let b = boxes[k] ?? CGRect(x: neckX[k] - sw * 0.12, y: neckY[k] - sh * 0.1, width: sw * 0.24, height: sh * 0.8)
+      let b = boxes[j] ?? CGRect(x: neckX[j] - sw * 0.12, y: neckY[j] - sh * 0.1, width: sw * 0.24, height: sh * 0.8)
       let pad = b.insetBy(dx: -max(b.width * 0.35, sw * 0.04), dy: -max(b.height * 0.12, sh * 0.04))
       let region = CIImage(color: .white).cropped(to: CGRect(x: pad.minX, y: sh - pad.maxY, width: pad.width, height: pad.height))
         .composited(over: CIImage(color: .black).cropped(to: CGRect(x: 0, y: 0, width: sw, height: sh)))
