@@ -408,9 +408,11 @@ function plan(spec, dir) {
         const z = T / x.torso;
         if (z < zMin * 0.92 || z > zMax * 1.08) return false;
         const zc = Math.min(zMax, Math.max(zMin, z)), nx = x.neck[0], ny = x.neck[1];
-        return nx >= 0.5 / zc - 0.02 && nx <= 1 - 0.5 / zc + 0.02 && ny >= ty / zc - 0.02 && ny <= 1 - (1 - ty) / zc + 0.02;
+        // 允许偏离画面中心一点（posTol，默认 8%）：素材里他常常不在正中，强求正中会把很多场都筛掉
+        const tol = spec.lock.posTol ?? 0.08;
+        return nx >= 0.5 / zc - tol && nx <= 1 - 0.5 / zc + tol && ny >= ty / zc - tol && ny <= 1 - (1 - ty) / zc + tol;
       }).length;
-      return ok / xs.length >= 0.7;
+      return ok / xs.length >= 0.65;
     };
   }
   const cuts = [];
