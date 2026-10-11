@@ -61,8 +61,13 @@ const CACHE_PATHS = [
 // Chrome 会给每个配置下载几十 MB 的本地模型和组件（optimization guide、朗读引擎等），用不到，启动时关掉
 const SLIM_ARGS = ['--disable-features=OptimizationGuideModelDownloading,OptimizationHintsFetching,OptimizationTargetPrediction,OptimizationHints', '--disable-component-update'];
 
+// 只是省空间：Chrome 刚退出时可能还在往缓存里写，删不干净就跳过，下次再删（这里抛错会在定时器里打崩整个服务）
 export function slimProfile(dir) {
-  for (const rel of CACHE_PATHS) fs.rmSync(path.join(dir, rel), { recursive: true, force: true });
+  for (const rel of CACHE_PATHS) {
+    try {
+      fs.rmSync(path.join(dir, rel), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    } catch {}
+  }
 }
 
 // opts: { dataDir, key, name, app, loginUrl, checkUrl, loggedIn(page), debugPort }

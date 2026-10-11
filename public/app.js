@@ -965,7 +965,8 @@ async function ytLoginStart(){
 }
 async function ytLoginPoll(){
   const run=S.ytLoginRun;if(!run)return;
-  try{S.ytLoginRun=await api('GET','/api/youtube-login/progress/'+encodeURIComponent(run.id))}catch{}
+  // 服务重启过，这次登录的进度就没了：别一直转圈，让人重新点登录
+  try{S.ytLoginRun=await api('GET','/api/youtube-login/progress/'+encodeURIComponent(run.id))}catch(e){if(e?.code==='not_found'){S.ytLoginRun=null;toast('登录过程被打断了（工作台重启过），重新点一次登录');await loadYtLogin();requestRender();return}}
   const r=S.ytLoginRun;const finished=r.status==='failed'||r.exported?.ok||r.exported?.ok===false;
   if(finished){if(r.exported?.ok){toast('YouTube 登录好了');S.ytLoginRun=null}await loadYtLogin()}
   else setTimeout(ytLoginPoll,2000);
@@ -994,7 +995,8 @@ async function biliLoginStart(){
 }
 async function biliLoginPoll(){
   const run=S.biliLoginRun;if(!run)return;
-  try{S.biliLoginRun=await api('GET','/api/bili/login/progress/'+encodeURIComponent(run.id))}catch{}
+  // 服务重启过，这次登录的进度就没了：别一直转圈，让人重新点登录
+  try{S.biliLoginRun=await api('GET','/api/bili/login/progress/'+encodeURIComponent(run.id))}catch(e){if(e?.code==='not_found'){S.biliLoginRun=null;toast('登录过程被打断了（工作台重启过），重新点一次登录');await loadBiliLogin();requestRender();return}}
   const r=S.biliLoginRun;const finished=r.status==='failed'||r.exported?.ok||r.exported?.ok===false;
   if(finished){if(r.exported?.ok){toast('B站登录好了，以后剪片段用 1080P');S.biliLoginRun=null}await loadBiliLogin()}
   else setTimeout(biliLoginPoll,2000);
