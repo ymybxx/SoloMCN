@@ -685,7 +685,18 @@ server.registerTool(
       note: z.string().max(300).describe('例如「苏新皓《竞速游戏》260726 梦寐以求演唱会 DAY1 直拍，红发白西装，整首」'),
     },
   },
-  tool(async ({ item_id, video, start, end, note }) => call('POST', `/api/items/${item_id}/assets/bili`, { video, start, end, note }, 600_000)),
+  // 先登记任务拿编号，再每 3 秒查一次：整首下载要一两分钟，一个请求挂着等会被调研沙盒的网络代理掐断
+  tool(async ({ item_id, video, start, end, note }) => {
+    const { job } = await call('POST', `/api/items/${item_id}/assets/bili`, { video, start, end, note, wait: false });
+    const deadline = Date.now() + 15 * 60_000;
+    for (;;) {
+      await new Promise((ok) => setTimeout(ok, 3000));
+      const s = await call('GET', `/api/items/${item_id}/assets/bili/${job}`).catch((err) => (/没有这个剪片段任务/.test(err.message) ? { status: 'failed', error: err.message } : null));
+      if (s?.status === 'done') { const { status, ...r } = s; return r; }
+      if (s?.status === 'failed') throw new Error(s.error);
+      if (Date.now() > deadline) throw new Error('剪片段超过 15 分钟还没完成，可能还在后台下载：过一会儿用 get_item 看素材里有没有，不要马上重试');
+    }
+  }),
 );
 
 // ---------- 生成视频 ----------

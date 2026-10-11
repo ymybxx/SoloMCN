@@ -61,6 +61,7 @@ const setupCheck = createSetupCheck({ hotUrl: HOT_URL });
 const ytLogin = createYtLogin({ root });
 // B站视频素材（调研时搜视频、找高能时刻、剪片段）；可选的 B站登录只为了下 1080P
 const bili = createBiliSource({ root });
+const biliJobs = new Map(); // 剪片段任务：编号 -> { status, itemId, result | error }
 {
   const r = skills.sync();
   if (r.installed.length) console.log(`已装上出厂技能：${r.installed.join('、')}`);
@@ -459,18 +460,33 @@ ${mine}`;
         return sendError(res, err.status || 502, 'capture_failed', `截图失败：${String(err.message).split('\n')[0].slice(0, 200)}`);
       }
     }
-    // 剪一段 B站视频存成素材：{ video, start, end, note }
+    // 剪一段 B站视频存成素材：{ video, start, end, note }。整首下载要一两分钟，
+    // 先登记成任务马上返回编号，再用 GET .../bili/<编号> 查结果（长时间挂着的请求会被调研沙盒的网络代理掐断）
     if (parts.length === 4 && parts[3] === 'bili' && method === 'POST') {
       const body = await readBody(req);
-      try {
-        const r = await bili.clip({ itemId: parts[1], video: String(body.video || ''), start: body.start, end: body.end });
+      const job = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const itemId = parts[1];
+      biliJobs.set(job, { status: 'running', itemId, at: Date.now() });
+      bili.clip({ itemId, video: String(body.video || ''), start: body.start, end: body.end }).then(async (r) => {
         const a = { id: `${Date.now().toString(36)}0`, kind: 'video', file: r.file, part: r.part, url: r.url, title: r.title, note: String(body.note || '').slice(0, 300), source: 'bilibili', at: Date.now() };
-        const cur = store.get('items', parts[1]).assets || [];
-        await store.update('items', parts[1], { assets: [...cur, a].slice(-80), updatedAt: Date.now() });
-        return sendJson(res, 200, { id: a.id, file: a.file, part: a.part, quality: r.quality, loggedIn: r.loggedIn, ...(r.loggedIn ? {} : { hint: '没登录 B站，只能下到 480P；在「渠道 → B站热门视频」登录后能下 1080P' }) });
-      } catch (err) {
-        return sendError(res, err.status || 502, 'clip_failed', err.message);
+        const cur = store.get('items', itemId)?.assets || [];
+        await store.update('items', itemId, { assets: [...cur, a].slice(-80), updatedAt: Date.now() });
+        biliJobs.set(job, { status: 'done', itemId, at: Date.now(), result: { id: a.id, file: a.file, part: a.part, quality: r.quality, loggedIn: r.loggedIn, ...(r.loggedIn ? {} : { hint: '没登录 B站，只能下到 480P；在「渠道 → B站热门视频」登录后能下 1080P' }) } });
+      }, (err) => biliJobs.set(job, { status: 'failed', itemId, at: Date.now(), error: err.message, code: err.status || 502 }));
+      // 一小时前的任务记录清掉
+      for (const [k, v] of biliJobs) if (Date.now() - v.at > 3600_000 && v.status !== 'running') biliJobs.delete(k);
+      if (body.wait === false) return sendJson(res, 202, { job });
+      for (;;) {
+        const j = biliJobs.get(job);
+        if (j.status === 'done') return sendJson(res, 200, j.result);
+        if (j.status === 'failed') return sendError(res, j.code, 'clip_failed', j.error);
+        await new Promise((ok) => setTimeout(ok, 500));
       }
+    }
+    if (parts.length === 5 && parts[3] === 'bili' && method === 'GET') {
+      const j = biliJobs.get(parts[4]);
+      if (!j || j.itemId !== parts[1]) return sendError(res, 404, 'not_found', '没有这个剪片段任务（可能工作台重启过），重新剪一次');
+      return sendJson(res, 200, j.status === 'done' ? { status: 'done', ...j.result } : j.status === 'failed' ? { status: 'failed', error: j.error } : { status: 'running', seconds: Math.round((Date.now() - j.at) / 1000) });
     }
     if (parts.length === 4 && method === 'DELETE') {
       const cur = it.assets || [];
