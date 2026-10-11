@@ -2,7 +2,7 @@
 # SoloMCN 的启停命令。一键安装时会链接到 ~/.local/bin/solomcn，在任何目录都能用：
 #   solomcn start     在后台启动（关掉终端也不影响），就绪后打开浏览器
 #   solomcn stop      停止工作台和热点服务
-#   solomcn restart   重启
+#   solomcn restart   重启（有 Claude 任务、发布、角色生成在跑时会拒绝，加 --force 强制）
 #   solomcn status    看看开着没有
 #   solomcn open      在浏览器里打开工作台
 #   solomcn logs      看运行日志（Ctrl+C 退出）
@@ -100,16 +100,30 @@ update() {
   printf '更新 SoloMCN…\n'
   git pull --ff-only || die "拉取最新代码失败：项目目录里可能有改过的文件（git status 查看）"
   SOLOMCN_INSTALLER=1 node scripts/setup.mjs
-  if [ "$was_up" = 1 ]; then stop; start --no-open; else ok "已更新。启动：solomcn start"; fi
+  if [ "$was_up" = 1 ]; then guard "${1:-}"; stop; start --no-open; else ok "已更新。启动：solomcn start"; fi
+}
+
+# 重启、停止前先问工作台有没有在跑的事（Claude 后台任务、发布、生成角色），有就不动，除非加 --force
+guard() {
+  [ "${1:-}" = "--force" ] && return 0
+  up || return 0
+  local r
+  r="$(curl -s --max-time 5 "$URL/api/busy" || true)"
+  if printf '%s' "$r" | grep -q '"busy":true'; then
+    printf '工作台还有事在做，现在重启会打断它们：\n'
+    printf '%s' "$r" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const x of JSON.parse(s).list)console.log("  - "+x)}catch{}})'
+    printf '等它们做完再来；确定要打断就加 --force\n'
+    exit 1
+  fi
 }
 
 case "${1:-}" in
   start) start "${2:-}" ;;
-  stop) stop ;;
-  restart) stop; start --no-open ;;
+  stop) guard "${2:-}"; stop ;;
+  restart) guard "${2:-}"; stop; start --no-open ;;
   status) status ;;
   open) up || info "（还没在运行，先 solomcn start）"; open "$URL" ;;
   logs) [ -f "$LOG" ] || die "还没有日志"; tail -n 200 -f "$LOG" ;;
-  update) update ;;
+  update) update "${2:-}" ;;
   *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

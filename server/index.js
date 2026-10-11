@@ -345,6 +345,14 @@ ${mine}`;
     }
   }
   // 调研素材：截网页（和页面里的视频）存到内容卡片上；删掉不要的
+  // 有没有在跑、重启会打断的事：后台 Claude 任务、发布、角色差分生成。solomcn restart/stop 先问这里
+  if (parts[0] === 'busy' && parts.length === 1 && method === 'GET') {
+    const runs = Object.values(store.all().agentRuns || {}).filter((r) => r.status === 'running').map((r) => `Claude ${r.name}`);
+    const pub = publisher.busy();
+    const chars = characters.list().filter((c) => c.running).map((c) => `生成「${c.name}」的表情差分`);
+    const list = [...runs, ...(pub ? [`发布「${pub}」`] : []), ...chars];
+    return sendJson(res, 200, { busy: list.length > 0, list });
+  }
   // 解说员角色库：参考图 → 表情差分（一次生成，之后每条视频直接用）
   if (parts[0] === 'characters') {
     try {

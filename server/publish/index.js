@@ -107,6 +107,14 @@ export function createPublisher({ store, root }) {
   const watchImages = (it) => (!it.script && it.video?.watch?.status === 'done' ? (it.video.watch.sheets || []).map(abs) : []);
   let publishing = null; // 同一时间只发一条，避免同账号短时间连续操作
 
+  // 上次关掉工作台时正在发布的平台：没等到结果，不知道发没发出去。标出来，让人去平台后台确认，别直接重发
+  for (const [id, it] of Object.entries(store.all().items || {})) {
+    for (const [p, r] of Object.entries(it.publish?.results || {})) {
+      if (r?.status !== 'running') continue;
+      store.update('items', id, { publish: { results: { [p]: { ...r, status: 'failed', error: '发布到一半工作台被重启了，没等到结果：先去平台后台看看发出去没有，没发出去再点重发', at: Date.now() } } } });
+    }
+  }
+
   const getItem = (id) => {
     const it = store.get('items', id);
     if (!it) throw Object.assign(new Error('找不到这条内容'), { status: 404 });
@@ -284,5 +292,7 @@ export function createPublisher({ store, root }) {
     manualCancel,
     accounts: () => Object.fromEntries(Object.keys(store.all().accounts).map((id) => [id, Object.fromEntries(Object.entries(browsers).map(([k, b]) => [k, b.status(id)]))])),
     platforms: () => PUBLISH_PLATFORMS,
+    // 正在发布的内容（重启前检查用）
+    busy: () => (publishing ? store.get('items', publishing)?.title || publishing : null),
   };
 }
