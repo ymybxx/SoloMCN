@@ -4,6 +4,7 @@
 //
 //   node montage.mjs align  --master <音轨来源.mp4> <片段1.mp4> <片段2.mp4> ...   各片段相对主音轨的时间差，带可信度
 //   node montage.mjs beats  --master <音轨来源.mp4> [--from 秒] [--to 秒]              主音轨的 BPM 和每一拍的时间
+//   node montage.mjs skips  --master <音轨来源> --within 90,150                     找能无缝砍掉的整数个八拍（成片超时长时用，写进 audio.skip）
 //   node montage.mjs compare --spec montage.json --at 30,60,90                         同一时刻各片段的画面拼成对比图（查对齐、调构图）
 //   node montage.mjs plan   --spec montage.json                                         按 spec 排切点，写回 spec 的 cuts（不渲染）
 //   node montage.mjs render --spec montage.json [--out renders/video.mp4]               渲染成片，顺带出切点表和缩略图拼图
@@ -229,14 +230,69 @@ function usable(s, a, b) {
   return a + seg.offset >= 0.05 && b + seg.offset <= (s.duration ?? Infinity) - 0.05 ? seg.offset : null;
 }
 
+// 主音轨实际用到的几段：[start, end] 去掉 audio.skip 里砍掉的部分。out 是这一段在成片里的起点
+function pieces(spec, from, to) {
+  const skips = (spec.audio.skip || []).map(([a, b]) => [Math.max(from, a), Math.min(to, b)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  const list = [];
+  let t = from, o = 0;
+  for (const [a, b] of skips) {
+    if (a > t) { list.push({ from: t, to: a, out: o }); o += a - t; }
+    t = Math.max(t, b);
+  }
+  if (to > t) list.push({ from: t, to, out: o });
+  return list;
+}
+// 主音轨时间 -> 成片时间（落在砍掉的部分里，就算到下一段开头）
+function toOut(P, t) {
+  for (const p of P) if (t >= p.from - 1e-6 && t <= p.to + 1e-6) return p.out + (t - p.from);
+  const n = P.find((p) => p.from >= t);
+  return n ? n.out : P.at(-1).out + P.at(-1).to - P.at(-1).from;
+}
+
+// 找能无缝砍掉的一段：砍点前后的声音接得上（砍掉的是整数个八拍，后面那段和被砍掉的开头听起来一样，比如重复的副歌、间奏）
+function findSkips(master, { within = [0, Infinity], min = 5, max = 30, top = 6, step = 8 } = {}) {
+  const bt = beats(master);
+  const bands = [envelope(master), envelope(master, 'highpass=f=250,lowpass=f=4000')];
+  const W = Math.round(3 * ENV_HZ);
+  const corr = (e, a, b) => {
+    if (a < 0 || b < 0 || a + W > e.length || b + W > e.length) return -1;
+    let sab = 0, saa = 0, sbb = 0;
+    for (let i = 0; i < W; i++) { sab += e[a + i] * e[b + i]; saa += e[a + i] ** 2; sbb += e[b + i] ** 2; }
+    return sab / Math.sqrt(saa * sbb || 1);
+  };
+  const B = bt.beats.filter((t) => t >= within[0] && t <= within[1]);
+  const out = [];
+  for (let i = 0; i < B.length; i++) {
+    for (let j = i + step; j < B.length; j += step) {
+      const len = B[j] - B[i];
+      if (len < min) continue;
+      if (len > max) break;
+      const ti = Math.round(B[i] * ENV_HZ), tj = Math.round(B[j] * ENV_HZ);
+      // 砍点之后：tj 往后听起来要像 ti 往后；砍点之前：tj 往前要像 ti 往前（两边都接得上才自然）
+      const score = bands.reduce((s, e) => s + corr(e, ti, tj) + corr(e, ti - W, tj - W), 0) / (bands.length * 2);
+      out.push({ from: B[i], to: B[j], length: r3(len), beats: j - i, score: Math.round(score * 1000) / 1000 });
+    }
+  }
+  // 去掉互相重叠的，留分高的
+  const picked = [];
+  for (const c of out.sort((a, b) => b.score - a.score)) {
+    if (picked.some((p) => c.from < p.to && c.to > p.from)) continue;
+    picked.push(c);
+    if (picked.length >= top) break;
+  }
+  return { bpm: bt.bpm, candidates: picked };
+}
+
 function plan(spec, dir) {
   const master = path.resolve(dir, spec.audio.file);
   const from = spec.audio.start ?? 0, to = spec.audio.end ?? duration(master);
   const auto = spec.auto || {};
   // 节拍按整首算（短片段算 BPM 容易落到 3/4、1/2 倍的假峰上），再取用到的这一段
   const bt = spec.beats || beats(master);
-  const grid = bt.beats.filter((t) => t >= from - 0.01 && t <= to);
-  if (!grid.length || grid[0] - from > 0.05) grid.unshift(from);
+  const P = pieces(spec, from, to);
+  const inPiece = (t) => P.find((p) => t >= p.from - 0.01 && t < p.to - 0.01);
+  // 拍点只取留下来的部分；每段开头（砍点之后）强制切一刀，换一套造型接上
+  const grid = [...new Set([...bt.beats.filter((t) => inPiece(t)), ...P.map((p) => p.from)].map(r3))].sort((a, b) => a - b);
   const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
   if (srcs.length < 2) die('能用的片段少于 2 个（先 align 填好 offset）');
   const pins = [...(spec.pins || [])].sort((x, y) => x.from - y.from); // 指定某段用某个片段（名场面、定格）
@@ -260,7 +316,9 @@ function plan(spec, dir) {
       continue;
     }
     const n = per(at);
-    let end = Math.min(grid[i + n] ?? to, to);
+    const piece = inPiece(at) || P.at(-1);
+    let end = Math.min(grid[i + n] ?? to, to, piece.to);
+    const stopAt = grid.findIndex((t) => t > at + 0.01 && t >= end - 0.01);
     const nextPin = pins.find((p) => p.from > at + 0.01 && p.from < end);
     if (nextPin) end = nextPin.from;
     // 挑一个覆盖这一段、最近两段没用过、总共用得最少的片段（同样少的随机挑）
@@ -275,7 +333,7 @@ function plan(spec, dir) {
     cuts.push({ at: r3(at), src: pick.s.id, offset: pick.off });
     recent.push(pick.s.id);
     if (nextPin) { while (i < grid.length && grid[i] < nextPin.from - 0.01) i++; if (Math.abs((grid[i] ?? Infinity) - nextPin.from) > 0.05) grid.splice(i, 0, nextPin.from); }
-    else i += n;
+    else i = stopAt === -1 ? grid.length : stopAt;
   }
   return { cuts, beats: { bpm: bt.bpm, period: bt.period, first: bt.first } };
 }
@@ -313,17 +371,26 @@ function render(spec, dir, out) {
   const cuts = [...spec.cuts].sort((a, b) => a.at - b.at);
   if (!cuts.length || cuts[0].at > from + 0.001) die('cuts 要从 audio.start 开始');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'montage-'));
-  const total = Math.round((to - from) * fps);
+  const P = pieces(spec, from, to);
+  const len = P.reduce((a, p) => a + p.to - p.from, 0);
+  const total = Math.round(len * fps);
+  // 切点换算到成片时间轴：每一段主音轨里生效的切点（段开头接着用上一个切点的片段）
+  const segs = [];
+  for (const p of P) {
+    const active = [...cuts].reverse().find((c) => c.at <= p.from + 0.001);
+    const inside = cuts.filter((c) => c.at > p.from + 0.001 && c.at < p.to - 0.001);
+    for (const c of [active, ...inside].filter(Boolean)) segs.push({ c, piece: p, out: p.out + Math.max(0, c.at - p.from) });
+  }
   const list = [];
   const table = [];
-  for (let k = 0; k < cuts.length; k++) {
-    const c = cuts[k];
+  for (let k = 0; k < segs.length; k++) {
+    const { c, piece } = segs[k];
     const s = srcs.get(c.src) || die(`切点 ${c.at} 用了不存在的片段 ${c.src}`);
     // 用帧号算起止，避免累计误差
-    const f0 = Math.round((c.at - from) * fps);
-    const f1 = k + 1 < cuts.length ? Math.round((cuts[k + 1].at - from) * fps) : total;
+    const f0 = Math.round(segs[k].out * fps);
+    const f1 = k + 1 < segs.length ? Math.round(segs[k + 1].out * fps) : total;
     if (f1 <= f0) continue;
-    const st = from + f0 / fps + (c.offset ?? s.offset) + (c.nudge || 0);
+    const st = piece.from + (f0 / fps - piece.out) + (c.offset ?? s.offset) + (c.nudge || 0);
     const zoom = c.zoom ?? s.zoom ?? 1;
     const cx = c.x ?? s.x ?? 0.5, cy = c.y ?? s.y ?? 0.5;
     // 先等比铺满画面，再按 zoom 放大，以 (x, y) 为中心裁出 W×H
@@ -341,7 +408,7 @@ function render(spec, dir, out) {
     const r = spawnSync('ffmpeg', ['-v', 'error', '-y', '-ss', String(Math.max(0, st)), '-i', path.resolve(dir, s.file), '-frames:v', String(f1 - f0), '-an', '-vf', vf.join(','), '-c:v', 'libx264', '-preset', 'fast', '-crf', '16', '-r', String(fps), seg]);
     if (r.status !== 0) die(`切点 ${c.at}（${c.src}）渲染失败：${r.stderr}`);
     list.push(`file '${seg}'`);
-    table.push({ at: r3(c.at), out: r3(f0 / fps), dur: r3((f1 - f0) / fps), src: c.src, srcTime: r3(st), label: label || '' });
+    table.push({ at: r3(piece.from + (f0 / fps - piece.out)), out: r3(f0 / fps), dur: r3((f1 - f0) / fps), src: c.src, srcTime: r3(st), label: label || '' });
   }
   fs.writeFileSync(path.join(tmp, 'list.txt'), list.join('\n'));
   const joined = path.join(tmp, 'joined.mp4');
@@ -353,17 +420,20 @@ function render(spec, dir, out) {
     if (!FONT) break;
     const size = Math.round(H * (t.size || 0.06));
     const y = t.y != null ? `${Math.round(H * t.y)}` : '(h-th)/2';
-    const a = r3(t.from - from), b = r3(t.to - from), fade = t.fade ?? 0.3;
+    const a = r3(toOut(P, t.from)), b = r3(toOut(P, t.to)), fade = t.fade ?? 0.3;
     const alpha = `if(lt(t,${a}),0,if(lt(t,${a + fade}),(t-${a})/${fade},if(lt(t,${b - fade}),1,if(lt(t,${b}),(${b}-t)/${fade},0))))`;
     overlays.push(`drawtext=fontfile='${FONT}':text='${esc(t.text)}':x=(w-tw)/2:y=${y}:fontsize=${size}:fontcolor=${t.color || 'white'}:alpha='${alpha}':shadowcolor=black@0.55:shadowx=3:shadowy=3:borderw=${t.border ?? 0}:bordercolor=black@0.5`);
   }
   // 开头结尾压暗淡入淡出
-  const fadeIn = spec.audio.fadeIn ?? 0.4, fadeOut = spec.audio.fadeOut ?? 1.2, len = (to - from);
+  const fadeIn = spec.audio.fadeIn ?? 0.4, fadeOut = spec.audio.fadeOut ?? 1.2;
   overlays.push(`fade=t=in:st=0:d=${fadeIn}`, `fade=t=out:st=${r3(len - fadeOut)}:d=${fadeOut}`);
-  const af = [`afade=t=in:st=0:d=${Math.min(fadeIn, 0.3)}`, `afade=t=out:st=${r3(len - fadeOut)}:d=${fadeOut}`, 'loudnorm=I=-14:TP=-1.5:LRA=11'];
+  // 主音轨按段截取再接起来，接缝处各淡 15 毫秒，免得爆音
+  const X = 0.015;
+  const parts = P.map((p, i) => `[1:a]atrim=start=${r3(p.from)}:end=${r3(p.to)},asetpts=PTS-STARTPTS${P.length > 1 ? `,afade=t=in:st=0:d=${X},afade=t=out:st=${r3(p.to - p.from - X)}:d=${X}` : ''}[p${i}]`);
+  const fc = [...parts, `${P.map((_, i) => `[p${i}]`).join('')}concat=n=${P.length}:v=0:a=1,afade=t=in:st=0:d=${Math.min(fadeIn, 0.3)},afade=t=out:st=${r3(len - fadeOut)}:d=${fadeOut},loudnorm=I=-14:TP=-1.5:LRA=11[a]`, `[0:v]${overlays.join(',')}[v]`].join(';');
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', joined, '-ss', String(from), '-t', String(len), '-i', master,
-    '-map', '0:v:0', '-map', '1:a:0', '-vf', overlays.join(','), '-af', af.join(','),
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-i', joined, '-i', master,
+    '-filter_complex', fc, '-map', '[v]', '-map', '[a]',
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', String(fps), '-c:a', 'aac', '-b:a', '256k', '-ar', '48000', '-movflags', '+faststart', '-shortest', out]);
   fs.rmSync(tmp, { recursive: true, force: true });
 
@@ -388,6 +458,10 @@ if (cmd === 'align') {
   if (!o.master) die('用法：montage.mjs beats --master <音轨来源> [--from 秒] [--to 秒]');
   const b = beats(o.master, { from: Number(o.from) || 0, to: o.to ? Number(o.to) : Infinity });
   console.log(JSON.stringify({ ...b, beats: o.all ? b.beats : `${b.beats.length} 拍（加 --all 全部列出）` }, null, 1));
+} else if (cmd === 'skips') {
+  if (!o.master) die('用法：montage.mjs skips --master <音轨来源> [--within 90,150] [--min 5] [--max 30] [--step 8]');
+  const w = o.within ? String(o.within).split(',').map(Number) : [0, Infinity];
+  console.log(JSON.stringify(findSkips(o.master, { within: w, min: Number(o.min) || 5, max: Number(o.max) || 30, step: Number(o.step) || 8 }), null, 1));
 } else if (cmd === 'compare') {
   if (!o.spec || !o.at) die('用法：montage.mjs compare --spec montage.json --at 30,60,90 [--out review/compare.jpg]');
   const file = path.resolve(o.spec); const dir = path.dirname(file);
