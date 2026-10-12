@@ -798,14 +798,16 @@ if (!process.env.HOT_SERVICE_URL && existsSync(hotPython)) {
     console.log(`已启动热点数据服务：${HOT_URL}`);
   }
 }
-// 工作台退出时把它启动的热点服务一起停掉：Ctrl+C、solomcn stop（SIGTERM）、直接关掉终端窗口（SIGHUP）都算
+// 工作台退出时把它启动的热点服务和正在跑的 Claude 一起停掉：Ctrl+C、solomcn stop（SIGTERM）、直接关掉终端窗口（SIGHUP）都算。
+// 不停的话 Claude 进程会留在后台接着跑，和重启后新开的任务撞在一起
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.on(sig, () => {
     hotProc?.kill();
+    agent.killAll();
     process.exit(0);
   });
 }
-process.on('exit', () => hotProc?.kill());
+process.on('exit', () => { hotProc?.kill(); agent.killAll(); });
 
 server.listen(PORT, HOST, () => {
   console.log(`SoloMCN 工作台已启动：http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);

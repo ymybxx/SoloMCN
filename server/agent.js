@@ -677,5 +677,10 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
     if (r) Promise.resolve().then(() => hooks.onDone?.(id, r.task, r)).catch((e) => console.error('运行收尾出错：', e.message));
   }
 
-  return { start, resume, followUp, say, stop, running: () => current.main?.id || null, runningIn: (lane) => current[lane]?.id || null, busy: (lane) => !!current[lane] };
+  // 工作台退出时：停掉所有正在跑的 Claude 进程（下次启动时这些运行会标成「被中断」，可以从中断处继续）
+  function killAll() {
+    for (const c of Object.values(current)) if (c?.proc && c.proc.exitCode === null && c.proc.signalCode === null) try { c.proc.kill('SIGTERM'); } catch {}
+  }
+
+  return { start, resume, followUp, say, stop, killAll, running: () => current.main?.id || null, runningIn: (lane) => current[lane]?.id || null, busy: (lane) => !!current[lane] };
 }
