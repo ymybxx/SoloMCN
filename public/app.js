@@ -318,8 +318,12 @@ function vRunMini(run){
 function keepLogScroll(container,fn){
   const saved={};
   container?.querySelectorAll('.run-log').forEach(l=>{saved[l.dataset.run]={top:l.scrollTop,bottom:l.scrollHeight-l.scrollTop-l.clientHeight<30}});
+  // 自己会滚动的输入框、长文本（技能说明等）：重新渲染后回到原来的位置，不然一刷新就弹回顶部
+  const kept={};
+  container?.querySelectorAll('textarea[id],.keep-scroll[id]').forEach(el=>{if(el.scrollTop)kept[el.id]=el.scrollTop});
   fn();
   container?.querySelectorAll('.run-log').forEach(l=>{const v=saved[l.dataset.run];l.scrollTop=!v||v.bottom?l.scrollHeight:v.top});
+  for(const [id,top] of Object.entries(kept)){const el=document.getElementById(id);if(el)el.scrollTop=top}
 }
 // 全屏查看一次运行
 function renderRunView(){
@@ -1492,7 +1496,7 @@ function vSkills(){
       <p class="hint">这个技能你改过，所以没有自动更新。可以让 Claude 把新版的改进合进你的版本（结果会先填进下面给你看），也可以直接用新版覆盖，或者保留你的版本。</p>
       <div class="actions"><button class="btn primary" data-act="skill-merge" ${S.skillBusy?'disabled':''}>${S.skillBusy==='merge'?'Claude 合并中…':'让 Claude 合并'}</button>
         <button class="btn ghost" data-act="skill-take-new">用新版覆盖</button><button class="btn ghost" data-act="skill-keep">保留我的版本</button></div>
-      <details><summary class="faint">看新的出厂版本</summary><pre class="skill-pre no-tr">${esc(cur.defaultContent||'')}</pre></details></div>`:'';
+      <details><summary class="faint">看新的出厂版本</summary><pre id="skillDefault" class="skill-pre keep-scroll no-tr">${esc(cur.defaultContent||'')}</pre></details></div>`:'';
   const merged=S.skillMerged&&cur&&S.skillMerged.name===cur.name?`<div class="panel" style="border-color:var(--ok)"><p class="hint">下面是 Claude 合并后的版本，检查一下，满意了点「采用合并结果」。</p><div class="actions"><button class="btn primary" data-act="skill-accept-merged">采用合并结果</button><button class="btn ghost" data-act="skill-merge-cancel">放弃</button></div></div>`:'';
   const hist=cur?.history?.length?`<details class="vhist"><summary>历史版本（${cur.history.length}）</summary>${cur.history.map(at=>`<div class="row-s"><span class="num faint">${esc(fmtTime(at))}</span><button class="btn ghost" data-act="skill-hist" data-k="${at}">载入这一版</button></div>`).join('')}</details>`:'';
   const editor=!cur?'<div class="panel"><p class="hint">正在读取…</p></div>':cur.err?`<div class="panel"><p class="err">${esc(cur.err)}</p></div>`:`
