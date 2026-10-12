@@ -1526,8 +1526,8 @@ function changeCard(c){
     :c.status==='applied'&&c.source!=='manual'||c.status==='applied'&&(c.files||[]).length?`<div class="actions"><button class="btn ghost" data-act="chg-revert" data-k="${c.id}">撤回</button></div>`
     :c.status==='failed'?`<div class="actions"><button class="btn ghost" data-act="chg-retry" data-k="${c.id}">重试</button><button class="btn ghost" data-act="chg-reject" data-k="${c.id}">不要了</button></div>`:'';
   return `<article class="panel grid chg" style="gap:8px">
-    <div class="chg-head"><span class="pill">${esc(CHG_SRC[c.source]||c.source)}</span><b class="chg-title">${esc(c.title||'')}</b><span class="pill ${stC}"><i></i>${stL}</span><span class="faint num">${esc(fmtTime(c.createdAt))}</span></div>
-    ${c.idea&&c.idea!==c.title?`<p class="chg-idea">「${esc(c.idea)}」</p>`:''}
+    <div class="chg-head"><span class="pill">${esc(CHG_SRC[c.source]||c.source)}</span><b class="chg-title">${esc(c.idea?(c.idea.length>28?c.idea.slice(0,28)+'…':c.idea):c.title||'')}</b><span class="pill ${stC}"><i></i>${stL}</span><span class="faint num">${esc(fmtTime(c.createdAt))}</span></div>
+    ${c.idea&&c.idea.length>28?`<p class="chg-idea">「${esc(c.idea)}」</p>`:''}
     ${(c.refines||[]).map(r=>`<p class="chg-idea faint">你又说：「${esc(r.text)}」</p>`).join('')}
     ${c.summary?`<div class="chg-sum">${esc(c.summary)}</div>`:c.status==='working'||c.status==='queued'?'<p class="hint">Claude 正在找该改的技能，改好了会出现在这里。</p>':''}
     ${c.error?`<p class="err">${esc(c.error)}</p>`:''}${c.note?`<p class="err">${esc(c.note)}</p>`:''}
