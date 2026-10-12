@@ -14,7 +14,6 @@ metadata:
 - 程序：`whisper-cli`（一般在 `/opt/homebrew/bin/whisper-cli`）。没有的话这台电脑没装，告诉用户运行 `brew install whisper-cpp`，这次跳过回听。
 - 模型：工作台根目录下的 `data/programs/whisper/`，用多语言模型（文件名里没有 `.en`），中文推荐 `ggml-medium.bin`（1.5 GB）或 `ggml-small.bin`（480 MB）。目录里没有就下载到这里：
   `curl -L -o data/programs/whisper/ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin`
-  （调研的沙盒里连不上 huggingface，就跳过，在汇报里说明。）
 
 ## 怎么用
 

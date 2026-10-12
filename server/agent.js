@@ -4,7 +4,7 @@
 // 可以用 claude --resume <id> 接着看 Claude 当时是怎么想的。
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { voicesFile } from './skills.js';
@@ -13,16 +13,16 @@ import { ASK_TIMEOUT_MS } from './lab.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 import { claudeBin, cliEnv, loginErrorMessage } from './cli.js';
+import { credentials } from './credentials.js';
 import { modelFor, effortFor } from './models.js';
 import { CONTENT_OUTPUT_POLICY } from './prompts.js';
 
-// 后台运行没人点确认：内置工具只提供上网查资料和加载技能、工具这几个，命令行、读写文件压根不提供，
-// 网页里就算藏着指令也碰不到本机；只放行 workbench 的 MCP 工具。禁止列表是第二道保险
 // 已有调研报告在这个天数内，重新调研时默认在它基础上补
 export const REUSE_DAYS = 7;
-const BUILTIN_TOOLS = ['WebSearch', 'WebFetch', 'Skill', 'ToolSearch'];
-const ALLOWED_TOOLS = ['mcp__workbench__*', ...BUILTIN_TOOLS];
-const DENIED_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'NotebookEdit', 'Glob', 'Grep'];
+// 每次运行的能力都一样全：读写文件、执行命令、上网、加载技能、开子代理，加上 workbench 的 MCP 工具。
+// 你配过的钥匙和登录也直接给它（见 credentials.js）。具体做什么由技能和任务决定，不按任务拆权限
+const ALL_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch', 'WebSearch', 'WebFetch'];
+const ALLOWED_TOOLS = ['mcp__workbench__*', ...ALL_TOOLS];
 const MAX_STEPS = 600;
 // 工作台页面会实时显示这些内容，所以要求中文
 // 过程说明和汇报的语言跟着页面「设置」里的界面语言走；作品内容（脚本、字幕、文案）按系列定，不受影响
@@ -124,12 +124,12 @@ const TASKS = {
     prompt: ({ videoId, redo }) => `/teardown-video 视频 id：${videoId}${redo ? '；重新拆解' : ''}`,
   },
   // 写脚本之前先调研：上网查真实的价格、能力、步骤和反方观点，写成带出处的报告存到卡片上
-  // 调研可以动手实践：在实验目录里跑（沙盒只允许写这个目录），见 labLaunch
+  // 调研可以动手实践：这条内容的代码、实验、结果放实验目录（videos/lab-<内容 id>/）
   research: {
     name: '调研',
     maxTurns: 120,
     lab: true,
-    prompt: ({ itemId, labDir, sockDir, programsDir, askAboveGB, prior, craft }) => `/research-topic 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}；实验目录：${labDir}；本地通信目录：${sockDir}；已装程序目录：${programsDir}；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
+    prompt: ({ itemId, labDir, programsDir, askAboveGB, prior, craft }) => `/research-topic 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}；实验目录：${labDir}；已装程序目录：${programsDir}；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
   },
   // 下面三个在「设置」里选成「后台 Agent」时走这里，选「单次调用」时走 cli.js
   script: {
@@ -147,17 +147,12 @@ const TASKS = {
     maxTurns: 30,
     prompt: () => '/review-data',
   },
-  // 生成视频：用 HyperFrames 把脚本做成 MP4，要跑几十分钟，走单独的队列，不挡精选、写脚本。
-  // 它要执行命令、写项目文件，所以放开命令行和读写文件；作为交换，不给上网搜索和打开网页，
-  // 输入只有卡片上的脚本和账号人设，网页内容进不来
+  // 生成视频：把脚本做成 MP4，要跑几十分钟，走单独的队列，不挡精选、写脚本
   video: {
     name: '生成视频',
     lane: 'video',
     maxTurns: 400,
     prompt: ({ itemId, craft }) => `/make-video 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}`,
-    tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'].join(','),
-    allowed: ['mcp__workbench__get_item', 'mcp__workbench__save_video', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'],
-    denied: ['WebSearch', 'WebFetch', 'NotebookEdit'],
   },
   // 按人的修改意见改已经做好的视频：只改提到的地方，重新渲染成新版本，旧版本保留
   revise: {
@@ -166,31 +161,19 @@ const TASKS = {
     maxTurns: 200,
     prompt: ({ itemId, feedback, images = [], craft }) => `/revise-video 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}\n修改意见：\n${feedback}` +
       (images.length ? `\n附图（用读文件工具逐张查看）：\n${images.map((p, i) => `图 ${i + 1}：${path.join(ROOT, p)}`).join('\n')}` : ''),
-    tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'].join(','),
-    allowed: ['mcp__workbench__get_item', 'mcp__workbench__save_video', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'],
-    denied: ['WebSearch', 'WebFetch', 'NotebookEdit'],
   },
   // 改进技能：按想法、运行中提的建议、有冲突的出厂更新、定期整理，在草稿里改技能（见 skills.js），
-  // 改完按设置直接生效或等用户确认。不上网，输入只有用户的话和技能本身
+  // 改完按设置直接生效或等用户确认
   skills: {
     name: '改进技能',
     lane: 'skills',
     maxTurns: 150,
     prompt: ({ changeId, mode, draft, extra }) => `/improve-skills 改动 id：${changeId}；方式：${mode}；草稿目录：${draft}${extra ? `\n${extra}` : ''}`,
-    tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'TodoWrite', 'ToolSearch'].join(','),
-    allowed: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'TodoWrite', 'ToolSearch'],
-    denied: ['WebSearch', 'WebFetch', 'NotebookEdit', 'mcp__workbench__*'],
   },
 };
 
-// 自我进化开着时，各环节的提示里多一段：遇到坑就改进对应的技能。
-// 生成、修改视频这两种能读写文件、不上网，直接改技能文件（跑完平台对比、记一条改动）；
-// 其他能上网的运行不能改文件，用 improve_skill 提建议，由「改进技能」任务整理进去
-const EVOLVE_DIRECT = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，做完后直接改对应技能的文件（.claude/skills/<技能名>/ 下）：做法的坑改做法技能，工具的坑改工具技能，通用流程的问题改流程技能。要改，不要只往后追加：同主题的合并，过时的删掉；SKILL.md 保持简短，细节放附录。只为以后的运行改，不为了这一次临时改。最后在汇报里单独一行写「技能改动：改了什么、为什么」。';
-const EVOLVE_SUGGEST = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，用 improve_skill 提给对应的技能（做法的坑给做法技能，工具的坑给工具技能，通用流程的问题给这个环节的流程技能）。只提以后别的内容也用得上的经验。';
-// 精选、出题、写脚本这些运行没有读文件工具（能读就能读到密钥）：技能的附录用 read_skill_file 读
-const SKILL_READ_HINT = '这次运行没有读文件工具。技能正文里提到的附录、做法技能各环节的文件（比如 stage-montage 的 script.md、某个技能的 references/xx.md），用 read_skill_file 读。';
-const EVOLVE_TASKS = { video: EVOLVE_DIRECT, revise: EVOLVE_DIRECT, research: EVOLVE_SUGGEST, script: EVOLVE_SUGGEST, check: EVOLVE_SUGGEST, curate: EVOLVE_SUGGEST, ideas: EVOLVE_SUGGEST, teardown: EVOLVE_SUGGEST, analysis: EVOLVE_SUGGEST };
+// 自我进化开着时，每次运行的提示里多一段：遇到坑就直接改进对应的技能（跑完平台对比、记一条技能改动）
+const EVOLVE = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，做完后直接改对应技能的文件（.claude/skills/<技能名>/ 下）：做法的坑改做法技能，工具的坑改工具技能，通用流程的问题改流程技能。要改，不要只往后追加：同主题的合并，过时的删掉；SKILL.md 保持简短，细节放附录。只为以后的运行改，不为了这一次临时改。最后在汇报里单独一行写「技能改动：改了什么、为什么」。';
 
 const TOOL_NAMES = {
   get_feed: '读取渠道素材',
@@ -282,10 +265,6 @@ function describeToolEn(name, input = {}) {
   return label;
 }
 
-// 实践时沙盒只放行这些网站：装 Python、Node 依赖，拉 GitHub 上的代码，下载公开的模型和前端库
-const LAB_DOMAINS = ['pypi.org', 'files.pythonhosted.org', 'registry.npmjs.org', 'github.com', 'api.github.com', 'codeload.github.com', '*.githubusercontent.com',
-  'api.adoptium.net',
-  'cdn.jsdelivr.net', 'unpkg.com', 'huggingface.co', '*.hf.co', 'crates.io', 'static.crates.io', 'index.crates.io', 'proxy.golang.org'];
 
 // 正在输出的工具参数是一段没写完的 JSON：从里面取出最长的字符串值（比如 save_script 的脚本正文），
 // 最后一个字符串可能还没写完，也一样取出来
@@ -316,38 +295,6 @@ export function longestString(raw) {
 }
 
 export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
-  // 调研任务的启动配置：在实验目录里运行，开 Claude Code 的沙盒（不能读家目录、只能写实验目录、只连白名单网站，
-  // 被拦的命令不准退到沙盒外重试）；读写文件工具也只允许实验目录；技能复制一份进去，工作台工具用绝对路径指定
-  function labLaunch(itemId) {
-    const dir = lab.prepare(itemId);
-    const sock = lab.sockDir(itemId);
-    const nodeDir = path.dirname(realpathSync(process.execPath));
-    const settings = {
-      sandbox: {
-        enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
-        filesystem: { denyRead: ['~/'], allowRead: [dir, lab.toolsDir, nodeDir, sock], allowWrite: [lab.toolsDir, sock] },
-        // 本地通信（unix socket）只放行这条内容专用的临时目录：工具之间能通信（比如 REA 连 Ghidra），
-        // 电脑上别的本地服务（Docker、SSH 代理等）连不上
-        network: { allowedDomains: LAB_DOMAINS, strictAllowlist: true, allowUnixSockets: [sock] },
-      },
-    };
-    const mcp = { mcpServers: { workbench: { command: process.execPath, args: [path.join(cwd, 'server', 'mcp.js')], env: { WORKBENCH_URL: process.env.WORKBENCH_URL || '' } } } };
-    return {
-      cwd: dir,
-      args: ['--settings', JSON.stringify(settings), '--mcp-config', JSON.stringify(mcp), '--strict-mcp-config'],
-      tools: [...BUILTIN_TOOLS, 'Bash', 'Read', 'Write', 'Edit', 'TodoWrite'].join(','),
-      allowed: [...ALLOWED_TOOLS, 'Bash', 'TodoWrite', `Edit(/${dir}/**)`, `Read(/${dir}/**)`, `Edit(/${lab.toolsDir}/**)`, `Read(/${lab.toolsDir}/**)`],
-      denied: ['NotebookEdit', 'Glob', 'Grep'],
-      // 依赖的缓存放进实验目录（家目录读写不了）；等人处理（登录、付款）最多 40 分钟，工具调用不能先超时
-      // npm、git、pip 的个人配置文件都在家目录里，沙盒读不了会报权限错误：指到实验目录里的空文件
-      env: {
-        PIP_CACHE_DIR: path.join(dir, '.cache', 'pip'), npm_config_cache: path.join(dir, '.cache', 'npm'), XDG_CACHE_HOME: path.join(dir, '.cache'),
-        NPM_CONFIG_USERCONFIG: path.join(dir, '.npmrc'), GIT_CONFIG_GLOBAL: path.join(dir, '.gitconfig'), PIP_CONFIG_FILE: '/dev/null',
-        TMPDIR: sock,
-        MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000),
-      },
-    };
-  }
   const uiLang = () => (store.get('settings', 'ui')?.lang === 'en' ? 'en' : 'zh');
   // 每条队列同一时间只跑一个任务：main（精选、出题、写脚本……）和 video（生成视频）互不阻塞
   const current = {}; // lane -> { id, proc, stopped }
@@ -413,7 +360,6 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
     if (task === 'research') {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
       args.labDir = lab.dirOf(args.itemId);
-      args.sockDir = lab.sockDir(args.itemId);
       args.programsDir = lab.toolsDir;
       args.askAboveGB = lab.settings().askAboveGB;
       // 已有报告：7 天内默认在它基础上补；超过 7 天或用户选了「从头查」就全部重查
@@ -534,19 +480,21 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
   }
 
   function launch({ id, run, task, t, lane, prompt, resumeSession = null, autoResumes = 0 }) {
-    const lb = t.lab && lab ? labLaunch(run.args.itemId) : null;
-    const env = { ...cliEnv(), ...(lb?.env || {}) };
+    if (t.lab && lab) lab.prepare(run.args.itemId);
+    // 你配过的钥匙和登录直接放进环境变量，提示里列出名字（不用工具的任务不给）
+    const cred = t.tools === '' ? { env: {}, prompt: '' } : credentials(cwd);
+    // 等人处理（登录、付款）最多 40 分钟，工具调用不能先超时
+    const env = { ...cliEnv(), ...cred.env, MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000) };
     const proc = spawn(
       claudeBin(),
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
       ['-p', prompt, ...(resumeSession ? ['--resume', resumeSession] : []),
         '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--max-turns', String(t.maxTurns),
-        '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY + (EVOLVE_TASKS[task] && skills?.settings().evolve ? '\n' + EVOLVE_TASKS[task] : '') + (String(lb?.tools ?? t.tools ?? BUILTIN_TOOLS.join(',')).split(',').includes('Read') || (t.tools === '') ? '' : '\n' + SKILL_READ_HINT),
-        '--permission-mode', 'dontAsk', '--tools', lb?.tools ?? t.tools ?? BUILTIN_TOOLS.join(','),
-        '--allowedTools', (lb?.allowed ?? t.allowed ?? ALLOWED_TOOLS).join(','), '--disallowedTools', (lb?.denied ?? t.denied ?? DENIED_TOOLS).join(','),
-        ...(lb?.args || []),
+        '--append-system-prompt', [LANG_PROMPTS[uiLang()], CONTENT_OUTPUT_POLICY, t.tools !== '' && skills?.settings().evolve ? EVOLVE : '', cred.prompt].filter(Boolean).join('\n'),
+        '--permission-mode', 'dontAsk', '--tools', t.tools ?? ALL_TOOLS.join(','),
+        ...(t.tools === '' ? [] : ['--allowedTools', ALLOWED_TOOLS.join(',')]),
         ...(t.schema ? ['--json-schema', JSON.stringify(t.schema)] : [])],
-      { cwd: lb?.cwd || cwd, env, stdio: ['ignore', 'pipe', 'pipe'] },
+      { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     const prev = current[lane];
     current[lane] = { id, proc, stopped: prev?.id === id ? prev.stopped : false, say: prev?.id === id ? prev.say : null };

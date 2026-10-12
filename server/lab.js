@@ -119,16 +119,12 @@ export function createLab({ root, store }) {
   const dirOf = (itemId) => path.join(root, 'videos', `lab-${itemId}`);
   const stamp = () => Date.now().toString(36);
 
-  // 调研任务开跑前：建实验目录，把在用的技能全部复制进去（沙盒读不到项目目录；复制，不是链接：改了也只改到副本，
-  // 调研要改进技能用 improve_skill 提建议）
+  // 调研任务开跑前：建好实验目录（调研和别的运行一样在项目目录里跑，用的是同一份技能）。
+  // 以前在沙盒里跑时复制进来的技能副本删掉，免得和在用的那份混淆
   function prepare(itemId) {
     const dir = dirOf(itemId);
     fs.mkdirSync(path.join(dir, 'media'), { recursive: true });
-    for (const f of ['.npmrc', '.gitconfig']) if (!fs.existsSync(path.join(dir, f))) fs.writeFileSync(path.join(dir, f), '');
-    const skills = path.join(dir, '.claude', 'skills');
-    fs.rmSync(skills, { recursive: true, force: true });
-    const live = path.join(root, '.claude', 'skills');
-    if (fs.existsSync(live)) fs.cpSync(live, skills, { recursive: true, filter: (p) => !/(^|\/)(node_modules|\.git)(\/|$)/.test(path.relative(live, p)) });
+    fs.rmSync(path.join(dir, '.claude', 'skills'), { recursive: true, force: true });
     return dir;
   }
 

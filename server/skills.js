@@ -213,7 +213,7 @@ export function createSkills({ root, store }) {
       conflicts.push(f.path);
     }
     if (conflicts.length) throw bad(`这几个文件在这之后又被改过，合不上：${conflicts.join('、')}。先看看现在的版本再决定`, 409);
-    for (const [p, b] of plan) writeFile(p, b);
+    for (const [p, b] of plan) { writeFile(p, b); syncRunSnapshots(path.relative(LIVE, p), b); }
   }
   const dropWork = (id) => { for (const d of ['start', 'draft', 'old', 'new']) fs.rmSync(path.join(cdir(id), d), { recursive: true, force: true }); };
   // 有冲突、由 Claude 合的出厂更新总是先给用户看
@@ -341,7 +341,7 @@ export function createSkills({ root, store }) {
     try { return await tidy(); } catch { return null; }
   }
 
-  // 生成、修改视频运行时 Claude 可以直接改在用的技能：开跑前存一份，跑完对比
+  // 每次运行 Claude 都可以直接改在用的技能：开跑前存一份，跑完对比
   const runDir = (runId) => path.join(CHANGES, `run-${runId}`);
   function runBegin(runId) {
     if (!settings().evolve || fs.existsSync(runDir(runId))) return;
@@ -351,18 +351,22 @@ export function createSkills({ root, store }) {
     const snap = runDir(runId);
     if (!fs.existsSync(snap)) return null;
     try {
-      if (!changed(snap, LIVE).length) return null;
+      const rels = changed(snap, LIVE);
+      if (!rels.length) return null;
       const id = newId();
       fs.mkdirSync(cdir(id), { recursive: true });
-      await save(id, { source: 'run', status: 'working', createdAt: Date.now(), fromRun: runId, files: [], title: '生成视频时发现的', ...meta });
-      return await settle(id, snap, LIVE, { live: true });
+      await save(id, { source: 'run', status: 'working', createdAt: Date.now(), fromRun: runId, files: [], title: '运行时改的', ...meta });
+      const r = await settle(id, snap, LIVE, { live: true });
+      // 同时在跑的其他运行：这些文件以现在的样子为准，免得算成它们改的
+      for (const rel of rels) syncRunSnapshots(rel, buf(path.join(LIVE, rel)), runId);
+      return r;
     } finally {
       fs.rmSync(snap, { recursive: true, force: true });
     }
   }
-  // 用户在页面上改的时候，正在跑的视频运行的快照也跟着改，免得算成 Claude 改的
-  function syncRunSnapshots(rel, b) {
-    for (const d of fs.existsSync(CHANGES) ? fs.readdirSync(CHANGES).filter((x) => x.startsWith('run-')) : []) {
+  // 技能在运行之外被改了（你在页面上改、通过或撤回一条改动、另一次运行改的）：正在跑的运行的快照也跟着改，免得算成它们改的
+  function syncRunSnapshots(rel, b, exceptRun) {
+    for (const d of fs.existsSync(CHANGES) ? fs.readdirSync(CHANGES).filter((x) => x.startsWith('run-') && x !== `run-${exceptRun}`) : []) {
       const p = path.join(CHANGES, d, rel);
       if (b === null) fs.rmSync(p, { force: true }); else { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, b); }
     }
