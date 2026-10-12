@@ -144,7 +144,7 @@ export function createSkills({ root, store }) {
     const disabled = settings().disabled.includes(name) && fs.existsSync(path.join(DISABLED, name));
     const live = disabled ? path.join(DISABLED, name) : path.join(LIVE, name);
     const hasDefault = fs.existsSync(def);
-    const hLive = hash(live), hBase = fs.existsSync(base) ? hash(base) : null;
+    const hLive = hash(live), hBase = fs.existsSync(base) ? hash(base) : null, hDef = hasDefault ? hash(def) : null;
     const text = read(live) || read(def);
     return {
       name,
@@ -152,8 +152,9 @@ export function createSkills({ root, store }) {
       kind: kindOf(text),
       origin: hasDefault ? 'default' : 'custom', // 出厂的 / 你自己加的
       enabled: !disabled,
-      modified: hasDefault ? hLive !== hBase : true,
-      update: hasDefault && hBase !== null && hash(def) !== hBase, // 出厂版本有更新还没合进来（一般是有冲突、等你确认）
+      // 和现在的出厂版本一模一样的，就算出厂、没有要合并的（比如你的改动已经被收进了出厂版本，还没等到下次启动对账）
+      modified: hasDefault ? hLive !== hBase && hLive !== hDef : true,
+      update: hasDefault && hBase !== null && hDef !== hBase && hLive !== hDef, // 出厂版本有更新还没合进来（一般是有冲突、等你确认）
       files: files(live),
     };
   }
