@@ -1491,7 +1491,7 @@ async function loadSkills(){
     const [list,set]=await Promise.all([api('GET','/api/skills'),api('GET','/api/skill-settings')]);
     S.skills=list;S.skillSet=set;
     if(!S.skillSel)S.skillSel='changes';
-    if(S.skillSel!=='changes')await loadSkill(S.skillSel);
+    if(S.skillSel!=='changes'&&S.skillSel!=='new')await loadSkill(S.skillSel);
   }catch(e){S.skills={down:e.message||'读取失败'}}
   requestRender();
 }
@@ -1562,15 +1562,28 @@ function vChanges(){
     <div class="section-head" style="margin-top:6px"><h2>最近的改动</h2></div>
     ${done.length?done.map(changeCard).join(''):'<div class="empty">还没有改动记录。</div>'}`;
 }
+// 加技能：一般说一句让 Claude 起草（会想清楚放流程、做法还是工具，写好各环节的文件，给你确认）；也可以自己从空白写
+function vNewSkill(){
+  return `<div class="panel grid" style="gap:8px"><div class="label">要一个什么技能，说一句</div>
+      <p class="hint">比如「做一种图文轮播的做法：从调研到出图」「一个给视频加片头片尾的工具」。Claude 会判断它是流程、做法还是工具，起草好 SKILL.md 和要用的附录、程序，改好给你看，你点通过才加上。</p>
+      <textarea id="ideaNewSkill" rows="3" maxlength="2000" placeholder="想要的技能是做什么的、什么时候用"></textarea>
+      <div class="actions"><button class="btn primary" data-act="skill-new-idea">交给 Claude 起草</button></div></div>
+    <details class="panel"><summary>自己从空白写</summary><div class="grid" style="gap:10px;margin-top:10px">
+      <div class="two"><div class="field"><label for="newSkillName">名字（小写字母、数字、连字符）</label><input type="text" id="newSkillName" maxlength="60" placeholder="carousel-post"></div>
+        <div class="field"><label for="newSkillKind">类型</label><select id="newSkillKind"><option value="craft">做法：一种内容各环节怎么做</option><option value="tool">工具：几处都会用的程序</option><option value="flow">流程：一个环节的通用步骤</option></select></div></div>
+      <div class="field"><label for="newSkillDesc">简介（Claude 靠它决定什么时候用这个技能）</label><input type="text" id="newSkillDesc" maxlength="300" placeholder="做什么、什么时候用"></div>
+      <div class="actions"><button class="btn" data-act="skill-new-blank">建好，去写正文</button></div></div></details>`;
+}
 function vSkills(){
   const L=S.skills;
   if(!L)return '<div class="empty">正在读取…</div>';
   if(L.down)return `<div class="empty"><strong>读取技能失败</strong>${esc(L.down)}</div>`;
   const pending=chgList(c=>c.status==='pending').length;
   const group=k=>{const xs=L.filter(x=>x.kind===k);return xs.length?`<div class="sk-group faint">${SKILL_KIND[k]}</div>`+xs.map(x=>`<button class="chan-tab" role="tab" aria-selected="${S.skillSel===x.name}" data-act="skill-sel" data-k="${esc(x.name)}"><b class="no-tr">${esc(x.name)}</b>${skillPill(x)}</button>`).join(''):''};
-  const nav=`<button class="chan-tab" role="tab" aria-selected="${S.skillSel==='changes'}" data-act="skill-sel" data-k="changes"><b>技能改动</b>${pending?`<span class="pill warn"><i></i>${pending} 条等你</span>`:''}</button>${group('flow')}${group('craft')}${group('tool')}`;
+  const nav=`<button class="chan-tab" role="tab" aria-selected="${S.skillSel==='changes'}" data-act="skill-sel" data-k="changes"><b>技能改动</b>${pending?`<span class="pill warn"><i></i>${pending} 条等你</span>`:''}</button>${group('flow')}${group('craft')}${group('tool')}<button class="chan-tab" role="tab" aria-selected="${S.skillSel==='new'}" data-act="skill-sel" data-k="new"><b>＋ 新技能</b></button>`;
   let body;
   if(S.skillSel==='changes')body=vChanges();
+  else if(S.skillSel==='new')body=vNewSkill();
   else{
     const cur=S.skillCur&&S.skillCur.name===S.skillSel?S.skillCur:null;
     if(!cur)body='<div class="panel"><p class="hint">正在读取…</p></div>';
@@ -1603,6 +1616,14 @@ function vSkills(){
 async function skillAction(k,b){
   try{
     if(k==='idea'){const el=$('#'+b.dataset.k);const text=(el?.value||'').trim();if(text.length<2)return toast('先写一句想改什么');b.disabled=true;await api('POST','/api/skill-changes/idea',{text});el.value='';toast('交给 Claude 了，改好会在「技能 → 技能改动」里等你确认');return}
+    if(k==='new-idea'){const el=$('#ideaNewSkill');const text=(el?.value||'').trim();if(text.length<2)return toast('先写一句要什么技能');b.disabled=true;await api('POST','/api/skill-changes/idea',{text:'新建一个技能：'+text});el.value='';S.skillSel='changes';toast('交给 Claude 起草了，好了会在「技能改动」里等你确认');await loadSkills();return}
+    if(k==='new-blank'){
+      const name=($('#newSkillName')?.value||'').trim(),kind=$('#newSkillKind')?.value||'craft',desc=($('#newSkillDesc')?.value||'').trim();
+      if(!/^[a-z0-9][a-z0-9-]{0,60}$/.test(name))return toast('名字只能用小写字母、数字和连字符');
+      if(!desc)return toast('写一句简介：做什么、什么时候用');
+      const pre={craft:'做法：',tool:'工具：',flow:''}[kind];
+      const content=`---\nname: ${name}\ndescription: ${pre}${desc.replace(/^(做法|工具)：/,'')}\n${kind==='flow'?'':`metadata:\n  kind: ${kind}\n`}---\n\n# ${name}\n\n`;
+      await api('POST','/api/skills',{name,content});S.skillSel=name;S.skillFile={name,path:'SKILL.md'};toast('建好了，接着写正文');await loadSkills();return}
     if(k==='tidy'){await api('POST','/api/skill-changes/tidy');toast('已开始整理，好了会出现在下面');return}
     if(k==='evolve'){S.skillSet=await api('PUT','/api/skill-settings',{evolve:b.checked});toast(b.checked?'自我进化已打开':'自我进化已关闭');render();return}
     const cur=S.skillCur;if(!cur)return;const name=cur.name;const url='/api/skills/'+encodeURIComponent(name);
@@ -1918,7 +1939,7 @@ document.addEventListener('click',e=>{
     case 'yt-key-save':ytKeySave();break;
     case 'yt-key-del':arm(b,'确认删除',async()=>{try{await api('DELETE','/api/hs/youtube/key');toast('已删除 key')}catch(e){toast(e.message||'删除失败')}await Promise.all([loadYtQuota(),loadFeed()])});break;
     case 'curate':agentRun('curate');break;
-    case 'skill-sel':S.skillSel=k;S.skillCur=null;S.skillFileCur=null;render();if(k==='changes')loadSkills();else loadSkill(k);break;
+    case 'skill-sel':S.skillSel=k;S.skillCur=null;S.skillFileCur=null;render();if(k==='changes'||k==='new')loadSkills();else loadSkill(k);break;
     case 'goto-changes':S.tab='skills';S.skillSel='changes';try{localStorage.setItem('wb.tab','skills')}catch(_){};history.replaceState(null,'','#skills');render();window.scrollTo(0,0);loadSkills();break;
     case 'skill-file':S.skillFile={name:S.skillCur.name,path:k};S.skillFileCur=null;render();loadSkillFile();break;
     case 'skill-save':skillAction('save',b);break;
@@ -1928,6 +1949,8 @@ document.addEventListener('click',e=>{
     case 'skill-evolve':skillAction('evolve',b);break;
     case 'skill-idea':skillAction('idea',b);break;
     case 'skill-tidy':skillAction('tidy',b);break;
+    case 'skill-new-idea':skillAction('new-idea',b);break;
+    case 'skill-new-blank':skillAction('new-blank',b);break;
     case 'skill-discard':if(S.skillDraft&&S.skillFileCur)delete S.skillDraft[S.skillFileCur.name+'/'+S.skillFileCur.path];render();break;
     case 'chg-diff':case 'chg-apply':case 'chg-reject':case 'chg-refine':case 'chg-retry':chgAction(act.slice(4),k,b);break;
     case 'chg-revert':arm(b,'确认撤回',()=>chgAction('revert',k,b));break;
