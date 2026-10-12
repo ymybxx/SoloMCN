@@ -607,7 +607,10 @@ function schedule(spec, dir) {
   // 每 stageHold 拍换到此刻最看得清他的一场，换装用扫描光带转场盖住接缝，不要求动作贴合；进出这一段也一样
   const stage = (opt.stage || []).filter((r) => Array.isArray(r) && r.length === 2);
   const inStage = (t) => stage.some(([a, b]) => t >= a - 0.01 && t < b);
-  const minHoldAt = B.map((t) => { if (inStage(t)) return opt.stageHold ?? 8; if (inFast(t)) return opt.fastHold ?? 2; const e = energyAt(t); return Math.max(opt.minHold, e >= 3 ? 4 : e === 2 ? 6 : 8); });
+  // 分身阵列段（opt.array: [{ span: [起, 止], n: 3 }]）：整段一个画面，几场并排；进去的那一刀不挑场次，出来的那一刀要换到能直接锁定的一场
+  const arrays = (opt.array || []).filter((x) => Array.isArray(x?.span) && x.span.length === 2);
+  const inArr = (t) => arrays.some(({ span: [a, b] }) => t >= a - 0.01 && t < b);
+  const minHoldAt = B.map((t, i) => { if (inArr(t) || (i > 0 && inArr(B[i - 1]))) return 1; if (inStage(t)) return opt.stageHold ?? 8; if (inFast(t)) return opt.fastHold ?? 2; const e = energyAt(t); return Math.max(opt.minHold, e >= 3 ? 4 : e === 2 ? 6 : 8); });
   const bonusAt = B.map((t) => opt.bonus + (energyAt(t) >= 2 ? 0.04 : 0));
   const motion = posesOf(spec, dir);
   const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
@@ -624,9 +627,9 @@ function schedule(spec, dir) {
   // 快切段里只要求看得清他（认得准、主要关节看得见）而且能放回画面中间，大小差一些也行
   const clearSeg = (s, off, a, b) => { const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off); return xs.length >= 2 && xs.filter((x) => L.centerable(x, 0.1)).length / xs.length >= 0.65; };
   const seenSeg = (s, off, a, b) => { const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off); return xs.length >= 2 && xs.filter((x) => x.ok && x.joints.filter(Boolean).length >= 6).length / xs.length >= 0.6; };
-  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); if (off == null) return null; if (inStage(t)) return seenSeg(s, off, t, e) ? off : null; return (inFast(t) ? clearSeg(s, off, t, e) : L.usableSeg(s, off, t, e)) && idOk(s, t + off, e + off) ? off : null; }));
+  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); if (off == null) return null; if (inArr(t)) return off; if (inStage(t)) return seenSeg(s, off, t, e) ? off : null; return (inFast(t) ? clearSeg(s, off, t, e) : L.usableSeg(s, off, t, e)) && idOk(s, t + off, e + off) ? off : null; }));
   // 舞台模式段的边界必须换一刀（这一段整段不锁定，前后整段锁定）
-  const stageEdge = B.map((t, i) => i > 0 && inStage(t) !== inStage(B[i - 1]));
+  const stageEdge = B.map((t, i) => i > 0 && (inStage(t) !== inStage(B[i - 1]) || inArr(t) !== inArr(B[i - 1])));
   // 造型要轮得全：能用的时间越少的场次，换进去时奖励越多（不然这几场一次都排不上）
   const okN = okAt.map((r) => r.filter((v) => v != null).length), okMax = Math.max(...okN);
   const rare = okN.map((n) => (opt.variety ?? 0.06) * (1 - n / okMax));
@@ -640,6 +643,13 @@ function schedule(spec, dir) {
     if (sw.has(key)) return sw.get(key);
     const oa = okAt[a][i - 1] ?? okAt[a][i], ob = okAt[b][i];
     let r = { cost: Infinity, why: oa == null ? 'out' : ob == null ? 'in' : '' };
+    if (inArr(B[i]) && inArr(B[i - 1])) { sw.set(key, r); return r; } // 阵列段中间不换
+    if (inArr(B[i]) && ob != null) { r = { cost: -opt.bonus, shift: 0, dist: null, arrayIn: true }; sw.set(key, r); return r; }
+    if (inArr(B[i - 1])) {
+      // 从阵列出来：换到这一刻就能锁定的一场（阵列最后一列放大成全屏，正好接上）
+      if (ob != null && L.edgeOk(srcs[b], ob, B[i]) && idOk(srcs[b], B[i] + ob - 0.3, B[i] + ob + 1.0)) r = { cost: -opt.bonus, shift: 0, dist: null, arrayOut: true };
+      sw.set(key, r); return r;
+    }
     if (inStage(B[i]) || inStage(B[i - 1])) {
       // 舞台模式里换场不看动作；这一拍谁都看不清时也允许换（边界必须换一刀），只是贵一些
       const obb = ob ?? usable(srcs[b], B[i], B[i + 1] ?? to);
@@ -734,19 +744,58 @@ function schedule(spec, dir) {
   const path_ = [best];
   for (let i = back.length - 1; i >= 0; i--) path_.unshift(back[i][path_[0]]);
   const decode = (k) => { const h = k % (H + 1); const r = (k - h) / (H + 1); const p = r % (N + 1); return { s: (r - p) / (N + 1), p, h }; };
-  const cuts = [];
+  const cuts = [], arrCuts = [];
   for (let i = 0; i < path_.length; i++) {
     const d = decode(path_[i]);
     if (i === 0 || d.h === 1) {
       const sObj = srcs[d.s];
       const r = i > 0 ? swCost(decode(path_[i - 1]).s, d.s, i) : null;
       const t0 = i === 0 ? from : B[i];
+      if (r?.arrayIn) arrCuts.push(cuts.length);
       cuts.push({ at: r3(t0), src: sObj.id, offset: okAt[d.s][i] ?? usable(sObj, t0, B[i + 1] ?? to) ?? sObj.offset, ...(r?.shift ? { nudge: r.shift } : {}), ...(r?.dist != null ? { motion: r3(r.dist) } : {}), ...(inStage(t0) ? { free: true } : {}), ...(r?.stage ? { stageCut: true } : {}) });
     }
   }
   // 换装默认用人形变形过渡（5 帧），可以用 schedule.fx 改（比如 "cut" 硬切）
   for (const [k, c] of cuts.entries()) if (k > 0 && opt.fx !== 'cut') c.fx = c.stageCut ? { type: opt.stageFx || 'scan', frames: opt.stageFxFrames || 12 } : { type: opt.fx || 'morph', frames: opt.fxFrames || 5 };
   for (const c of cuts) delete c.stageCut;
+  // 舞台段：按 hold 拍分成时间窗，每个窗换成此刻最清楚（认得准、正脸、没被挡）的一场，他放在画面中间；
+  // 两场都很清楚、造型又不同时，偶尔并排成两列（分身）。第一个窗是上一刀的场次，最后一个窗是下一刀的场次
+  for (const ci of arrCuts) {
+    const c = cuts[ci], prev = cuts[ci - 1], next = cuts[ci + 1];
+    const def = arrays.find(({ span: [a, b] }) => c.at >= a - 0.01 && c.at < b);
+    if (!def || !prev || !next) continue;
+    const hold = def.hold || 4, end = next.at;
+    const winB = B.filter((t) => t >= c.at - 0.01 && t < end - 0.01);
+    const seen = (sObj, a, b) => { const off = usable(sObj, a, b); if (off == null) return { r: 0, off: null }; const xs = motion[sObj.id].samples.filter((x) => x.t >= a + off && x.t <= b + off); return { r: xs.length ? xs.filter((x) => x.ok && x.front && x.joints.filter(Boolean).length >= 7).length / xs.length : 0, off }; };
+    const lookOf = (id) => look[srcs.findIndex((x) => x.id === id)];
+    const wins = [];
+    for (let w = 0; w < winB.length; w += hold) wins.push([winB[w], winB[w + hold] ?? end]);
+    if (wins.length > 1 && wins.at(-1)[1] - wins.at(-1)[0] < 0.6) { const l = wins.pop(); wins.at(-1)[1] = l[1]; }
+    const out = [];
+    let lastSplit = -9;
+    for (const [wi, [a, b]] of wins.entries()) {
+      const col = (id) => ({ src: id, offset: usable(srcs.find((x) => x.id === id), a, b) ?? srcs.find((x) => x.id === id).offset });
+      if (wi === 0) { out.push({ from: r3(a), to: r3(b), cols: [col(prev.src)] }); continue; }
+      if (wi === wins.length - 1) { out.push({ from: r3(a), to: r3(b), cols: [col(next.src)] }); continue; }
+      const before = new Set(out.at(-1).cols.map((x) => lookOf(x.src)));
+      const cand = srcs.map((x) => ({ id: x.id, look: lookOf(x.id), ...seen(x, a, b) })).filter((x) => x.off != null).sort((p, q) => q.r - p.r);
+      // 每个窗都换造型：优先挑和上一个窗不同造型、又看得清的
+      // 先保证看得清：只在和最清楚的那场差不多清楚（差 0.1 以内）的里面挑换造型的
+      const top = cand[0]?.r ?? 0;
+      const fresh = cand.filter((x) => !before.has(x.look) && x.r >= top - 0.1);
+      const pool = fresh.length ? fresh : cand;
+      const first = pool[0];
+      const second = pool.find((x) => x.look !== first.look && x.r >= 0.8);
+      if (first.r >= 0.8 && second && wi - lastSplit >= 3 && wi > 1 && wi < wins.length - 2 && (def.split ?? true)) { out.push({ from: r3(a), to: r3(b), cols: [col(first.id), col(second.id)] }); lastSplit = wi; }
+      else out.push({ from: r3(a), to: r3(b), cols: [col(first.id)] });
+    }
+    // 相邻两个窗是同一场就并成一个（不在同一场里自己转场）
+    const merged = [];
+    for (const w of out) { const l = merged.at(-1); if (l && l.cols.length === w.cols.length && l.cols.every((x, k) => x.src === w.cols[k].src)) l.to = w.to; else merged.push(w); }
+    c.array = { windows: merged, ...(def.colTorso ? { colTorso: def.colTorso } : {}) };
+    c.fx = { type: 'cut', frames: 1 }; next.fx = { type: 'cut', frames: 1 };
+    delete c.motion;
+  }
   spec.cuts = cuts;
   spec.lock.torso = L.T;
   return { cuts: cuts.length, cost: r3(bv), motions: cuts.filter((c) => c.motion != null).map((c) => c.motion) };
@@ -778,6 +827,47 @@ function compare(spec, dir, times, out) {
 // 直拍的镜头跟着主角走，主角又一直是同一个造型，所以用「整个人的外观（发色、衣服）」+「离画面中心多近」+「前后帧连贯」认人。
 const SWIFT = path.join(path.dirname(new URL(import.meta.url).pathname), 'persons.swift');
 const LOCKFX = path.join(path.dirname(new URL(import.meta.url).pathname), 'lockfx.swift');
+const ARRAY_SWIFT = path.join(path.dirname(new URL(import.meta.url).pathname), 'array.swift');
+function arrayBin() {
+  const st = fs.statSync(ARRAY_SWIFT);
+  const bin = path.join(os.tmpdir(), `montage-array-${Math.round(st.mtimeMs)}`);
+  if (!fs.existsSync(bin)) {
+    const r = spawnSync('swiftc', ['-O', ARRAY_SWIFT, '-o', bin], { encoding: 'utf8' });
+    if (r.status !== 0) die(`编译 array.swift 失败：${r.stderr}`);
+  }
+  return bin;
+}
+function videoSize(file) {
+  const r = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file], { encoding: 'utf8' });
+  const [w, h] = r.stdout.trim().split(',').map(Number);
+  return [w || 1920, h || 1080];
+}
+// 各片段在用到的时段里的平均颜色（每秒取 2 帧），拉到所有片段的平均值；和 lockfx 原来的算法一样（0.7 次方、限制在 0.87–1.15）
+function gradeGains(spec, dir, segs, fps, total) {
+  const srcs = new Map(spec.sources.map((s) => [s.id, s]));
+  const ranges = new Map();
+  for (let k = 0; k < segs.length; k++) {
+    const { c, piece } = segs[k];
+    const f0 = Math.round(segs[k].out * fps), f1 = k + 1 < segs.length ? Math.round(segs[k + 1].out * fps) : total;
+    const t0 = piece.from + (f0 / fps - piece.out), t1 = t0 + (f1 - f0) / fps;
+    const items = c.array ? c.array.windows.flatMap((w) => w.cols.map((sl) => ({ src: sl.src, a: Math.max(t0, w.from) + sl.offset, b: Math.min(t1, w.to) + sl.offset }))) : [{ src: c.src, a: t0 + (c.offset ?? srcs.get(c.src).offset), b: t1 + (c.offset ?? srcs.get(c.src).offset) }];
+    for (const it of items) { if (it.b <= it.a) continue; const f = path.resolve(dir, srcs.get(it.src).file); if (!ranges.has(f)) ranges.set(f, []); ranges.get(f).push([it.a, it.b]); }
+  }
+  const means = new Map();
+  for (const [f, rs] of ranges) {
+    let sum = [0, 0, 0], n = 0;
+    for (const [a, b] of rs) {
+      const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(Math.max(0, a)), '-t', String(b - a), '-i', f, '-vf', 'fps=2,scale=16:9', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1 << 26 });
+      const buf = r.stdout || Buffer.alloc(0);
+      for (let i = 0; i + 2 < buf.length; i += 3) { sum[0] += buf[i] / 255; sum[1] += buf[i + 1] / 255; sum[2] += buf[i + 2] / 255; n++; }
+    }
+    if (n) means.set(f, sum.map((v) => v / n));
+  }
+  if (!means.size) return null;
+  const target = [0, 1, 2].map((c) => [...means.values()].reduce((a, m) => a + m[c], 0) / means.size);
+  return Object.fromEntries([...means].map(([f, m]) => [f, [0, 1, 2].map((c) => r3(Math.min(1.15, Math.max(0.87, Math.pow(target[c] / Math.max(m[c], 0.01), 0.7)))))]));
+}
+
 function lockfxBin() {
   const st = fs.statSync(LOCKFX);
   const bin = path.join(os.tmpdir(), `montage-lockfx-${Math.round(st.mtimeMs)}`);
@@ -952,7 +1042,7 @@ function resolveSubject(samples,{aspect=16/9,none=3.0,gap=2.5,sure=1.4,loose=2.6
   });
   return samples.map((s,i)=>{const c=path[i];
     if(c.none)return{t:s.t,ok:false};
-    return{t:s.t,ok:ok[i],neck:c.neck,torso:c.torso,joints:c.joints,id:Math.round(c.idz*100)/100};});
+    return{t:s.t,ok:ok[i],neck:c.neck,torso:c.torso,joints:c.joints,front:c.front?1:0,id:Math.round(c.idz*100)/100};});
 }
 
 // 每条片段的骨架，缓存在 pose/<id>.json（逐帧认好的主角，v:2）；画面里所有人的原始数据在 pose/<id>.cands.json
@@ -965,7 +1055,7 @@ function posesOf(spec, dir) {
     const file = path.join(dir, 'pose', `${s.id}.json`);
     const cfile = path.join(dir, 'pose', `${s.id}.cands.json`);
     let cached = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
-    if (cached?.v !== 2) {
+    if (cached?.v !== 3) {
       if (!fs.existsSync(cfile)) {
         const job = path.join(os.tmpdir(), `pose-job-${process.pid}-${s.id}.json`);
         fs.writeFileSync(job, JSON.stringify({ file: path.resolve(dir, s.file), step: 0.1, fpEvery: 5 }));
@@ -974,7 +1064,7 @@ function posesOf(spec, dir) {
         if (r.status !== 0) die(`骨架提取失败：${s.file}\n${r.stderr}`);
         fs.writeFileSync(cfile, r.stdout);
       }
-      cached = { v: 2, samples: resolveSubject(JSON.parse(fs.readFileSync(cfile, 'utf8')).samples) };
+      cached = { v: 3, samples: resolveSubject(JSON.parse(fs.readFileSync(cfile, 'utf8')).samples) };
       fs.writeFileSync(file, JSON.stringify(cached));
     }
     const samples = cached.samples;
@@ -1229,6 +1319,8 @@ function render(spec, dir, out) {
     scanPeople(spec, dir);
     const motion = posesOf(spec, dir);
     const jobSegs = [];
+    // 统一调色：各片段在用到的时段里的平均颜色，拉到同一个目标（lockfx 和分身阵列用同一套增益，不会在进出阵列时跳色）
+    const gains = lock.grade ?? lock.mode === 'cut' ? gradeGains(spec, dir, segs, fps, total) : null;
     for (let k = 0; k < segs.length; k++) {
       const { c, piece } = segs[k];
       const s = srcs.get(c.src) || die(`切点 ${c.at} 用了不存在的片段 ${c.src}`);
@@ -1240,6 +1332,37 @@ function render(spec, dir, out) {
       const tr = JSON.parse(fs.readFileSync(path.join(dir, 'track', `${s.id}.json`), 'utf8')).samples
         .filter((x) => x.ok && x.w != null && x.t >= st - 0.3 && x.t <= st + dur + 0.5).map((x) => [r3(x.t - st), x.cx, x.cy, x.w, x.h]);
       const mid = tr.length ? tr[Math.floor(tr.length / 2)] : null;
+      if (c.array && segs[k].isStart) {
+        const clip = path.join(tmp, `array-${k}.mp4`);
+        const zOf = (cut, a, b) => {
+          const so = srcs.get(cut.src), xs = motion[so.id].samples.filter((x) => x.ok && x.t >= a + (cut.offset ?? so.offset) && x.t <= b + (cut.offset ?? so.offset)).map((x) => x.torso).sort((p, q) => p - q);
+          const [sw0, sh0] = videoSize(path.resolve(dir, so.file)), s0 = Math.max(W / sw0, H / sh0);
+          const p75 = (xs[Math.floor(xs.length * 0.75)] ?? 0.3) * sh0;
+          return s0 * Math.min(lock.zoomMax ?? 1.45, Math.max(lock.zoomMin ?? 1.1, (spec.lock.torso * H) / (p75 * s0)));
+        };
+        const prevCut = segs[k - 1]?.c, nextCut = segs[k + 1]?.c;
+        const tAt = piece.from + (f0 / fps - piece.out);
+        const fr = (t) => Math.round((t - tAt) * fps);
+        const wins = c.array.windows;
+        const aj = {
+          out: clip, size: [W, H], fps, frames: f1 - f0, y: lock.y ?? 0.3, fullTorso: spec.lock.torso, colTorso: c.array.colTorso ?? 0.3, tr: Math.round(fps * 0.4),
+          ...(spec.theme?.colors ? { theme: spec.theme.colors } : {}), ...(gains ? { gains } : {}),
+          windows: wins.map((w, wi) => ({
+            from: Math.max(0, fr(w.from)), to: wi + 1 < wins.length ? fr(wins[wi + 1].from) - 1 : f1 - f0 - 1,
+            cols: w.cols.map((cl) => {
+              const so = srcs.get(cl.src), start = tAt + cl.offset;
+              const scale = wi === 0 && prevCut ? zOf(prevCut, prevCut.at, tAt) : wi === wins.length - 1 && nextCut ? zOf(nextCut, nextCut.at, Math.min(to, nextCut.at + 4)) : undefined;
+              return { file: path.resolve(dir, so.file), start: r3(start), ...(scale ? { scale } : {}), necks: motion[so.id].samples.filter((x) => x.ok && x.t >= start + w.from - tAt - 0.5 && x.t <= start + w.to - tAt + 1).map((x) => [r3(x.t - start), x.neck[0], x.neck[1], x.torso]) };
+            }),
+          })),
+        };
+        fs.writeFileSync(path.join(tmp, `array-${k}.json`), JSON.stringify(aj));
+        const ar = spawnSync(arrayBin(), [path.join(tmp, `array-${k}.json`)], { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'inherit'] });
+        if (ar.status !== 0) die('分身阵列渲染失败');
+        jobSegs.push({ file: clip, start: 0, frames: f1 - f0, hint: null, track: [], necks: [], free: true, array: true, strong: false, keep: [], fx: { type: 'cut', frames: 1 } });
+        table.push({ at: r3(tAt), out: r3(f0 / fps), dur: r3(dur), src: 'stage:' + c.array.windows.map((w) => w.cols.map((x) => x.src).join('+')).join('>'), srcTime: 0, label: '舞台段' });
+        continue;
+      }
       const necks = motion ? motion[s.id].samples.filter((x) => x.ok && x.t >= st - 0.4 && x.t <= st + dur + 0.6).map((x) => [r3(x.t - st), x.neck[0], x.neck[1]]) : [];
       jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, necks, free: !!c.free, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [],
         ...(c.fx && segs[k].isStart ? { fx: c.fx } : spec.cuts.some((x) => x.fx) ? { fx: { type: 'cut', frames: 1 } } : {}) });
@@ -1255,6 +1378,7 @@ function render(spec, dir, out) {
       flash: { light: 0.6, strong: 1.5, frames: 5, punch: 0.06, ...(lock.flash || {}) },
       transition: { type: lock.transition, frames: lock.frames },
       ...(spec.theme?.colors ? { theme: { colors: spec.theme.colors } } : {}),
+      ...(gains ? { gains } : {}),
       segments: jobSegs,
     };
     fs.writeFileSync(path.join(tmp, 'job.json'), JSON.stringify(job));

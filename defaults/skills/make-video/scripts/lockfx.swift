@@ -19,7 +19,7 @@ struct Job: Decodable {
   // track：这一刀里认人得到的主角框 [相对这一刀开头的秒数, cx, cy, w, h]（素材坐标 0–1），用来认准是他
   // necks：逐帧认好的主角脖子位置 [相对这一刀开头的秒数, x, y]（素材坐标 0–1）。有它就只跟这个人，认不到就补插值，绝不改跟旁边的人
   // fx：这一刀开头的换装转场（cut 硬切 / dissolve 叠化 / scan 扫描换装 / echo 残影换装 / gate 节拍光门 / whip 动势甩切 / pulse 色彩脉冲 / flash 闪白），不填就用全局 transition
-  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let necks: [[Double]]?; let free: Bool?; let strong: Bool?; let keep: [[Double]]?; let fx: Transition? }
+  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let necks: [[Double]]?; let free: Bool?; let array: Bool?; let strong: Bool?; let keep: [[Double]]?; let fx: Transition? }
   struct Theme: Decodable { let colors: [String]? }
   let size: [Int]; let fps: Double; let out: String
   let target: Target; let zoomMin: Double; let zoomMax: Double; let smooth: Double
@@ -28,6 +28,7 @@ struct Job: Decodable {
   // grade：各场统一调色；matchCut：换装时在前后几帧里挑新旧两场姿态最像的那一帧来切
   let mode: String?; let ease: Double?; let grade: Bool?; let matchCut: Int?
   let theme: Theme?
+  let gains: [String: [Double]]? // 由 montage 统一算好的各片段调色增益（有就不再自己算）
 }
 
 func fail(_ m: String) -> Never { FileHandle.standardError.write((m + "\n").data(using: .utf8)!); exit(1) }
@@ -134,7 +135,7 @@ func fxOf(_ si: Int) -> (type: String, frames: Int) {
   return (t, max(2, job.transition?.frames ?? (job.flash?.frames ?? 6)))
 }
 // 叠化、扫描、残影、光门、甩切要用到上一刀切点之后的几帧：上一刀多分析、多渲染这些 tail 帧
-let NEEDS_TAIL: Set<String> = ["dissolve", "scan", "echo", "gate", "whip", "morph"]
+let NEEDS_TAIL: Set<String> = ["dissolve", "scan", "echo", "gate", "whip", "morph", "stripes"]
 func tailOf(_ si: Int) -> Int {
   guard si < job.segments.count - 1 else { return 0 }
   let n = fxOf(si + 1)
@@ -266,8 +267,8 @@ if M > 0 {
   }
 }
 // 统一调色：各条素材的平均颜色往全体平均靠 70%，每个通道最多调 ±15%
-var gains: [String: [Double]] = [:]
-if job.grade == true, !colorSamples.isEmpty {
+var gains: [String: [Double]] = job.gains ?? [:]
+if job.grade == true, job.gains == nil, !colorSamples.isEmpty {
   let means = colorSamples.mapValues { xs in (0..<3).map { c in xs.map { $0[c] }.reduce(0, +) / Double(xs.count) } }
   let target = (0..<3).map { c in means.values.map { $0[c] }.reduce(0, +) / Double(means.count) }
   for (f, m) in means { gains[f] = (0..<3).map { c in min(1.15, max(0.87, pow(target[c] / max(m[c], 0.01), 0.7))) } }
@@ -315,6 +316,28 @@ func transition(_ type: String, k: Int, n: Int, incoming: CIImage, prevTail: [CV
     // 只让光带本身发光（整帧加柔光会把亮背景的舞台冲白）
     let glow = band(y: y, hw: H * 0.07, C2, 0.5).applyingGaussianBlur(sigma: 18).cropped(to: frameRectAll)
     return additive(additive(o, glow), band(y: y, hw: H * 0.018, C1, 0.9))
+  case "stripes":
+    // 赛道条纹换装：三道斜条纹（主题色描边）错开一点时间从左往右推过去，条纹推过的地方已经是新造型
+    guard let old = tailImg(prevTail, k) else { return incoming }
+    let shear = CGAffineTransform(a: 1, b: 0, c: -0.36, d: 1, tx: 0, ty: 0) // 往右上斜
+    var mask = CIImage(color: .black).cropped(to: frameRectAll)
+    var edges = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: frameRectAll)
+    let bandH = H / 3
+    for b in 0..<3 {
+      let p = smooth01((t - Double(b) * 0.12) / 0.76)
+      let x1 = -W * 0.4 + p * W * 1.8
+      let y0 = Double(2 - b) * bandH // Core Image 原点在左下：第 0 道在最上面
+      let r = CGRect(x: -W * 0.4, y: y0, width: max(0, x1 + W * 0.4), height: bandH + 1)
+      let pivot = CGAffineTransform(translationX: 0, y: -(y0 + bandH / 2)).concatenating(shear).concatenating(CGAffineTransform(translationX: 0, y: y0 + bandH / 2))
+      mask = CIImage(color: .white).cropped(to: r).transformed(by: pivot).composited(over: mask)
+      if p > 0.01 && p < 0.99 {
+        let e = CGRect(x: x1 - W * 0.012, y: y0, width: W * 0.012, height: bandH + 1)
+        edges = CIImage(color: b == 1 ? C1 : C2).cropped(to: e).transformed(by: pivot).composited(over: edges)
+      }
+    }
+    mask = mask.cropped(to: frameRectAll)
+    let o = incoming.applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: old, kCIInputMaskImageKey: mask]).cropped(to: frameRectAll)
+    return edges.cropped(to: frameRectAll).composited(over: additive(o, edges.applyingGaussianBlur(sigma: 14).cropped(to: frameRectAll)))
   case "echo":
     // 残影换装：旧造型的人像染上主题色，作为两层半透明残影跟着跳，逐渐淡掉
     var o = incoming
@@ -449,7 +472,7 @@ for (si, seg) in job.segments.enumerated() {
   z = min(job.zoomMax, max(job.zoomMin, z))
   let S = s0 * z
   report.append(["i": si, "found": p.found, "frames": seg.frames, "zoom": (z * 100).rounded() / 100, "nudge": nudge[si]])
-  let gain = gains[seg.file]
+  let gain = seg.array == true ? nil : gains[seg.file] // 分身阵列已经在合成时按各自场次调过色
 
   // 第二遍：渲染
   let st2 = seg.start + Double(nudge[si]) / job.fps

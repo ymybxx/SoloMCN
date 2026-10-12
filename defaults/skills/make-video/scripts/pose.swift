@@ -124,7 +124,9 @@ while let sb = out.copyNextSampleBuffer() {
     let headX = face.isEmpty ? neck.x : face.map { $0.x }.reduce(0, +) / Double(face.count)
     let hairR = CGRect(x: headX - tx * 0.16, y: headY - torso * 0.32, width: tx * 0.32, height: torso * 0.2)
     let clothR = CGRect(x: neck.x - tx * 0.28, y: neck.y + torso * 0.12, width: tx * 0.56, height: torso * 0.6)
-    var c: [String: Any] = ["neck": [r3(neck.x), r3(neck.y)], "torso": r3(torso), "joints": joints, "hair": hueHist(buf, hairR), "cloth": hist(buf, clothR)]
+    // 正脸：鼻子和至少一只眼睛看得见（背影、低头埋脸时不算）
+    let front = p(.nose) != nil && (p(.leftEye) != nil || p(.rightEye) != nil)
+    var c: [String: Any] = ["neck": [r3(neck.x), r3(neck.y)], "torso": r3(torso), "joints": joints, "hair": hueHist(buf, hairR), "cloth": hist(buf, clothR), "front": front]
     if withFp {
       c["fp"] = featurePrint(buf, CGRect(x: neck.x - tx * 0.6, y: neck.y - torso * 0.6, width: tx * 1.2, height: torso * 2.4))
       // 脸部一块（鼻子、眼睛都看得见时）：同款衣服、同色头发的队友，脸才分得开（通用图像特征，不是人脸识别）
