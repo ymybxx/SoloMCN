@@ -1483,7 +1483,7 @@ async function loadSkills(){
   requestRender();
 }
 async function loadSkill(name){try{S.skillCur=await api('GET','/api/skills/'+encodeURIComponent(name))}catch(e){S.skillCur={err:e.message||'读取失败'}}requestRender()}
-const skillPill=x=>x.origin==='custom'?'<span class="pill"><i></i>自己加的</span>':x.update?'<span class="pill warn"><i></i>出厂说明有更新</span>':x.modified?'<span class="pill ok"><i></i>改过</span>':'<span class="pill"><i></i>出厂</span>';
+const skillPill=x=>x.origin==='custom'?'<span class="pill"><i></i>自己加的</span>':x.update&&!x.modified?'<span class="pill"><i></i>新版待重启</span>':x.update?'<span class="pill warn"><i></i>出厂说明有更新</span>':x.modified?'<span class="pill ok"><i></i>改过</span>':'<span class="pill"><i></i>出厂</span>';
 function vSkills(){
   const L=S.skills;
   if(!L)return '<div class="empty">正在读取…</div>';
@@ -1492,7 +1492,12 @@ function vSkills(){
   const nav=L.map(x=>`<button class="chan-tab" role="tab" aria-selected="${S.skillSel===x.name}" data-act="skill-sel" data-k="${esc(x.name)}"><b class="no-tr">${esc(x.name)}</b>${skillPill(x)}</button>`).join('');
   const text=cur?(S.skillDraft?.[cur.name]??cur.content):'';
   const dirty=cur&&S.skillDraft?.[cur.name]!=null&&S.skillDraft[cur.name]!==cur.content;
-  const upd=cur?.update?`<div class="panel grid" style="gap:8px;border-color:var(--warn)"><div class="label">出厂说明有新版本</div>
+  // 没改过的技能：平台重启时会自动换成新版（重启前这里先提示一下，也可以现在就换）
+  const upd=cur?.update&&!cur.modified?`<div class="panel grid" style="gap:8px"><div class="label">出厂说明有新版本</div>
+      <p class="hint">你没改过这个技能，平台下次重启时会自动换成新版。想现在就用新版，点「现在换上」。</p>
+      <div class="actions"><button class="btn primary" data-act="skill-take-new">现在换上</button></div>
+      <details><summary class="faint">看新的出厂版本</summary><pre id="skillDefault" class="skill-pre keep-scroll no-tr">${esc(cur.defaultContent||'')}</pre></details></div>`
+    :cur?.update?`<div class="panel grid" style="gap:8px;border-color:var(--warn)"><div class="label">出厂说明有新版本</div>
       <p class="hint">这个技能你改过，所以没有自动更新。可以让 Claude 把新版的改进合进你的版本（结果会先填进下面给你看），也可以直接用新版覆盖，或者保留你的版本。</p>
       <div class="actions"><button class="btn primary" data-act="skill-merge" ${S.skillBusy?'disabled':''}>${S.skillBusy==='merge'?'Claude 合并中…':'让 Claude 合并'}</button>
         <button class="btn ghost" data-act="skill-take-new">用新版覆盖</button><button class="btn ghost" data-act="skill-keep">保留我的版本</button></div>
@@ -1819,7 +1824,7 @@ document.addEventListener('click',e=>{
     case 'skill-sel':S.skillSel=k;S.skillMerged=null;S.skillCur=null;render();loadSkill(k);break;
     case 'skill-save':skillAction('save');break;
     case 'skill-reset':arm(b,'确认恢复',()=>skillAction('reset'));break;
-    case 'skill-take-new':arm(b,'确认覆盖',()=>skillAction('take-new'));break;
+    case 'skill-take-new':if(S.skillCur&&!S.skillCur.modified)skillAction('take-new');else arm(b,'确认覆盖',()=>skillAction('take-new'));break;
     case 'skill-keep':skillAction('keep');break;
     case 'skill-merge':skillAction('merge');break;
     case 'skill-accept-merged':skillAction('accept-merged');break;
