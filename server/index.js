@@ -1,7 +1,7 @@
 // 本地服务：提供页面、数据接口和 AI 接口。只监听本机地址。
 import http from 'node:http';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +17,7 @@ import { createSetupCheck } from './setupcheck.js';
 import { createYtLogin } from './ytlogin.js';
 import { createLab } from './lab.js';
 import { createCharacters } from './characters.js';
-import { runClaude } from './cli.js';
+import { runClaude, claudeBin, cliEnv } from './cli.js';
 import { captureSource } from './assets.js';
 import { createBiliSource } from './bilisource.js';
 import { watchVideo, probe } from './watch.js';
@@ -48,6 +48,7 @@ const store = await createStore(path.join(root, 'data', 'db.json'), { onChange: 
 const lab = createLab({ root, store });
 const characters = createCharacters({ root });
 const labClaudeCalls = new Map(); // 调研实验里问 Claude 的次数：内容 id:日期 -> 次数
+const labClaudeRuns = new Map(); // 调研实验里让 Claude Code 跑一次任务的次数：内容 id:日期 -> 次数
 lab.clearStale();
 // 定时清理实践占用的空间：启动一分钟后一次，之后每 6 小时一次
 const labCleanup = () => { try { const r = lab.cleanup(); if (r.done.length) console.log(`实践空间清理：${r.done.length} 项`); } catch (err) { console.error('实践空间清理出错：', err.message); } };
@@ -502,6 +503,60 @@ async function handleApi(req, res, parts) {
     } catch (err) {
       return sendError(res, 502, 'claude_failed', String(err.message || err).split('\n')[0].slice(0, 300));
     }
+  }
+  // 调研实验里要看 Claude Code 自己干一件活的完整过程（怎么一步步调工具、花多少）：沙盒里没有 claude、也连不上
+  // Anthropic，由工作台在沙盒外代跑一次。它只能在实验目录的那个子目录里读写，命令也在同样的沙盒里跑（不能联网），
+  // 不带工作台的工具；事件流原样写进实验目录里的文件，每行加上收到的时间 _t（毫秒）
+  if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts[3] === 'claude-run' && parts.length === 4 && method === 'POST') {
+    const body = await readBody(req);
+    const labDir = lab.dirOf(parts[1]);
+    const inLab = (rel, fallback) => { const p = path.resolve(labDir, String(rel || fallback)); return p === labDir || p.startsWith(labDir + path.sep) ? p : null; };
+    const dir = inLab(body.dir, '.');
+    const out = inLab(body.out, `claude-runs/${Date.now().toString(36)}.jsonl`);
+    const prompt = String(body.prompt || '').slice(0, 20_000);
+    if (!dir || !out || !existsSync(dir)) return sendError(res, 400, 'bad_request', 'dir、out 要是实验目录里的路径，dir 要先建好');
+    if (!prompt.trim()) return sendError(res, 400, 'bad_request', 'prompt 不能空');
+    const model = ['haiku', 'sonnet', 'opus'].includes(body.model) ? body.model : 'sonnet';
+    const maxTurns = Math.min(40, Math.max(1, Number(body.max_turns) || 20));
+    const TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'];
+    const tools = (Array.isArray(body.tools) && body.tools.length ? body.tools : TOOLS).filter((x) => TOOLS.includes(x));
+    const day = new Date().toISOString().slice(0, 10), key = `${parts[1]}:${day}`;
+    if ((labClaudeRuns.get(key) || 0) >= 8) return sendError(res, 429, 'limit', '这条内容今天已经让 Claude Code 跑了 8 次，用已经拿到的结果');
+    labClaudeRuns.set(key, (labClaudeRuns.get(key) || 0) + 1);
+    const settings = { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
+      filesystem: { denyRead: ['~/'], allowRead: [dir, path.dirname(realpathSync(process.execPath))], allowWrite: [dir] },
+      network: { allowedDomains: [], strictAllowlist: true } } };
+    const allowed = tools.flatMap((x) => (x === 'Read' || x === 'Edit' || x === 'Write' ? [`${x}(/${dir}/**)`] : [x]));
+    await fs.mkdir(path.dirname(out), { recursive: true });
+    const started = Date.now();
+    const result = await new Promise((resolve) => {
+      const proc = spawn(claudeBin(), ['-p', prompt, '--model', model, '--output-format', 'stream-json', '--verbose', '--max-turns', String(maxTurns),
+        '--permission-mode', 'dontAsk', '--tools', tools.join(','), '--allowedTools', allowed.join(','), '--disallowedTools', 'WebSearch,WebFetch,NotebookEdit',
+        '--settings', JSON.stringify(settings), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}'],
+        { cwd: dir, env: cliEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+      const lines = [];
+      let buf = '', err = '', last = null;
+      const timer = setTimeout(() => proc.kill('SIGTERM'), Math.min(900, Math.max(30, Number(body.timeout_s) || 600)) * 1000);
+      proc.stdout.on('data', (c) => {
+        buf += c;
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (!line) continue;
+          try { const ev = JSON.parse(line); ev._t = Date.now() - started; if (ev.type === 'result') last = ev; lines.push(JSON.stringify(ev)); } catch { lines.push(line); }
+        }
+      });
+      proc.stderr.on('data', (c) => { err = (err + c).slice(-2000); });
+      proc.on('close', (code) => { clearTimeout(timer); resolve({ code, lines, last, err }); });
+      proc.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, lines, last, err: e.message }); });
+    });
+    await fs.writeFile(out, result.lines.join('\n') + '\n');
+    const r = result.last || {};
+    return sendJson(res, 200, {
+      out: path.relative(labDir, out), events: result.lines.length, exitCode: result.code, durationMs: Date.now() - started,
+      turns: r.num_turns ?? null, costUsd: r.total_cost_usd ?? null, usage: r.usage ?? null, result: String(r.result || '').slice(0, 3000),
+      error: r.is_error || result.code ? String(r.result || result.err || '').slice(0, 500) : undefined, used: labClaudeRuns.get(key), limit: 8,
+    });
   }
   if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts[3] === 'ask' && parts.length === 5 && method === 'GET') {
     try { return sendJson(res, 200, lab.askStatus(parts[1], parts[4])); } catch (err) { return sendError(res, err.status || 500, 'not_found', err.message); }

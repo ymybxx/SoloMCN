@@ -1064,6 +1064,28 @@ server.registerTool(
 );
 
 server.registerTool(
+  'lab_run_claude',
+  {
+    title: '让 Claude Code 跑一次任务',
+    description: '实验里要看 Claude Code 自己干一件活的完整过程时用（怎么一步步读文件、改代码、跑命令，轮数、花费、耗时、缓存读写 token）。沙盒里没有 claude、也连不上 Anthropic，由工作台在沙盒外代跑一次，不要为此请用户在终端里跑。' +
+      'dir 是实验目录里要它干活的子目录（先建好里面的文件）；它只能读写这个目录，命令也在同样的沙盒里跑、不能联网，不带工作台的工具。' +
+      '事件流（--output-format stream-json）原样写进 out 文件（实验目录里的相对路径），每行多一个 _t：从开始到收到这条事件的毫秒数。返回轮数、花费、耗时、用量和最后的回答。' +
+      '用的是用户自己的 Claude 订阅额度，每条内容每天最多 8 次，设计好再跑。',
+    inputSchema: {
+      item_id: ITEM_ID,
+      dir: z.string().max(200).describe('实验目录里的子目录，比如 demo-repo'),
+      prompt: z.string().min(1).max(20000).describe('交给它的任务，就像用户在终端里说的那句'),
+      out: z.string().max(200).optional().describe('事件流写到哪（实验目录里的相对路径），比如 run1/events.jsonl'),
+      model: z.enum(['haiku', 'sonnet', 'opus']).optional().describe('默认 sonnet'),
+      tools: z.array(z.enum(['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'])).optional().describe('给它哪些工具，默认全给'),
+      max_turns: z.number().int().min(1).max(40).optional().describe('最多几轮，默认 20'),
+      timeout_s: z.number().int().min(30).max(900).optional().describe('最多跑多少秒，默认 600'),
+    },
+  },
+  tool(async ({ item_id, ...body }) => call('POST', `/api/items/${item_id}/lab/claude-run`, body, 960_000)),
+);
+
+server.registerTool(
   'lab_ask_claude',
   {
     title: '问 Claude',
