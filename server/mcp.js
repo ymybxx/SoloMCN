@@ -1033,6 +1033,21 @@ server.registerTool(
 );
 
 server.registerTool(
+  'read_skill_file',
+  {
+    title: '读技能里的文件',
+    description: '读一个技能文件夹里的文件：SKILL.md 正文里提到的附录（references/*.md）、做法技能各环节的文件（research.md、script.md、video.md、revise.md）等。' +
+      '没有读文件工具的运行（精选、出题、写脚本、预审……）用它读技能，只能读技能文件夹里的文件。',
+    inputSchema: {
+      skill: z.string().regex(/^[a-z0-9][a-z0-9-]{0,60}$/).describe('技能名，比如 stage-montage、teardown-video'),
+      path: z.string().max(200).optional().describe('技能文件夹里的相对路径，比如 script.md、references/lab.md；不填就是 SKILL.md'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  tool(async ({ skill, path: rel }) => call('GET', `/api/skills/${skill}/file?path=${encodeURIComponent(rel || 'SKILL.md')}`)),
+);
+
+server.registerTool(
   'improve_skill',
   {
     title: '改进技能',

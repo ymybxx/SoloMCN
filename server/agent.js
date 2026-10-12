@@ -188,6 +188,8 @@ const TASKS = {
 // 其他能上网的运行不能改文件，用 improve_skill 提建议，由「改进技能」任务整理进去
 const EVOLVE_DIRECT = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，做完后直接改对应技能的文件（.claude/skills/<技能名>/ 下）：做法的坑改做法技能，工具的坑改工具技能，通用流程的问题改流程技能。要改，不要只往后追加：同主题的合并，过时的删掉；SKILL.md 保持简短，细节放附录。只为以后的运行改，不为了这一次临时改。最后在汇报里单独一行写「技能改动：改了什么、为什么」。';
 const EVOLVE_SUGGEST = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，用 improve_skill 提给对应的技能（做法的坑给做法技能，工具的坑给工具技能，通用流程的问题给这个环节的流程技能）。只提以后别的内容也用得上的经验。';
+// 精选、出题、写脚本这些运行没有读文件工具（能读就能读到密钥）：技能的附录用 read_skill_file 读
+const SKILL_READ_HINT = '这次运行没有读文件工具。技能正文里提到的附录、做法技能各环节的文件（比如 stage-montage 的 script.md、某个技能的 references/xx.md），用 read_skill_file 读。';
 const EVOLVE_TASKS = { video: EVOLVE_DIRECT, revise: EVOLVE_DIRECT, research: EVOLVE_SUGGEST, script: EVOLVE_SUGGEST, check: EVOLVE_SUGGEST, curate: EVOLVE_SUGGEST, ideas: EVOLVE_SUGGEST, teardown: EVOLVE_SUGGEST, analysis: EVOLVE_SUGGEST };
 
 const TOOL_NAMES = {
@@ -539,7 +541,7 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
       ['-p', prompt, ...(resumeSession ? ['--resume', resumeSession] : []),
         '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--max-turns', String(t.maxTurns),
-        '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY + (EVOLVE_TASKS[task] && skills?.settings().evolve ? '\n' + EVOLVE_TASKS[task] : ''),
+        '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY + (EVOLVE_TASKS[task] && skills?.settings().evolve ? '\n' + EVOLVE_TASKS[task] : '') + (String(lb?.tools ?? t.tools ?? BUILTIN_TOOLS.join(',')).split(',').includes('Read') || (t.tools === '') ? '' : '\n' + SKILL_READ_HINT),
         '--permission-mode', 'dontAsk', '--tools', lb?.tools ?? t.tools ?? BUILTIN_TOOLS.join(','),
         '--allowedTools', (lb?.allowed ?? t.allowed ?? ALLOWED_TOOLS).join(','), '--disallowedTools', (lb?.denied ?? t.denied ?? DENIED_TOOLS).join(','),
         ...(lb?.args || []),
