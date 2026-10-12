@@ -108,7 +108,12 @@ guard() {
   [ "${1:-}" = "--force" ] && return 0
   up || return 0
   local r
-  r="$(curl -s --max-time 5 "$URL/api/busy" || true)"
+  r="$(curl -s --max-time 20 "$URL/api/busy" || true)"
+  # 问不到（工作台忙得没回话、出错）就当作有事在做，不重启：宁可多等一会儿，也不打断正在跑的任务
+  if ! printf '%s' "$r" | grep -q '"busy":'; then
+    printf '工作台没有回答「有没有在跑的事」，为了不打断任务，这次不重启；稍后再试，确定要重启就加 --force\n'
+    exit 1
+  fi
   if printf '%s' "$r" | grep -q '"busy":true'; then
     printf '工作台还有事在做，现在重启会打断它们：\n'
     printf '%s' "$r" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const x of JSON.parse(s).list)console.log("  - "+x)}catch{}})'
