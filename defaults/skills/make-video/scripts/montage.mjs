@@ -570,7 +570,9 @@ function lockFns(spec, motion) {
   const usableSeg = (s, off, a, b) => {
     const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off);
     if (xs.length < 3) return false;
-    const ok = xs.filter((x) => x.ok && x.joints.filter(Boolean).length >= (spec.lock.minJoints ?? 7) && T / x.torso >= zMin * 0.92 && T / x.torso <= zMax * 1.08).length;
+    // 停留期间大小可以比统一大小差得多一些（直拍自己会推拉镜头，他看得清就行）；换装那一刻的大小另外由 edgeOk 卡严
+    const slack = spec.lock.holdSlack ?? 1.35;
+    const ok = xs.filter((x) => x.ok && x.joints.filter(Boolean).length >= (spec.lock.minJoints ?? 7) && T / x.torso >= zMin * 0.92 / slack && T / x.torso <= zMax * 1.08 * slack).length;
     // 全程锁定时，这一段大部分时刻还要能把他放回画面中间（放大倍数小、他又走到边上，裁切框挪不过去，画面中间就成了别人）
     const centered = xs.filter((x) => fitAt(x, spec.lock.centerTol ?? 0.08)).length;
     return ok / xs.length >= 0.65 && centered / xs.length >= (spec.lock.centerShare ?? 0.7);
@@ -620,11 +622,14 @@ function schedule(spec, dir) {
     if (sw.has(key)) return sw.get(key);
     const oa = okAt[a][i - 1] ?? okAt[a][i], ob = okAt[b][i];
     let r = { cost: Infinity, why: oa == null ? 'out' : ob == null ? 'in' : '' };
-    // 脱身：这一场已经认不准他、锁不住（被挡、挤在一起），宁可换到一场看得清的，也别继续停在这
-    if (oa == null && ob != null && okAt[a][i] == null && idOk(srcs[b], B[i] + ob - 0.3, B[i] + ob + 1.0) && L.edgeOk(srcs[b], ob, B[i])) { // 新的一场换进来那一刻要能直接放到画面中间
+    // 脱身：这一场已经认不准他、锁不住（被挡、挤在一起）时，可以从这里换走，但换装那一刻照样要动作贴合、位置对得上（不贴合的刀比多停几拍更难看）
+    if (oa == null && ob != null && okAt[a][i] == null && idOk(srcs[b], B[i] + ob - 0.3, B[i] + ob + 1.0) && L.edgeOk(srcs[b], ob, B[i])) {
       const sObjA = srcs[a], offA = usable(sObjA, B[i] - 0.5, B[i] + 0.5) ?? sObjA.offset;
       const m = bestShift(motion[sObjA.id], B[i] + offA, motion[srcs[b].id], B[i] + ob);
-      r = { cost: opt.escape ?? 0.6, shift: Number.isFinite(m.dist) ? m.shift : 0, dist: Number.isFinite(m.dist) ? m.dist : 1, escape: true };
+      // 动作差可以放宽到 escapeMax（默认 0.3），位置、大小照样要对得上；越不像越贵，只在被挡时才用
+      if (Number.isFinite(m.dist) && m.dist <= (opt.escapeMax ?? 0.3) && meet(L.reach(sObjA, offA, B[i]), L.reach(srcs[b], ob + m.shift, B[i]))) {
+        r = { cost: m.dist - opt.bonus + Math.max(0, m.dist - opt.thr) * 4 + 0.1, shift: m.shift, dist: m.dist, escape: true };
+      }
       sw.set(key, r);
       return r;
     }
@@ -658,7 +663,7 @@ function schedule(spec, dir) {
       // 继续用这一场
       {
         // 停到上限以后还能继续停（找不到合适的换装点时），只是每拍扣分越来越多
-        const pen = okAt[s][i] == null ? 2 : 0; // 这一拍认不准他或锁不住：尽量别停在这场
+        const pen = okAt[s][i] == null ? (opt.blockedCost ?? 6) : 0; // 这一拍他被挡、认不准或锁不住：基本不许停在这场，宁可换到看得清的一场
         const v = c + pen + hold(h + 1);
         const k = idx(s, p, Math.min(H, h + 1));
         if (v < nxt[k]) { nxt[k] = v; bk[k] = idx(s, p, h); }
@@ -682,7 +687,7 @@ function schedule(spec, dir) {
     console.error('每场能停的拍数：' + srcs.map((x, k) => `${x.id}:${okAt[k].filter((v) => v != null).length}/${B.length}`).join(' '));
     let n = 0; const into = new Array(N).fill(0);
     for (let i = 1; i < B.length; i++) for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) if (a !== b && Number.isFinite(swCost(a, b, i).cost)) { n++; into[b]++; }
-    if (process.env.SCHED_SPAN) { const [f0, f1] = process.env.SCHED_SPAN.split(',').map(Number); const why = {}; for (let i = 1; i < B.length; i++) if (B[i] >= f0 && B[i] <= f1) for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) if (a !== b) { const r = swCost(a, b, i); if (!Number.isFinite(r.cost)) why[r.why] = (why[r.why] || 0) + 1; else why.ok = (why.ok || 0) + 1; } console.error('这段换不了的原因：' + JSON.stringify(why)); }
+    if (process.env.SCHED_SPAN) { const [f0, f1] = process.env.SCHED_SPAN.split(',').map(Number); const why = {}; for (let i = 1; i < B.length; i++) if (B[i] >= f0 && B[i] <= f1) for (let a = 0; a < N; a++) for (let b = 0; b < N; b++) if (a !== b) { const r = swCost(a, b, i); if (!Number.isFinite(r.cost)) why[r.why] = (why[r.why] || 0) + 1; else why.ok = (why.ok || 0) + 1; } console.error('这段换不了的原因：' + JSON.stringify(why)); console.error('这段停不了的原因：' + srcs.map((x) => { const w = { align: 0, lock: 0, id: 0, ok: 0 }; B.forEach((t, i) => { if (t < f0 || t > f1) return; const e = B[i + 1] ?? to; const off = usable(x, t, e); if (off == null) w.align++; else if (!L.usableSeg(x, off, t, e)) w.lock++; else if (!idOk(x, t + off, e + off)) w.id++; else w.ok++; }); return `${x.id}:${JSON.stringify(w)}`; }).join(' ')); console.error('这段每场能停的拍：' + srcs.map((x, k) => `${x.id}:` + B.map((t, i) => (t >= f0 && t <= f1 ? (okAt[k][i] != null ? '█' : '·') : '')).join('')).join('  ')); }
     console.error(`能换的（拍 × 场次对）：${n}；能换进各场的次数：` + srcs.map((x, k) => `${x.id}:${into[k]}`).join(' '));
   }
   if (best < 0) die('这一段找不到能一直锁住主角的排法（素材都偏到边上或被挡），换一段试试');

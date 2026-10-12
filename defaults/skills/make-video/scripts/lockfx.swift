@@ -150,7 +150,7 @@ let C1 = themeColors.first ?? CIColor(red: 1, green: 0.93, blue: 0.82)
 let C2 = themeColors.dropFirst().first ?? CIColor(red: 1, green: 0.2, blue: 0.45)
 
 let M = max(0, job.matchCut ?? 0)
-struct Plan { var neckX: [Double]; var neckY: [Double]; var boxes: [CGRect?]; var poses: [[CGPoint?]?]; var kps: [[CGPoint?]?]; var torso: Double; var found: Int; var sw: Double; var sh: Double; var pre: Int; var file: String }
+struct Plan { var neckX: [Double]; var neckY: [Double]; var lost: [Double]; var boxes: [CGRect?]; var poses: [[CGPoint?]?]; var kps: [[CGPoint?]?]; var torso: Double; var found: Int; var sw: Double; var sh: Double; var pre: Int; var file: String }
 var plans: [Plan] = []
 var colorSamples: [String: [[Double]]] = [:] // 每条素材抽样的平均颜色，统一调色用
 // 第一遍：每一刀逐帧找主角。前后各多分析 matchCut 帧，给动作卡点微调留余地
@@ -228,12 +228,23 @@ for (si, seg) in job.segments.enumerated() {
       boxes[k] = (abs(k - a.0) <= abs(b.0 - k) ? a.1 : b.1).box
     }
   }
+  // 认不到他的时段：离最近一次认到超过 0.25 秒开始，平滑交还原机位（直拍的摄影师本来就跟着他），0.6 秒时完全交还；认回来再锁住
+  var lost = [Double](repeating: 0, count: total)
+  if !known.isEmpty {
+    var ki = 0
+    for k in 0..<total {
+      while ki + 1 < known.count && known[ki + 1].0 <= k { ki += 1 }
+      var d = abs(known[ki].0 - k); if ki + 1 < known.count { d = min(d, abs(known[ki + 1].0 - k)) }
+      let x = (Double(d) / job.fps - 0.25) / 0.35
+      lost[k] = x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x)
+    }
+  } else { lost = [Double](repeating: 1, count: total) }
   // 平滑：前后各 smooth/2 秒的移动平均，去掉骨架识别的抖动
   let r = max(1, Int(job.smooth * job.fps / 2))
   func smoothed(_ v: [Double]) -> [Double] { v.indices.map { i in let lo = max(0, i - r), hi = min(v.count - 1, i + r); return v[lo...hi].reduce(0, +) / Double(hi - lo + 1) } }
   // 这一刀的身体大小取偏大的读数（第 75 百分位），弯腰、转身那几帧量小了不算
   let ts = known.map { $0.1.torso }.sorted()
-  plans.append(Plan(neckX: smoothed(neckX), neckY: smoothed(neckY), boxes: boxes, poses: picked.map { $0?.pose }, kps: picked.map { $0?.kp }, torso: ts.isEmpty ? 0 : ts[min(ts.count - 1, Int(Double(ts.count) * 0.75))], found: known.count, sw: sw, sh: sh, pre: pre, file: seg.file))
+  plans.append(Plan(neckX: smoothed(neckX), neckY: smoothed(neckY), lost: lost, boxes: boxes, poses: picked.map { $0?.pose }, kps: picked.map { $0?.kp }, torso: ts.isEmpty ? 0 : ts[min(ts.count - 1, Int(Double(ts.count) * 0.75))], found: known.count, sw: sw, sh: sh, pre: pre, file: seg.file))
   FileHandle.standardError.write("\r分析 \(si + 1)/\(job.segments.count)".data(using: .utf8)!)
 }
 // 动作卡点微调：每一刀的开头在 ±matchCut 帧里挑和上一刀最后一帧姿态最像的
@@ -498,6 +509,11 @@ for (si, seg) in job.segments.enumerated() {
       let natX = neckX[j] * Sn - (sw * Sn - W) / 2, natY = neckY[j] * Sn - (sh * Sn - H) / 2
       let wantX = natX + (job.target.x * W - natX) * w, wantY = natY + (job.target.y * H - natY) * w
       x0 = neckX[j] * S - wantX; y0 = neckY[j] * S - wantY
+    }
+    // 认不到他时交还原机位：同样的放大倍数，裁切框回到原画中间
+    if !cutMode, j < p.lost.count, p.lost[j] > 0 {
+      let w = p.lost[j]
+      x0 += ((sw * S - W) / 2 - x0) * w; y0 += ((sh * S - H) / 2 - y0) * w
     }
     // 有背景虚化时，裁切框可以超出原画（最多画面的 30%），超出的部分用虚化后的边缘补上，主角照样钉在原位；
     // 没有背景虚化就只能在原画范围里移动
