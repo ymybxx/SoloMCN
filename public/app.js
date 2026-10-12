@@ -75,7 +75,7 @@ function applyLocal(col){
 // 后台 Agent 写回脚本、预审结果，或运行状态变了，内容详情跟着更新；正在输入时只更新进度，不打断
 // 详情里决定要不要整体重画的那些状态；画完就记下来，数据刷新时没变就不重画
 function drawerSigOf(id,it){
-  const rs=itemRun('script',id),rc=itemRun('check',id),rv=itemRun('video',id),rr=itemRun('revise',id),re=itemRun('research',id),any=runningRun(),anyV=runningVideo();
+  const rs=itemRun('script',id),rc=itemRun('check',id),rv=itemRun('video',id),rr=itemRun('revise',id),re=itemRun('research',id),any=runningOnItem(id),anyV=runningVideo();
   const pb=it.publish||{};
   return [(it.scriptHistory||[]).length,it.labAsk?.id,it.labAsk?.status,(it.assets||[]).map(a=>a.id).join(','),pb.gen?.status,pb.cover,JSON.stringify(Object.fromEntries(Object.entries(pb.results||{}).map(([k,v])=>[k,v.status]))),!!pb.platforms,re?.id,re?.status,it.research?.at,rs?.id,rs?.status,rc?.id,rc?.status,rv?.id,rv?.status,rr?.id,rr?.status,any?.id,anyV?.id,it.stage,JSON.stringify(it.precheck||null),JSON.stringify(it.video||null)].join('|');
 }
@@ -279,6 +279,12 @@ const runList=()=>Object.entries(S.runs||{}).map(([id,v])=>({id,...v})).sort((a,
 const VIDEO_TASKS=['video','revise'];
 const runningRun=task=>runList().find(r=>r.status==='running'&&(task?r.task===task:!VIDEO_TASKS.includes(r.task)&&r.task!=='teardown'));
 const runningVideo=()=>runList().find(r=>r.status==='running'&&VIDEO_TASKS.includes(r.task));
+// 队列和 server/agent.js 一致：调研、写脚本、预审按内容卡片各排各的；精选、出题、复盘这些共用一条；视频一条
+const ITEM_TASKS=['research','script','check'];
+const laneKey=r=>VIDEO_TASKS.includes(r.task)?'video':ITEM_TASKS.includes(r.task)&&r.args?.itemId?'item:'+r.args.itemId:r.task==='teardown'||r.task==='skills'?r.task:'main';
+const runningIn=lane=>runList().find(r=>r.status==='running'&&laneKey(r)===lane);
+const runningMain=()=>runningIn('main');
+const runningOnItem=id=>runningIn('item:'+id);
 // 任务进行中插话：输入框放在会频繁刷新的进度区外面，打字不会被打断
 const vSay=run=>run?.status==='running'?`<div class="say"><input type="text" id="say-${esc(run.id)}" value="${esc(S.say?.[run.id]||'')}" placeholder="有疑问或想调整，直接说，例如：片尾那行字太小了" aria-label="对正在运行的 Claude 说"><button class="btn" data-act="agent-say" data-id="${esc(run.id)}">插话</button></div>`:'';
 const lastRun=task=>runList().find(r=>r.task===task);
@@ -296,7 +302,7 @@ const fmtDur=run=>fmtSecs(Math.round(((run.finishedAt||Date.now())-run.startedAt
 // 运行中的时长每秒走一次：长时间没有新步骤（比如在等一个慢网页）时，页面不重画，时长也不能停
 const vDur=run=>run.status==='running'?`<span class="run-dur" data-start="${run.startedAt}">${fmtDur(run)}</span>`:fmtDur(run);
 setInterval(()=>{for(const el of document.querySelectorAll('.run-dur[data-start]'))el.textContent=fmtSecs(Math.round((Date.now()-Number(el.dataset.start))/1000))},1000);
-const laneBusy=run=>VIDEO_TASKS.includes(run.task)?runningVideo():run.task==='teardown'?runningRun('teardown'):runningRun();
+const laneBusy=run=>runningIn(laneKey(run));
 // 完整过程：可滚动，新步骤自动滚到底，往上翻时不打扰
 // 正在写的那一段：思考只显示字数；说的话和工具参数里的长文本（比如脚本正文）滚动显示最新写出的部分
 function vLive(run){
@@ -377,8 +383,8 @@ function aiActions(kind,id,hasScript){
     return `${busy?'<button class="btn" data-act="stop">停止</button>':''}<button class="${cls}" data-act="ai-${kind}" ${dis?'disabled':''}>${busy?(kind==='script'?'生成中…':'预审中…'):label}</button>`}
   const run=itemRun(kind,id);
   if(run?.status==='running')return `<button class="btn" data-act="agent-stop" data-id="${esc(run.id)}">停止</button><button class="${cls}" disabled>Claude ${kind==='script'?'写脚本':'预审'}中…</button>`;
-  const other=runningRun();const dis=!aiReady()||!!other||(kind==='check'&&!hasScript);
-  return `<button class="${cls}" data-act="ai-${kind}" ${dis?'disabled':''} title="${other?'Claude 正在跑「'+esc(other.name)+'」，等它结束再点':''}">${other?'Claude 正忙':label}</button>`;
+  const other=runningOnItem(id);const dis=!aiReady()||!!other||(kind==='check'&&!hasScript);
+  return `<button class="${cls}" data-act="ai-${kind}" ${dis?'disabled':''} title="${other?'这条内容正在跑「'+esc(other.name)+'」，等它结束再点':''}">${other?'Claude 正忙':label}</button>`;
 }
 // 内容详情里「生成视频」按钮：视频单独排队，同一时间只生成一个
 // 本机视频（绝对路径）走工作台的专门接口播放，生成的视频在 videos/ 下走 /media/
@@ -464,7 +470,7 @@ function vVideo(it,id){
 // 调研：按钮、报告（正文里的 [n] 点开就是对应来源）
 // 看完脚本提意见，让 Claude 只改提到的地方；旧版本自动留底，可以退回上一版
 function vScriptRevise(id,it){
-  const run=itemRun('script',id),busy=run?.status==='running'||!!runningRun();
+  const run=itemRun('script',id),busy=run?.status==='running'||!!runningOnItem(id);
   const hist=it.scriptHistory||[];
   return `<div class="revise">
     <div class="field"><label for="scriptFb">修改意见</label>
@@ -479,8 +485,8 @@ function vScriptRevise(id,it){
 function researchActions(id,it){
   const run=itemRun('research',id);
   if(run?.status==='running')return `<button class="btn" data-act="agent-stop" data-id="${esc(run.id)}">停止</button><button class="btn" disabled>调研中…</button>`;
-  const other=runningRun();
-  const dis=!aiReady()||other?'disabled':'',busy=other?'Claude 正在跑「'+esc(other.name)+'」，等它结束再点':'';
+  const other=runningOnItem(id);
+  const dis=!aiReady()||other?'disabled':'',busy=other?'这条内容正在跑「'+esc(other.name)+'」，等它结束再点':'';
   if(other||!it.research)return `<button class="btn ${it.research?'':'primary'}" data-act="ai-research" ${dis} title="${busy}">${other?'Claude 正忙':'AI 调研'}</button>`;
   // 报告 7 天内（和 server/agent.js 的 REUSE_DAYS 一致）可以选在原有基础上补，还是从头查；过了 7 天只能从头查
   if(Date.now()-(it.research.at||0)>7*86400000)return `<button class="btn" data-act="ai-research" data-fresh="1" ${dis} title="报告已超过 7 天，会从头重新查">重新调研</button>`;
@@ -624,7 +630,7 @@ function vRun(run){
   return `<div class="panel run">
     <div class="run-head"><span class="pill ${st[0]}"><i></i>Claude ${esc(run.name)} · ${st[1]}</span>
       <span class="faint num">${fmtTime(run.startedAt)} · ${vDur(run)}${run.turns?' · '+run.turns+' 轮':''}${run.model?' · '+esc(modelName(run.model)):''}${(()=>{const other=(run.modelsUsed||[]).filter(m=>m!==run.model&&!/haiku/.test(m));return other.length?` · <span style="color:var(--warn)">中途换成 ${esc(modelName(other.join('、')))}</span>`:''})()}</span>
-      <button class="btn ghost" data-act="run-view" data-id="${esc(run.id)}">全屏查看</button>${running?`<button class="btn" data-act="agent-stop" data-id="${esc(run.id)}">停止</button>`:`${(run.status==='failed'||run.status==='stopped')&&run.sessionId&&!runningRun(run.task==='video'?'video':undefined)?`<button class="btn" data-act="agent-resume" data-id="${esc(run.id)}">从中断处继续</button>`:''}<button class="btn ghost" data-act="run-toggle" data-id="${esc(run.id)}">${open?'收起':'展开过程和说明'}</button>`}</div>
+      <button class="btn ghost" data-act="run-view" data-id="${esc(run.id)}">全屏查看</button>${running?`<button class="btn" data-act="agent-stop" data-id="${esc(run.id)}">停止</button>`:`${(run.status==='failed'||run.status==='stopped')&&run.sessionId&&!laneBusy(run)?`<button class="btn" data-act="agent-resume" data-id="${esc(run.id)}">从中断处继续</button>`:''}<button class="btn ghost" data-act="run-toggle" data-id="${esc(run.id)}">${open?'收起':'展开过程和说明'}</button>`}</div>
     ${run.error?`<p class="err">${esc(run.error)}</p>`:''}
     ${vSay(run)}
     ${running||open?vLog(run):''}
@@ -633,7 +639,7 @@ function vRun(run){
   </div>`;
 }
 function vPick(p){
-  const open=S.pickOpen===p.id;const busy=!!runningRun();
+  const open=S.pickOpen===p.id;const busy=!!runningMain();
   const srcs=(p.sources||[]).map(s=>{const u=safeUrl(s.url);const t=`<span class="src-ch">${esc(CH_NAMES[s.channel]||s.channel)}</span>${esc(s.title)}`;
     return u?`<a class="pick-src" href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`:`<span class="pick-src">${t}</span>`}).join('');
   const ideaN=(S.radar?.ideas||[]).filter(d=>d.pickId===p.id).length;
@@ -656,7 +662,7 @@ function vPick(p){
   </article>`;
 }
 function vRadar(){
-  const run=runningRun('curate')||lastRun('curate');const busy=runningRun();
+  const run=runningRun('curate')||lastRun('curate');const busy=runningMain();
   const picks=pickList();const by=s=>picks.filter(p=>p.status===s);const todo=by('new'),done=by('ideas'),dropped=by('dropped');
   return `<div class="section-head"><h2>选题雷达</h2><p>Claude 读这一轮各渠道的素材，挑出值得做的主题；你决定给哪些账号出题，或者不做</p>
       <div class="actions"><button class="btn primary" data-act="curate" ${busy?'disabled':''}>${runningRun('curate')?'Claude 精选中…':busy?'Claude 正在跑别的任务':'让 Claude 精选'}</button></div></div>
@@ -1761,7 +1767,7 @@ function vData(){
       <div class="blk-head"><h3>AI 复盘</h3><span class="faint" style="font-size:12px">${modeOf('analysis')==='agent'?'后台 Agent':'单次调用'}</span><div class="actions">${(()=>{
         if(modeOf('analysis')==='oneshot')return `${busy?'<button class="btn" data-act="stop">停止</button>':''}<button class="btn primary" data-act="ai-analysis" ${!aiReady()||S.gen?'disabled':''}>${an?'重新复盘':'开始复盘'}</button>`;
         const r=runningRun('analysis');if(r)return `<button class="btn" data-act="agent-stop" data-id="${esc(r.id)}">停止</button><button class="btn primary" disabled>Claude 复盘中…</button>`;
-        const other=runningRun();return `<button class="btn primary" data-act="ai-analysis" ${!aiReady()||other?'disabled':''} title="${other?'Claude 正在跑「'+esc(other.name)+'」，等它结束再点':''}">${other?'Claude 正忙':an?'重新复盘':'开始复盘'}</button>`;
+        const other=runningMain();return `<button class="btn primary" data-act="ai-analysis" ${!aiReady()||other?'disabled':''} title="${other?'Claude 正在跑「'+esc(other.name)+'」，等它结束再点':''}">${other?'Claude 正忙':an?'重新复盘':'开始复盘'}</button>`;
       })()}</div></div>
       ${modeOf('analysis')==='agent'?vRunMini(runningRun('analysis')||lastRun('analysis')):''}
       <div id="anOut">${busy?'<p class="hint busy">Claude 正在分析数据…</p>':an?`<p class="ai-out">${esc(an.text)}</p><p class="hint" style="margin-top:8px">生成于 ${new Date(an.at).toLocaleString('zh-CN',{hour12:false})}</p>`:'<p class="hint">把所有已发布内容的数据交给 Claude，找出哪类选题、情绪、账号在赢，并给出下周的选题方向。</p>'}</div>

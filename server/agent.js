@@ -300,8 +300,11 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
   const uiLang = () => (store.get('settings', 'ui')?.lang === 'en' ? 'en' : 'zh');
   // 每条队列同一时间只跑一个任务：main（精选、出题、写脚本……）和 video（生成视频）互不阻塞
   const current = {}; // lane -> { id, proc, stopped }
-  const busyMsg = (lane) => ({ video: '已经有一个视频在生成，等它结束或先停止', teardown: '已经有一条视频在拆解，等它结束或先停止' })[lane] || 'Claude 正在跑另一个任务，等它结束或先停止';
-  const laneOf = (task) => TASKS[task]?.lane || 'main';
+  // 队列：调研、写脚本、预审按内容卡片各排各的（不同卡片可以同时跑，同一张卡片一次一个）；
+  // 精选、出题、复盘这类全局任务共用 main；生成和修改视频共用 video（渲染很吃电脑，一次一个）
+  const ITEM_TASKS = ['research', 'script', 'check'];
+  const busyMsg = (lane) => (lane.startsWith('item:') ? '这条内容已经有一个 Claude 任务在跑，等它结束或先停止' : ({ video: '已经有一个视频在生成，等它结束或先停止', teardown: '已经有一条视频在拆解，等它结束或先停止' })[lane] || 'Claude 正在跑另一个任务，等它结束或先停止');
+  const laneOf = (task, args = {}) => (ITEM_TASKS.includes(task) && args.itemId ? `item:${args.itemId}` : TASKS[task]?.lane || 'main');
 
   // 服务重启时还标着“运行中”的，说明上次被中断了
   for (const [id, run] of Object.entries(store.all().agentRuns || {})) {
@@ -420,7 +423,7 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
   const sayPrompt = (text) => `用户在你工作过程中插了一句话（刚才正在进行的那一步被打断了，需要的话重做那一步）：\n「${text}」\n按这句话调整，然后接着把原来的任务做完；已经做好、且和这句话无关的部分不要重做。`;
 
   async function start(task, args = {}) {
-    const lane = laneOf(task);
+    const lane = laneOf(task, args);
     if (current[lane]) {
       throw Object.assign(new Error(busyMsg(lane)), { status: 409 });
     }
@@ -449,7 +452,7 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
     if (!saved.sessionId) throw Object.assign(new Error('这次运行没有留下会话，只能重新开始'), { status: 400 });
     const t = TASKS[saved.task];
     if (!t) throw Object.assign(new Error('没有这个任务'), { status: 400 });
-    const lane = laneOf(saved.task);
+    const lane = laneOf(saved.task, saved.args);
     if (current[lane]) throw Object.assign(new Error(busyMsg(lane)), { status: 409 });
     const run = { ...saved, status: 'running', error: null, finishedAt: null, resumes: (saved.resumes || 0) + 1, steps: [...(saved.steps || [])] };
     run.steps.push({ at: Date.now(), kind: 'text', text: '从中断处继续' });
@@ -471,7 +474,7 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
     if (!text) throw Object.assign(new Error('先写要追加的要求'), { status: 400 });
     const t = TASKS[saved.task];
     if (!t) throw Object.assign(new Error('没有这个任务'), { status: 400 });
-    const lane = laneOf(saved.task);
+    const lane = laneOf(saved.task, saved.args);
     if (current[lane]) throw Object.assign(new Error(busyMsg(lane)), { status: 409 });
     const run = { ...saved, status: 'running', error: null, finishedAt: null, steps: [...(saved.steps || [])], followUps: [...(saved.followUps || []), { at: Date.now(), text }] };
     run.steps.push({ at: Date.now(), kind: 'text', text: `追加要求：${text}` });
