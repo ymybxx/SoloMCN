@@ -19,7 +19,7 @@ struct Job: Decodable {
   // track：这一刀里认人得到的主角框 [相对这一刀开头的秒数, cx, cy, w, h]（素材坐标 0–1），用来认准是他
   // necks：逐帧认好的主角脖子位置 [相对这一刀开头的秒数, x, y]（素材坐标 0–1）。有它就只跟这个人，认不到就补插值，绝不改跟旁边的人
   // fx：这一刀开头的换装转场（cut 硬切 / dissolve 叠化 / scan 扫描换装 / echo 残影换装 / gate 节拍光门 / whip 动势甩切 / pulse 色彩脉冲 / flash 闪白），不填就用全局 transition
-  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let necks: [[Double]]?; let strong: Bool?; let keep: [[Double]]?; let fx: Transition? }
+  struct Segment: Decodable { let file: String; let start: Double; let frames: Int; let hint: Hint?; let track: [[Double]]?; let necks: [[Double]]?; let free: Bool?; let strong: Bool?; let keep: [[Double]]?; let fx: Transition? }
   struct Theme: Decodable { let colors: [String]? }
   let size: [Int]; let fps: Double; let out: String
   let target: Target; let zoomMin: Double; let zoomMax: Double; let smooth: Double
@@ -469,7 +469,7 @@ for (si, seg) in job.segments.enumerated() {
   var myTailKP: [[CGPoint?]] = []
   // 这一刀开头的 8 个点 → 上一刀结尾的 8 个点（成片坐标），拟合一次
   var fineFit: (s: Double, ang: Double, pc: CGPoint, qc: CGPoint)? = nil
-  if si > 0, !carryKP.isEmpty, job.mode != "cut" {
+  if si > 0, !carryKP.isEmpty, job.mode != "cut", seg.free != true {
     let j0 = min(p.kps.count - 1, max(0, base))
     if let k0 = (0...3).lazy.compactMap({ d -> [CGPoint?]? in p.kps[min(p.kps.count - 1, j0 + d)] }).first { fineFit = fitSimilarity(k0, carryKP) }
   }
@@ -491,7 +491,7 @@ for (si, seg) in job.segments.enumerated() {
       let fxp = kp0.qc.x + kp0.s * (cos(kp0.ang) * nx - sin(kp0.ang) * ny), fyp = kp0.qc.y + kp0.s * (sin(kp0.ang) * nx + cos(kp0.ang) * ny)
       let wantX = job.target.x * W + (fxp - job.target.x * W) * w, wantY = job.target.y * H + (fyp - job.target.y * H) * w
       x0 = neckX[j] * S - wantX; y0 = neckY[j] * S - wantY
-    } else if !cutMode, let c = carry, si > 0, p.torso > 0 {
+    } else if !cutMode, seg.free != true, let c = carry, si > 0, p.torso > 0 {
       let w = smooth01(1 - Double(k) / carryFrames)
       let Sc = c.s / p.torso // 让他和上一刀结尾一样大
       S = min(s0 * job.zoomMax, max(s0 * job.zoomMin, S + (Sc - S) * w))
@@ -510,8 +510,10 @@ for (si, seg) in job.segments.enumerated() {
       let wantX = natX + (job.target.x * W - natX) * w, wantY = natY + (job.target.y * H - natY) * w
       x0 = neckX[j] * S - wantX; y0 = neckY[j] * S - wantY
     }
+    // 舞台模式：不锁定，原机位画面（不放大、不挪）
+    if seg.free == true { S = s0; ang = 0; x0 = (sw * S - W) / 2; y0 = (sh * S - H) / 2 }
     // 认不到他时交还原机位：同样的放大倍数，裁切框回到原画中间
-    if !cutMode, j < p.lost.count, p.lost[j] > 0 {
+    if !cutMode, seg.free != true, j < p.lost.count, p.lost[j] > 0 {
       let w = p.lost[j]
       x0 += ((sw * S - W) / 2 - x0) * w; y0 += ((sh * S - H) / 2 - y0) * w
     }
@@ -520,13 +522,13 @@ for (si, seg) in job.segments.enumerated() {
     let over = job.background != nil ? 0.3 : 0.0
     x0 = min(max(-W * over, x0), sw * S - W + W * over); y0 = min(max(-H * over, y0), sh * S - H + H * over)
     // 记下这一刀结尾（切点前最后一帧）他实际在哪、多大，给下一刀接力
-    if k == seg.frames - 1, p.torso > 0 { carry = (neckX[j] * S - x0, neckY[j] * S - y0, p.torso * S) }
+    if k == seg.frames - 1 { carry = seg.free == true || p.torso <= 0 ? nil : (neckX[j] * S - x0, neckY[j] * S - y0, p.torso * S) } // 舞台模式段之后不接力位置
     // 这一帧 8 个点在成片里的位置（缩放平移后再绕脖子转 ang）
     let pivX = neckX[j] * S - x0, pivY = neckY[j] * S - y0
     let kpOut: [CGPoint?] = (kpHere ?? []).map { q in q.map { pt in
       let ux = pt.x * S - x0 - pivX, uy = pt.y * S - y0 - pivY
       return CGPoint(x: pivX + cos(ang) * ux - sin(ang) * uy, y: pivY + sin(ang) * ux + cos(ang) * uy) } }
-    if k == seg.frames - 1 { carryKP = kpOut }
+    if k == seg.frames - 1 { carryKP = seg.free == true ? [] : kpOut }
     if k >= seg.frames { myTailKP.append(kpOut) }
     // 切点放大回弹
     var punch = 1.0, ev = 0.0

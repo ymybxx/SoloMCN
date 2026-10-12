@@ -603,7 +603,11 @@ function schedule(spec, dir) {
   // 快切段（主音轨时间 [[起, 止]]）：所有场次都没法长时间看清他的段落，每 1–2 拍换到此刻看得清的一场，换的那一刀只要求位置、大小对得上、动作大致像
   const fast = (opt.fastCut || []).filter((r) => Array.isArray(r) && r.length === 2);
   const inFast = (t) => fast.some(([a, b]) => t >= a - 0.01 && t < b);
-  const minHoldAt = B.map((t) => { if (inFast(t)) return opt.fastHold ?? 2; const e = energyAt(t); return Math.max(opt.minHold, e >= 3 ? 4 : e === 2 ? 6 : 8); });
+  // 舞台模式段（主音轨时间 [[起, 止]]）：所有场次都没法干净锁定他的段落（队形舞、人挤人），不锁定、用原机位的队形画面，
+  // 每 stageHold 拍换到此刻最看得清他的一场，换装用扫描光带转场盖住接缝，不要求动作贴合；进出这一段也一样
+  const stage = (opt.stage || []).filter((r) => Array.isArray(r) && r.length === 2);
+  const inStage = (t) => stage.some(([a, b]) => t >= a - 0.01 && t < b);
+  const minHoldAt = B.map((t) => { if (inStage(t)) return opt.stageHold ?? 8; if (inFast(t)) return opt.fastHold ?? 2; const e = energyAt(t); return Math.max(opt.minHold, e >= 3 ? 4 : e === 2 ? 6 : 8); });
   const bonusAt = B.map((t) => opt.bonus + (energyAt(t) >= 2 ? 0.04 : 0));
   const motion = posesOf(spec, dir);
   const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
@@ -619,7 +623,10 @@ function schedule(spec, dir) {
   };
   // 快切段里只要求看得清他（认得准、主要关节看得见）而且能放回画面中间，大小差一些也行
   const clearSeg = (s, off, a, b) => { const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off); return xs.length >= 2 && xs.filter((x) => L.centerable(x, 0.1)).length / xs.length >= 0.65; };
-  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); return off != null && (inFast(t) ? clearSeg(s, off, t, e) : L.usableSeg(s, off, t, e)) && idOk(s, t + off, e + off) ? off : null; }));
+  const seenSeg = (s, off, a, b) => { const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off); return xs.length >= 2 && xs.filter((x) => x.ok && x.joints.filter(Boolean).length >= 6).length / xs.length >= 0.6; };
+  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); if (off == null) return null; if (inStage(t)) return seenSeg(s, off, t, e) ? off : null; return (inFast(t) ? clearSeg(s, off, t, e) : L.usableSeg(s, off, t, e)) && idOk(s, t + off, e + off) ? off : null; }));
+  // 舞台模式段的边界必须换一刀（这一段整段不锁定，前后整段锁定）
+  const stageEdge = B.map((t, i) => i > 0 && inStage(t) !== inStage(B[i - 1]));
   // 造型要轮得全：能用的时间越少的场次，换进去时奖励越多（不然这几场一次都排不上）
   const okN = okAt.map((r) => r.filter((v) => v != null).length), okMax = Math.max(...okN);
   const rare = okN.map((n) => (opt.variety ?? 0.06) * (1 - n / okMax));
@@ -633,6 +640,14 @@ function schedule(spec, dir) {
     if (sw.has(key)) return sw.get(key);
     const oa = okAt[a][i - 1] ?? okAt[a][i], ob = okAt[b][i];
     let r = { cost: Infinity, why: oa == null ? 'out' : ob == null ? 'in' : '' };
+    if (inStage(B[i]) || inStage(B[i - 1])) {
+      // 舞台模式里换场不看动作；这一拍谁都看不清时也允许换（边界必须换一刀），只是贵一些
+      const obb = ob ?? usable(srcs[b], B[i], B[i + 1] ?? to);
+      if (obb == null) { sw.set(key, r); return r; }
+      r = { cost: (ob != null ? 0.05 : 1.5) - opt.bonus, shift: 0, dist: null, stage: true };
+      sw.set(key, r);
+      return r;
+    }
     if (inFast(B[i]) && ob != null && idOk(srcs[b], B[i] + ob - 0.2, B[i] + ob + 0.6)) {
       const sObjA = srcs[a], offA = oa ?? usable(sObjA, B[i] - 0.5, B[i] + 0.5) ?? sObjA.offset;
       const m = bestShift(motion[sObjA.id], B[i] + offA, motion[srcs[b].id], B[i] + ob);
@@ -686,7 +701,7 @@ function schedule(spec, dir) {
       // 继续用这一场
       {
         // 停到上限以后还能继续停（找不到合适的换装点时），只是每拍扣分越来越多
-        const pen = okAt[s][i] == null ? (opt.blockedCost ?? 6) : 0; // 这一拍他被挡、认不准或锁不住：基本不许停在这场，宁可换到看得清的一场
+        const pen = stageEdge[i] ? Infinity : okAt[s][i] == null ? (opt.blockedCost ?? 6) : 0; // 这一拍他被挡、认不准或锁不住：基本不许停在这场，宁可换到看得清的一场
         const v = c + pen + hold(h + 1);
         const k = idx(s, p, Math.min(H, h + 1));
         if (v < nxt[k]) { nxt[k] = v; bk[k] = idx(s, p, h); }
@@ -702,6 +717,7 @@ function schedule(spec, dir) {
       }
     }
     back.push(bk); cur = nxt;
+    if (process.env.SCHED_DEBUG && !cur.some(Number.isFinite)) { console.error(`第 ${i} 拍（${r3(B[i])} 秒）之后没有可行的排法；舞台段=${inStage(B[i])} 边界=${stageEdge[i]} 能停的场：${srcs.filter((x, k) => okAt[k][i] != null).map((x) => x.id).join(',')}`); break; }
   }
   let best = -1, bv = Infinity;
   for (let k = 0; k < cur.length; k++) if (cur[k] < bv) { bv = cur[k]; best = k; }
@@ -724,11 +740,13 @@ function schedule(spec, dir) {
     if (i === 0 || d.h === 1) {
       const sObj = srcs[d.s];
       const r = i > 0 ? swCost(decode(path_[i - 1]).s, d.s, i) : null;
-      cuts.push({ at: r3(i === 0 ? from : B[i]), src: sObj.id, offset: okAt[d.s][i] ?? sObj.offset, ...(r?.shift ? { nudge: r.shift } : {}), ...(r ? { motion: r3(r.dist) } : {}) });
+      const t0 = i === 0 ? from : B[i];
+      cuts.push({ at: r3(t0), src: sObj.id, offset: okAt[d.s][i] ?? usable(sObj, t0, B[i + 1] ?? to) ?? sObj.offset, ...(r?.shift ? { nudge: r.shift } : {}), ...(r?.dist != null ? { motion: r3(r.dist) } : {}), ...(inStage(t0) ? { free: true } : {}), ...(r?.stage ? { stageCut: true } : {}) });
     }
   }
   // 换装默认用人形变形过渡（5 帧），可以用 schedule.fx 改（比如 "cut" 硬切）
-  for (const [k, c] of cuts.entries()) if (k > 0 && opt.fx !== 'cut') c.fx = { type: opt.fx || 'morph', frames: opt.fxFrames || 5 };
+  for (const [k, c] of cuts.entries()) if (k > 0 && opt.fx !== 'cut') c.fx = c.stageCut ? { type: opt.stageFx || 'scan', frames: opt.stageFxFrames || 12 } : { type: opt.fx || 'morph', frames: opt.fxFrames || 5 };
+  for (const c of cuts) delete c.stageCut;
   spec.cuts = cuts;
   spec.lock.torso = L.T;
   return { cuts: cuts.length, cost: r3(bv), motions: cuts.filter((c) => c.motion != null).map((c) => c.motion) };
@@ -1223,7 +1241,7 @@ function render(spec, dir, out) {
         .filter((x) => x.ok && x.w != null && x.t >= st - 0.3 && x.t <= st + dur + 0.5).map((x) => [r3(x.t - st), x.cx, x.cy, x.w, x.h]);
       const mid = tr.length ? tr[Math.floor(tr.length / 2)] : null;
       const necks = motion ? motion[s.id].samples.filter((x) => x.ok && x.t >= st - 0.4 && x.t <= st + dur + 0.6).map((x) => [r3(x.t - st), x.neck[0], x.neck[1]]) : [];
-      jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, necks, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [],
+      jobSegs.push({ file: path.resolve(dir, s.file), start: r3(st), frames: f1 - f0, hint: mid ? { cx: mid[1], cy: mid[2] } : null, track: tr, necks, free: !!c.free, strong: !!(c.pinned || (lock.strongEvery && jobSegs.length % lock.strongEvery === 0)), keep: s.keep || [],
         ...(c.fx && segs[k].isStart ? { fx: c.fx } : spec.cuts.some((x) => x.fx) ? { fx: { type: 'cut', frames: 1 } } : {}) });
       table.push({ at: r3(piece.from + (f0 / fps - piece.out)), out: r3(f0 / fps), dur: r3(dur), src: c.src, srcTime: r3(st), label: c.label ?? s.label ?? '' });
     }
