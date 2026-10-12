@@ -577,7 +577,13 @@ function lockFns(spec, motion) {
     const centered = xs.filter((x) => fitAt(x, spec.lock.centerTol ?? 0.08)).length;
     return ok / xs.length >= 0.65 && centered / xs.length >= (spec.lock.centerShare ?? 0.7);
   };
-  return { T: r3(T), sizeOk, edgeOk, reach, usableSeg };
+  // 只看位置：按能放大到的倍数，他能不能放回画面中间（大小差一些也算）
+  const centerable = (x, tol) => {
+    if (!x?.ok || x.joints.filter(Boolean).length < (spec.lock.minJoints ?? 7)) return false;
+    const zc = Math.min(zMax, Math.max(zMin, T / x.torso)), nx = x.neck[0], ny = x.neck[1];
+    return nx >= 0.5 / zc - tol && nx <= 1 - 0.5 / zc + tol && ny >= ty / zc - tol && ny <= 1 - (1 - ty) / zc + tol;
+  };
+  return { T: r3(T), sizeOk, edgeOk, reach, usableSeg, centerable };
 }
 
 // ---------- 全局挑换装点：只在两场动作几乎一样的那一拍换（动态规划） ----------
@@ -594,7 +600,10 @@ function schedule(spec, dir) {
   const sm = sections(master, { from, to });
   spec.structureMap = { bpm: sm.bpm, sections: sm.sections, drops: sm.drops };
   const energyAt = (t) => (sm.sections.find((x) => t >= x.from - 0.01 && t < x.to - 0.01) || sm.sections.at(-1)).energy;
-  const minHoldAt = B.map((t) => { const e = energyAt(t); return Math.max(opt.minHold, e >= 3 ? 4 : e === 2 ? 6 : 8); });
+  // 快切段（主音轨时间 [[起, 止]]）：所有场次都没法长时间看清他的段落，每 1–2 拍换到此刻看得清的一场，换的那一刀只要求位置、大小对得上、动作大致像
+  const fast = (opt.fastCut || []).filter((r) => Array.isArray(r) && r.length === 2);
+  const inFast = (t) => fast.some(([a, b]) => t >= a - 0.01 && t < b);
+  const minHoldAt = B.map((t) => { if (inFast(t)) return opt.fastHold ?? 2; const e = energyAt(t); return Math.max(opt.minHold, e >= 3 ? 4 : e === 2 ? 6 : 8); });
   const bonusAt = B.map((t) => opt.bonus + (energyAt(t) >= 2 ? 0.04 : 0));
   const motion = posesOf(spec, dir);
   const srcs = spec.sources.filter((s) => s.offset != null && s.use !== false);
@@ -608,7 +617,9 @@ function schedule(spec, dir) {
     for (let k = 1; k < pp.length; k++) if (Math.hypot(pp[k].neck[0] - pp[k - 1].neck[0], pp[k].neck[1] - pp[k - 1].neck[1]) > 0.06) return false;
     return true;
   };
-  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); return off != null && L.usableSeg(s, off, t, e) && idOk(s, t + off, e + off) ? off : null; }));
+  // 快切段里只要求看得清他（认得准、主要关节看得见）而且能放回画面中间，大小差一些也行
+  const clearSeg = (s, off, a, b) => { const xs = motion[s.id].samples.filter((x) => x.t >= a + off && x.t <= b + off); return xs.length >= 2 && xs.filter((x) => L.centerable(x, 0.1)).length / xs.length >= 0.65; };
+  const okAt = srcs.map((s) => B.map((t, i) => { const e = B[i + 1] ?? to; const off = usable(s, t, e); return off != null && (inFast(t) ? clearSeg(s, off, t, e) : L.usableSeg(s, off, t, e)) && idOk(s, t + off, e + off) ? off : null; }));
   // 造型要轮得全：能用的时间越少的场次，换进去时奖励越多（不然这几场一次都排不上）
   const okN = okAt.map((r) => r.filter((v) => v != null).length), okMax = Math.max(...okN);
   const rare = okN.map((n) => (opt.variety ?? 0.06) * (1 - n / okMax));
@@ -622,6 +633,16 @@ function schedule(spec, dir) {
     if (sw.has(key)) return sw.get(key);
     const oa = okAt[a][i - 1] ?? okAt[a][i], ob = okAt[b][i];
     let r = { cost: Infinity, why: oa == null ? 'out' : ob == null ? 'in' : '' };
+    if (inFast(B[i]) && ob != null && idOk(srcs[b], B[i] + ob - 0.2, B[i] + ob + 0.6)) {
+      const sObjA = srcs[a], offA = oa ?? usable(sObjA, B[i] - 0.5, B[i] + 0.5) ?? sObjA.offset;
+      const m = bestShift(motion[sObjA.id], B[i] + offA, motion[srcs[b].id], B[i] + ob);
+      const ra = L.reach(sObjA, offA, B[i]);
+      if ((!Number.isFinite(m.dist) || m.dist <= (opt.fastMax ?? 0.35)) && (!ra || meet(ra, L.reach(srcs[b], ob + (m.shift || 0), B[i])))) {
+        r = { cost: (Number.isFinite(m.dist) ? m.dist : 0.35) - opt.bonus, shift: m.shift || 0, dist: Number.isFinite(m.dist) ? m.dist : 1, fast: true };
+        sw.set(key, r);
+        return r;
+      }
+    }
     // 脱身：这一场已经认不准他、锁不住（被挡、挤在一起）时，可以从这里换走，但换装那一刻照样要动作贴合、位置对得上（不贴合的刀比多停几拍更难看）
     if (oa == null && ob != null && okAt[a][i] == null && idOk(srcs[b], B[i] + ob - 0.3, B[i] + ob + 1.0) && L.edgeOk(srcs[b], ob, B[i])) {
       const sObjA = srcs[a], offA = usable(sObjA, B[i] - 0.5, B[i] + 0.5) ?? sObjA.offset;
