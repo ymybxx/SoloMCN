@@ -486,7 +486,11 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
     // 你配过的钥匙和登录直接放进环境变量，提示里列出名字（不用工具的任务不给）
     const cred = t.tools === '' ? { env: {}, prompt: '' } : credentials(cwd);
     // 等人处理（登录、付款）最多 40 分钟，工具调用不能先超时
-    const env = { ...cliEnv(), ...cred.env, MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000) };
+    // 模型、依赖这类大下载默认落到已装程序目录（data/programs），空间管理里看得到、能清理。
+    // 只对工作台启动的运行生效，你自己的终端不受影响。npm 和通用缓存（XDG）不改：出片用的 HyperFrames 和它的 Chrome 已经缓存在默认位置，改了要重下一遍
+    const programs = path.join(cwd, 'data', 'programs');
+    const downloads = { HF_HOME: path.join(programs, 'huggingface'), TORCH_HOME: path.join(programs, 'torch'), PIP_CACHE_DIR: path.join(programs, 'cache', 'pip') };
+    const env = { ...cliEnv(), ...downloads, ...cred.env, MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000) };
     const proc = spawn(
       claudeBin(),
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
