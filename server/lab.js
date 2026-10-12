@@ -447,18 +447,16 @@ export function createLab({ root, store }) {
     return { dir: path.relative(root, dir), files: out };
   }
 
-  // ---------- 已装程序和（停用的）经验本 ----------
+  // ---------- 已装程序 ----------
   const shared = path.join(root, 'videos', 'lab-shared');
   const toolsDir = path.join(root, 'data', 'programs');
   const manifestFile = path.join(toolsDir, 'programs.json');
-  const notesFile = path.join(shared, 'NOTES.md');
   // 以前的共用工具箱搬到 data/programs（同一块盘上是改名，不用复制）
   if (!fs.existsSync(toolsDir) && fs.existsSync(path.join(shared, 'tools'))) {
     fs.mkdirSync(path.dirname(toolsDir), { recursive: true });
     fs.renameSync(path.join(shared, 'tools'), toolsDir);
     if (fs.existsSync(path.join(shared, 'tools.json'))) fs.renameSync(path.join(shared, 'tools.json'), manifestFile);
   }
-  const NOTES_HEAD = '# 实践经验本\n\n调研里动手实践积累的经验：这台电脑的环境、工具箱里的工具怎么用、踩过的坑和解法。Claude 每次调研开始时读，结束时追加；你可以随时改、删掉过时的。\n\n';
   fs.mkdirSync(toolsDir, { recursive: true });
 
   const settings = () => ({ ...LAB_DEFAULTS, ...(store.get('settings', 'lab') || {}) });
@@ -472,20 +470,6 @@ export function createLab({ root, store }) {
 
   const readManifest = () => { try { return JSON.parse(fs.readFileSync(manifestFile, 'utf8')); } catch { return {}; } };
   const writeManifest = (m) => fs.writeFileSync(manifestFile, JSON.stringify(m, null, 1));
-  const readNotes = () => { try { return fs.readFileSync(notesFile, 'utf8'); } catch { return NOTES_HEAD; } };
-  function writeNotes(text) {
-    fs.mkdirSync(shared, { recursive: true });
-    fs.writeFileSync(notesFile, String(text).slice(0, 60_000));
-    return { ok: true, length: Math.min(String(text).length, 60_000) };
-  }
-  function appendNotes(text) {
-    const lines = String(text || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 20);
-    if (!lines.length) throw bad('没写经验');
-    const day = new Date().toISOString().slice(0, 10);
-    const add = lines.map((l) => (l.startsWith('- ') ? l : `- ${l}`)).map((l) => `${l}（${day}）`).join('\n');
-    return writeNotes(readNotes().replace(/\s*$/, '\n') + add + '\n');
-  }
-
   // 已装程序：list 列出装了什么；add 登记新装的；used 记下这次用了哪个
   function toolbox({ action = 'list', name, dir, purpose, usage }) {
     const m = readManifest();
@@ -524,7 +508,7 @@ export function createLab({ root, store }) {
         const p = path.join(root, 'videos', e.name);
         return { itemId, title: items[itemId]?.title || '（内容已删除）', exists: !!items[itemId], size: sizeOf(p), slimmed: fs.existsSync(path.join(p, '.slimmed')), lastUsedAt: newestMtime(p) };
       });
-    return { settings: settings(), tools, toolsTotal: tools.reduce((s, t) => s + t.size, 0), labs, labsTotal: labs.reduce((s, l) => s + l.size, 0), notesLength: readNotes().length };
+    return { settings: settings(), tools, toolsTotal: tools.reduce((s, t) => s + t.size, 0), labs, labsTotal: labs.reduce((s, l) => s + l.size, 0) };
   }
 
   function removeTool(name, reason) {
@@ -624,5 +608,5 @@ export function createLab({ root, store }) {
   }
 
   return { dirOf, sockDir, prepare, record, addMedia, removeMedia, pruneMissing, browse, ask, answer, askStatus, clearStale, files,
-    shared, toolsDir, settings, setSettings, toolbox, readNotes, writeNotes, appendNotes, storage, removeTool, slimLab, removeLab, afterRun, cleanup };
+    shared, toolsDir, settings, setSettings, toolbox, storage, removeTool, slimLab, removeLab, afterRun, cleanup };
 }

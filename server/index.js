@@ -466,14 +466,11 @@ async function handleApi(req, res, parts) {
     }
     return sendError(res, 404, 'not_found', '没有这个接口');
   }
-  // 实践的已装程序（data/programs）和空间管理（经验本已停用，只留着读写旧内容）
+  // 实践的已装程序（data/programs）和空间管理
   if (parts[0] === 'lab') {
     try {
       if (parts[1] === 'storage' && method === 'GET') return sendJson(res, 200, lab.storage());
       if (parts[1] === 'settings' && method === 'PUT') return sendJson(res, 200, await lab.setSettings(await readBody(req)));
-      if (parts[1] === 'notes' && parts.length === 2 && method === 'GET') return sendJson(res, 200, { text: lab.readNotes() });
-      if (parts[1] === 'notes' && parts.length === 2 && method === 'PUT') return sendJson(res, 200, lab.writeNotes(String((await readBody(req)).text ?? '')));
-      if (parts[1] === 'notes' && parts[2] === 'append' && method === 'POST') return sendJson(res, 200, lab.appendNotes((await readBody(req)).text));
       if (parts[1] === 'toolbox' && method === 'POST') return sendJson(res, 200, lab.toolbox(await readBody(req)));
       if (parts[1] === 'cleanup' && method === 'POST') return sendJson(res, 200, lab.cleanup());
       if (parts[1] === 'tools' && parts[2] && parts[3] === 'remove' && method === 'POST') return sendJson(res, 200, lab.removeTool(decodeURIComponent(parts[2]), null));

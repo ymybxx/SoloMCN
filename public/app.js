@@ -2027,9 +2027,6 @@ document.addEventListener('click',e=>{
     case 'lab-slim':labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/slim`,r=>`瘦身完成，腾出 ${fmtSize(r.freed)}`);break;
     case 'lab-rm':arm(b,'确认删除',()=>labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/remove`,r=>`已删除，腾出 ${fmtSize(r.freed)}`));break;
     case 'lab-cleanup':S.labCleaning=true;render();labCall('POST','/api/lab/cleanup',r=>r.done.length?`清理了 ${r.done.length} 项`:'没有需要清理的').finally(()=>{S.labCleaning=false;render()});break;
-    case 'lab-notes':api('GET','/api/lab/notes').then(r=>{S.labNotes=r.text;render()},e=>toast(e.message||'读取失败'));break;
-    case 'lab-notes-save':api('PUT','/api/lab/notes',{text:$('#labNotes')?.value??S.labNotes}).then(()=>toast('经验本已保存'),e=>toast(e.message||'保存失败'));break;
-    case 'lab-notes-close':S.labNotes=undefined;render();break;
     case 'fu-toggle':e.preventDefault();S.fuOpen=S.fuOpen===id?null:id;render();break;
     case 'run-followup':{const text=($('#fu-'+id)?.value||'').trim();if(!text){toast('先写要追加的要求');break}b.disabled=true;
       api('POST',`/api/agent/runs/${encodeURIComponent(id)}/followup`,{text}).then(()=>{S.fuText={...(S.fuText||{}),[id]:''};S.fuOpen=null;toast('Claude 接着做了')},e=>{b.disabled=false;toast(e.message||'启动失败')});break}
@@ -2076,7 +2073,6 @@ document.addEventListener('input',e=>{
   if(t.dataset.q&&t.type!=='checkbox'){const ch=t.dataset.ch||'x';const d=draft(ch);d.settings.queries[Number(t.dataset.q)][t.dataset.f]=t.value;
     if(!d.dirty){d.dirty=true;S.pendingRender=true}const sv=document.querySelector(`[data-act="cfg-save"][data-id="${ch}"]`);if(sv)sv.disabled=false;return}
   if(t.id==='poolText'){S.poolText=t.value;return}
-  if(t.id==='labNotes'){S.labNotes=t.value;return}
   if(t.id&&t.id.startsWith('fu-')){S.fuText={...(S.fuText||{}),[t.id.slice(3)]:t.value};return}
   if(t.id==='poolUser'){S.poolUser=t.value;return}
   if(!S.open)return;
