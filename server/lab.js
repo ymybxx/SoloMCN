@@ -6,8 +6,8 @@
 // - 等人处理：碰到登录、要花钱、要填支付信息，Claude 调 ask，任务停在这里，等你在页面上处理完再继续。
 //   银行卡号这类支付信息只由人在弹出的窗口里自己填，实践浏览器拒绝替 Claude 输入
 // 截图、录屏都存成内容卡片上的素材（source: 'practice'），写脚本、做视频时能直接用
-// - 共用工具箱：videos/lab-shared/tools/，所有内容共用（Ghidra、JDK 这类大工具装一次），tools.json 记着每个工具的用途、用法、上次使用时间
-// - 经验本：videos/lab-shared/NOTES.md，调研开始时读、结束时追加以后能复用的经验（环境情况、踩过的坑），页面上能看能改
+// - 已装程序：data/programs/，所有内容共用（Ghidra、JDK、模型文件这类大东西装一次），programs.json 记着每个的用途、用法、上次使用时间
+//   （以前在 videos/lab-shared/tools/，启动时自动搬过来）。怎么用的经验写进技能，不再另记经验本
 // - 空间管理：每次调研结束清掉下载缓存和解压过的安装包；定时淘汰久没用的工具、总量超上限的工具，
 //   瘦身调研完一段时间或已发布内容的实验目录（只留代码、记录和实践素材）。阈值在「设置」里改
 import fs from 'node:fs';
@@ -22,7 +22,6 @@ export const ASK_TIMEOUT_MS = 40 * 60_000; // 等人处理最多等多久
 const RECORD_MAX_SEC = 30;
 const SNAPSHOT_MAX = 15_000;
 const IDLE_CLOSE_MS = 10 * 60_000; // 实践浏览器闲置多久自动关掉
-const LAB_SKILLS = ['research-topic']; // 调研任务在实验目录里运行，要用的技能复制进去
 const MEDIA_KIND = { '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.webp': 'image', '.gif': 'image', '.mp4': 'video', '.webm': 'video', '.mov': 'video' };
 const LAUNCH = {
   executablePath: CHROME,
@@ -120,17 +119,16 @@ export function createLab({ root, store }) {
   const dirOf = (itemId) => path.join(root, 'videos', `lab-${itemId}`);
   const stamp = () => Date.now().toString(36);
 
-  // 调研任务开跑前：建实验目录，把调研要用的技能复制进去（复制，不是链接：改了也只改到副本）
+  // 调研任务开跑前：建实验目录，把在用的技能全部复制进去（沙盒读不到项目目录；复制，不是链接：改了也只改到副本，
+  // 调研要改进技能用 improve_skill 提建议）
   function prepare(itemId) {
     const dir = dirOf(itemId);
     fs.mkdirSync(path.join(dir, 'media'), { recursive: true });
     for (const f of ['.npmrc', '.gitconfig']) if (!fs.existsSync(path.join(dir, f))) fs.writeFileSync(path.join(dir, f), '');
     const skills = path.join(dir, '.claude', 'skills');
     fs.rmSync(skills, { recursive: true, force: true });
-    for (const name of LAB_SKILLS) {
-      const src = path.join(root, '.claude', 'skills', name);
-      if (fs.existsSync(src)) fs.cpSync(src, path.join(skills, name), { recursive: true });
-    }
+    const live = path.join(root, '.claude', 'skills');
+    if (fs.existsSync(live)) fs.cpSync(live, skills, { recursive: true, filter: (p) => !/(^|\/)(node_modules|\.git)(\/|$)/.test(path.relative(live, p)) });
     return dir;
   }
 
@@ -449,11 +447,17 @@ export function createLab({ root, store }) {
     return { dir: path.relative(root, dir), files: out };
   }
 
-  // ---------- 共用工具箱和经验本 ----------
+  // ---------- 已装程序和（停用的）经验本 ----------
   const shared = path.join(root, 'videos', 'lab-shared');
-  const toolsDir = path.join(shared, 'tools');
-  const manifestFile = path.join(shared, 'tools.json');
+  const toolsDir = path.join(root, 'data', 'programs');
+  const manifestFile = path.join(toolsDir, 'programs.json');
   const notesFile = path.join(shared, 'NOTES.md');
+  // 以前的共用工具箱搬到 data/programs（同一块盘上是改名，不用复制）
+  if (!fs.existsSync(toolsDir) && fs.existsSync(path.join(shared, 'tools'))) {
+    fs.mkdirSync(path.dirname(toolsDir), { recursive: true });
+    fs.renameSync(path.join(shared, 'tools'), toolsDir);
+    if (fs.existsSync(path.join(shared, 'tools.json'))) fs.renameSync(path.join(shared, 'tools.json'), manifestFile);
+  }
   const NOTES_HEAD = '# 实践经验本\n\n调研里动手实践积累的经验：这台电脑的环境、工具箱里的工具怎么用、踩过的坑和解法。Claude 每次调研开始时读，结束时追加；你可以随时改、删掉过时的。\n\n';
   fs.mkdirSync(toolsDir, { recursive: true });
 
@@ -482,7 +486,7 @@ export function createLab({ root, store }) {
     return writeNotes(readNotes().replace(/\s*$/, '\n') + add + '\n');
   }
 
-  // 工具箱：list 列出工具和经验本；add 登记新装的工具；used 记下这次用了哪些
+  // 已装程序：list 列出装了什么；add 登记新装的；used 记下这次用了哪个
   function toolbox({ action = 'list', name, dir, purpose, usage }) {
     const m = readManifest();
     if (action === 'add' || action === 'used') {
@@ -491,17 +495,17 @@ export function createLab({ root, store }) {
       if (action === 'add') {
         const rel = String(dir || key).replace(/^\/+/, '');
         const abs = path.resolve(toolsDir, rel);
-        if (!abs.startsWith(toolsDir + path.sep)) throw bad('工具要装在工具箱目录里');
+        if (!abs.startsWith(toolsDir + path.sep)) throw bad('程序要装在已装程序目录（data/programs）里');
         m[key] = { ...(m[key] || {}), name: key, dir: path.relative(toolsDir, abs), purpose: String(purpose || m[key]?.purpose || '').slice(0, 300), usage: String(usage || m[key]?.usage || '').slice(0, 600), addedAt: m[key]?.addedAt || Date.now(), lastUsedAt: Date.now(), removed: false };
       } else {
-        if (!m[key]) throw bad(`工具箱里没有 ${key}，装好后先用 add 登记`);
+        if (!m[key]) throw bad(`已装程序里没有 ${key}，装好后先用 add 登记`);
         m[key].lastUsedAt = Date.now();
       }
       writeManifest(m);
     }
     const tools = Object.values(m).map((t) => ({ name: t.name, dir: t.dir, purpose: t.purpose, usage: t.usage, removed: !!t.removed,
       exists: !t.removed && fs.existsSync(path.join(toolsDir, t.dir || t.name)), lastUsed: t.lastUsedAt ? new Date(t.lastUsedAt).toISOString().slice(0, 10) : null }));
-    return { toolsDir, tools, notes: readNotes(), askAboveGB: settings().askAboveGB };
+    return { programsDir: toolsDir, programs: tools, askAboveGB: settings().askAboveGB };
   }
 
   // ---------- 空间管理 ----------
@@ -530,7 +534,6 @@ export function createLab({ root, store }) {
     const m = readManifest();
     for (const t of Object.values(m)) if ((t.dir || t.name).split('/')[0] === name) t.removed = true;
     writeManifest(m);
-    if (reason) appendNotes(`工具箱里的 ${name} 已删除（${reason}），需要时按上面记的方法重装`);
     return { removed: name };
   }
 

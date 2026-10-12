@@ -756,9 +756,10 @@ server.registerTool(
       contact_sheet: VIDEO_PATH.optional().describe('检查用的缩略图拼图，如 videos/xxx/snapshots/contact-sheet.jpg'),
       duration_s: z.number().positive().max(600).describe('成片时长（秒）'),
       notes: z.string().max(1000).optional().describe('仅供后台查看的制作记录：素材来源、改动和未解决的问题；不要复制成画面、字幕或旁白'),
+      pronunciations: z.array(z.object({ word: z.string().min(1).max(40), say: z.string().min(1).max(60) })).max(30).optional().describe('这次发现念错、改写后念对了的词，登记进账号的读音表，下次配音自动套用'),
     },
   },
-  tool(async ({ item_id, mp4, project, contact_sheet, duration_s, notes }) => {
+  tool(async ({ item_id, mp4, project, contact_sheet, duration_s, notes, pronunciations }) => {
     const abs = path.resolve(ROOT, mp4);
     if (!abs.startsWith(path.join(ROOT, 'videos') + path.sep) || !existsSync(abs) || !statSync(abs).isFile()) throw new Error(`找不到视频文件 ${mp4}`);
     const it = await call('GET', `/api/items/${item_id}`);
@@ -766,6 +767,7 @@ server.registerTool(
     const prev = it.video && it.video.mp4 !== mp4 ? [{ mp4: it.video.mp4, durationS: it.video.durationS, notes: it.video.notes, at: it.video.at, version: it.video.version || 1 }, ...(it.video.history || [])].slice(0, 10) : it.video?.history || [];
     const video = { history: prev, version: it.video && it.video.mp4 !== mp4 ? (it.video.version || 1) + 1 : it.video?.version || 1, mp4, project: (project || path.dirname(path.dirname(mp4))).replace(/\/$/, ''), contactSheet: contact_sheet || null, durationS: Math.round(duration_s * 10) / 10, notes: notes || '', sizeMB: Math.round(statSync(abs).size / 1e5) / 10, at: Date.now() };
     await call('PATCH', `/api/items/${item_id}`, { video, stage: ['idea', 'script', 'production'].includes(it.stage || 'idea') ? 'scheduled' : it.stage, updatedAt: Date.now() });
+    if (pronunciations?.length && it.accountId) await call('POST', `/api/accounts/${it.accountId}/pronunciations`, { add: pronunciations }).catch(() => {});
     return { saved: true, ...video };
   }),
 );
@@ -810,7 +812,11 @@ server.registerTool(
         video: it.video ? { mp4: it.video.mp4, project: it.video.project, durationS: it.video.durationS, notes: it.video.notes, version: it.video.version || 1 } : null,
         // 调研时动手实践的实验目录（代码、网页实验、下载的结果），做视频时网页实验可以直接当镜头
         lab: labInfo?.files?.length ? labInfo : undefined,
+        // 这条内容用的做法技能（写脚本时定的，或者系列指定的），各环节读那个技能里对应的文件
+        craft: it.craft || (a?.series || []).find((v) => v.id === it.seriesId)?.craft || null,
       },
+      // 账号的读音表：配音前把这些词换成读法（字幕仍显示原文）
+      pronunciations: a?.pronunciations?.length ? a.pronunciations : undefined,
       // account 里的人群、人设、风格、配音、情绪，是按这条内容所属的系列取的（没有系列就用账号上的）
       account: a && (() => { const c = creativeOf(a, it); return { code: a.code, name: a.name, brief: a.brief || undefined, audience: c.audience, persona: c.persona, style: c.visual, platforms: (a.platforms || []).map((p) => PLATFORM_NAMES[p] || p), emotions: c.emotions, voice: c.voice }; })(),
       // 这条内容属于哪个系列：人群、主角、画面、结构、时长都按它
@@ -834,14 +840,18 @@ server.registerTool(
   {
     title: '保存脚本',
     description: '把写好的分镜脚本存到内容卡片上（会覆盖原有脚本，旧脚本自动留底）。还在「选题」阶段的内容会自动推进到「脚本」阶段。',
-    inputSchema: { item_id: ITEM_ID, script: z.string().min(50).max(30000).describe('完整的分镜脚本，纯文本') },
+    inputSchema: {
+      item_id: ITEM_ID,
+      script: z.string().min(50).max(30000).describe('完整的分镜脚本，纯文本'),
+      craft: z.string().regex(/^[a-z0-9][a-z0-9-]{0,60}$/).optional().describe('这条内容用的做法技能名（比如 stage-montage、explainer-video），之后生成视频、修改视频都按它'),
+    },
   },
-  tool(async ({ item_id, script }) => {
+  tool(async ({ item_id, script, craft }) => {
     const it = await call('GET', `/api/items/${item_id}`);
     // 覆盖前把旧脚本留底（最近 5 份），按意见改坏了可以在卡片上退回上一版
     const old = (it.script || '').trim();
     const scriptHistory = old && old !== script.trim() ? [{ script: it.script, at: Date.now() }, ...(it.scriptHistory || [])].slice(0, 5) : it.scriptHistory || [];
-    await call('PATCH', `/api/items/${item_id}`, { script, scriptHistory, stage: (it.stage || 'idea') === 'idea' ? 'script' : it.stage, updatedAt: Date.now() });
+    await call('PATCH', `/api/items/${item_id}`, { script, scriptHistory, ...(craft ? { craft } : {}), stage: (it.stage || 'idea') === 'idea' ? 'script' : it.stage, updatedAt: Date.now() });
     return { saved: true, length: script.length };
   }),
 );
@@ -1011,14 +1021,14 @@ server.registerTool(
 server.registerTool(
   'lab_toolbox',
   {
-    title: '共用工具箱',
+    title: '已装程序',
     description:
-      '所有内容共用的实践工具箱（Ghidra、JDK 这类大工具装一次，以后直接用）和经验本。' +
-      'action：list 列出工具箱里的工具（用途、用法、装在哪）和经验本全文，调研开始时先看；add 登记刚装进工具箱的工具（dir 是相对工具箱的目录，写清用途和怎么运行）；used 记下这次用了哪个工具（久没用的工具会被自动清理）。',
+      '这台电脑上为实践装的程序（Ghidra、JDK、模型文件这类大东西装一次，以后直接用），都在已装程序目录（data/programs）里。' +
+      'action：list 列出已装的程序（用途、用法、装在哪），开始动手前先看；add 登记刚装好的程序（dir 是相对已装程序目录的目录，写清用途和怎么运行）；used 记下这次用了哪个（久没用的会被自动清理）。',
     inputSchema: {
       action: z.enum(['list', 'add', 'used']),
       name: z.string().max(60).optional().describe('add、used 时的工具名，比如 ghidra'),
-      dir: z.string().max(200).optional().describe('add 时工具在工具箱里的目录，比如 ghidra_12.1.4'),
+      dir: z.string().max(200).optional().describe('add 时程序在已装程序目录里的目录，比如 ghidra/ghidra_12.1.4'),
       purpose: z.string().max(300).optional().describe('add 时写这个工具用来做什么'),
       usage: z.string().max(600).optional().describe('add 时写怎么运行（命令、需要的环境变量，比如 JAVA_HOME）'),
     },
@@ -1027,13 +1037,19 @@ server.registerTool(
 );
 
 server.registerTool(
-  'lab_notes_add',
+  'improve_skill',
   {
-    title: '追加实践经验',
-    description: '调研结束前，把以后别的内容也用得上的经验追加进经验本：这台电脑的环境、工具怎么装怎么用、踩过的坑和解法。每条一行、简短，不写这条内容自己的细节，经验本里已经有的不要重复写。',
-    inputSchema: { text: z.string().min(1).max(3000).describe('一行一条经验') },
+    title: '改进技能',
+    description: '这次运行遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法时，提给对应的技能。工作台会交给 Claude 整理进技能（按设置直接生效或等用户确认）。' +
+      '做法的坑提给做法技能，工具的坑提给工具技能，通用流程的问题提给这个环节的流程技能。只提以后别的内容也用得上的经验，不写这条内容自己的细节。',
+    inputSchema: {
+      skill: z.string().regex(/^[a-z0-9][a-z0-9-]{0,60}$/).optional().describe('觉得该改哪个技能（比如 stage-montage、research-topic），不确定就不填'),
+      problem: z.string().min(4).max(1500).describe('遇到了什么：哪一步、什么情况、结果怎样'),
+      suggestion: z.string().max(1500).optional().describe('建议技能里怎么写'),
+      item_id: ITEM_ID.optional(),
+    },
   },
-  tool(async ({ text }) => call('POST', '/api/lab/notes/append', { text })),
+  tool(async ({ skill, problem, suggestion, item_id }) => call('POST', '/api/skill-changes/suggest', { skill, problem, suggestion, itemId: item_id })),
 );
 
 server.registerTool(

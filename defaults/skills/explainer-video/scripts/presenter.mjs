@@ -19,7 +19,7 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = process.env.SOLOMCN_ROOT || path.resolve(HERE, '../../../..'); // 工作台根目录（.claude/skills/make-video/scripts 往上四层）
+const ROOT = process.env.SOLOMCN_ROOT || path.resolve(HERE, '../../../..'); // 工作台根目录（.claude/skills/explainer-video/scripts 往上四层）
 const { chromium } = await import(pathToFileURL(path.join(ROOT, 'node_modules', 'playwright-core', 'index.mjs')).href);
 const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 

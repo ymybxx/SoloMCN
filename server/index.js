@@ -53,10 +53,43 @@ lab.clearStale();
 const labCleanup = () => { try { const r = lab.cleanup(); if (r.done.length) console.log(`实践空间清理：${r.done.length} 项`); } catch (err) { console.error('实践空间清理出错：', err.message); } };
 setTimeout(labCleanup, 60_000).unref();
 setInterval(labCleanup, 6 * 3600_000).unref();
-const agent = createAgent({ store, cwd: root, lab });
+// 技能是本地数据：启动时装上新的出厂技能，出厂更新没改过的直接换上、改过的三方合并（见 skills.js）
+const skills = createSkills({ root, store });
+const agent = createAgent({ store, cwd: root, lab, skills, hooks: {
+  // 生成、修改视频时 Claude 可以直接改技能：开跑前存一份，跑完对比，记成一条技能改动
+  onStart: (id, task) => { if (['video', 'revise'].includes(task)) skills.runBegin(id); },
+  onDone: async (id, task, run) => {
+    if (task === 'skills') await skills.finishDraft(run.args?.changeId, { ok: run.status === 'done', summary: run.result, error: run.error || (run.status === 'stopped' ? '被停止了' : '') });
+    if (['video', 'revise'].includes(task)) {
+      const report = String(run.result || '');
+      const line = (report.match(/技能改动[:：]\s*(.+)/) || [])[1];
+      await skills.runEnd(id, { itemId: run.args?.itemId, task, title: line ? line.slice(0, 60) : `${run.name || '生成视频'}时改的`, summary: line || report.slice(-1500) });
+    }
+    pumpSkills();
+  },
+} });
+// 排队的技能改动一条一条交给 Claude（单独一条队列，不挡生成视频和写脚本）
+let pumping = false;
+async function pumpSkills() {
+  if (pumping || agent.busy('skills')) return;
+  pumping = true;
+  try {
+    const next = skills.nextQueued();
+    if (!next) return;
+    await skills.markWorking(next.id);
+    try {
+      const run = await agent.start('skills', { changeId: next.id });
+      await skills.markWorking(next.id, run.id);
+    } catch (e) {
+      await store.update('skillChanges', next.id, { status: 'failed', error: e.message });
+    }
+  } finally {
+    pumping = false;
+  }
+}
+setTimeout(() => skills.maybeTidy().then(pumpSkills), 120_000).unref();
+setInterval(() => skills.maybeTidy().then(pumpSkills), 6 * 3600_000).unref();
 const publisher = createPublisher({ store, root });
-// 技能是本地数据：启动时装上新的出厂技能，没改过的跟着出厂说明更新
-const skills = createSkills({ root });
 const setupCheck = createSetupCheck({ hotUrl: HOT_URL });
 // 拉 YouTube 字幕用的登录（可选），cookie 导出到 data/youtube-cookies.txt 给热点服务的 yt-dlp 用
 const ytLogin = createYtLogin({ root });
@@ -66,9 +99,12 @@ const biliJobs = new Map(); // 剪片段任务：编号 -> { status, itemId, res
 const vetJobs = new Map(); // 直拍体检任务（同上），一次只跑一个
 let vetQueue = Promise.resolve();
 {
-  const r = skills.sync();
+  const r = await skills.sync();
   if (r.installed.length) console.log(`已装上出厂技能：${r.installed.join('、')}`);
-  if (r.updated.length) console.log(`技能已跟着出厂说明更新：${r.updated.join('、')}`);
+  if (r.updated.length) console.log(`技能已跟着出厂版本更新：${r.updated.join('、')}`);
+  if (r.merged.length) console.log(`出厂更新已合进你改过的技能：${r.merged.join('、')}`);
+  if (r.conflicted.length) console.log(`出厂更新和你改过的地方冲突，交给 Claude 合并：${r.conflicted.join('、')}`);
+  setTimeout(pumpSkills, 5_000).unref();
 }
 
 // 让 Claude 能“看”一条视频：截帧拼成缩略图 + 语音转文字，结果存在 video.watch，生成发布信息时用
@@ -225,30 +261,45 @@ async function handleApi(req, res, parts) {
   // 连接设置（图片生成的接口地址、key、模型，Claude 长期令牌）：只返回末 4 位
   // 环境检查：首次打开时提示还差什么（Claude Code 登录、ffmpeg、Chrome、HyperFrames 技能、热点服务）
   if (parts[0] === 'setup-check' && method === 'GET') return sendJson(res, 200, await setupCheck.check(new URL(req.url, 'http://localhost').searchParams.has('force')));
-  // 技能：列表、查看、保存、恢复出厂、出厂更新的合并
+  // 技能：列表、查看、改文件、开关、恢复出厂；技能改动：想法、对比、通过、再改改、不要、撤回
+  if (parts[0] === 'skill-settings') {
+    if (method === 'GET') return sendJson(res, 200, skills.settings());
+    if (method === 'PUT') return sendJson(res, 200, await skills.setSettings(await readBody(req)));
+  }
+  if (parts[0] === 'skill-changes') {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    if (parts.length === 1 && method === 'GET') return sendJson(res, 200, skills.listChanges({ skill: q.get('skill') || undefined, limit: Math.min(200, Number(q.get('limit')) || 50) }));
+    // 总控台提想法：Claude 找到该改的技能，在草稿里改好，等你确认
+    if (parts[1] === 'idea' && method === 'POST') { const r = await skills.idea((await readBody(req)).text); pumpSkills(); return sendJson(res, 200, r); }
+    if (parts[1] === 'tidy' && method === 'POST') { const r = await skills.tidy(); pumpSkills(); return sendJson(res, 200, r); }
+    // 运行中提的建议（improve_skill）：交给 Claude 整理进技能
+    if (parts[1] === 'suggest' && method === 'POST') { const b = await readBody(req); const r = await skills.suggest({ ...b, runId: agent.runningIn('main') }); pumpSkills(); return sendJson(res, 200, r); }
+    const id = parts[1];
+    if (!/^[a-z0-9]{6,40}$/.test(id || '')) return sendError(res, 404, 'not_found', '没有这条改动');
+    if (parts.length === 2 && method === 'GET') return sendJson(res, 200, { ...skills.rec(id), id });
+    if (parts[2] === 'diff' && method === 'GET') return sendJson(res, 200, { diff: skills.diff(id) });
+    if (parts[2] === 'apply' && method === 'POST') return sendJson(res, 200, await skills.apply(id));
+    if (parts[2] === 'reject' && method === 'POST') return sendJson(res, 200, await skills.reject(id));
+    if (parts[2] === 'revert' && method === 'POST') return sendJson(res, 200, await skills.revert(id));
+    if (parts[2] === 'refine' && method === 'POST') { const r = await skills.refine(id, (await readBody(req)).text); pumpSkills(); return sendJson(res, 200, r); }
+    if (parts[2] === 'retry' && method === 'POST') { const r = skills.rec(id); if (r?.status !== 'failed') return sendError(res, 400, 'bad_input', '只有没做完的能重试'); await store.update('skillChanges', id, { status: 'queued' }); pumpSkills(); return sendJson(res, 200, skills.rec(id)); }
+  }
   if (parts[0] === 'skills') {
     if (parts.length === 1 && method === 'GET') return sendJson(res, 200, skills.list());
+    if (parts.length === 1 && method === 'POST') { const b = await readBody(req); return sendJson(res, 200, await skills.create(b.name, b.content)); }
     const name = parts[1];
     if (parts.length === 2 && method === 'GET') return sendJson(res, 200, skills.get(name));
-    if (parts.length === 2 && method === 'PUT') return sendJson(res, 200, skills.save(name, (await readBody(req)).content));
-    if (parts[2] === 'reset' && method === 'POST') return sendJson(res, 200, skills.reset(name));
-    if (parts[2] === 'accept' && method === 'POST') return sendJson(res, 200, skills.acceptUpdate(name, (await readBody(req)).content));
-    if (parts[2] === 'history' && /^\d+$/.test(parts[3] || '') && method === 'GET') return sendJson(res, 200, { content: skills.historyContent(name, parts[3]) });
-    // 让 Claude 把新版出厂说明的改进合进你改过的版本：只返回合并结果，你看过再保存
-    if (parts[2] === 'merge' && method === 'POST') {
-      const { base, next, mine } = skills.mergeInputs(name);
-      const prompt = `下面是一个 Claude Code 技能（SKILL.md）的三个版本。用户在旧的出厂版本上改过，现在出厂版本更新了。
-请输出合并后的完整 SKILL.md：保留用户的所有改动和口味，同时把新出厂版本里的改进（新增的规则、步骤、修正）合进来；两边冲突时以用户的改动为准。只输出合并后的文件内容，不要任何解释。
-
-===== 旧的出厂版本 =====
-${base}
-===== 新的出厂版本 =====
-${next}
-===== 用户现在的版本 =====
-${mine}`;
-      const { text } = await runClaude(prompt, { model: modelFor(store, 'series'), effort: effortFor(store, 'series') });
-      return sendJson(res, 200, { content: String(text || '').replace(/^```(?:markdown|md)?\n|\n```\s*$/g, '').trim() + '\n' });
+    if (parts.length === 2 && method === 'DELETE') return sendJson(res, 200, await skills.remove(name));
+    // 技能目录里的任意一个文件：?path=SKILL.md、references/x.md、scripts/y.mjs
+    if (parts[2] === 'file') {
+      const rel = new URL(req.url, 'http://localhost').searchParams.get('path') || 'SKILL.md';
+      if (method === 'GET') return sendJson(res, 200, skills.readSkillFile(name, rel));
+      if (method === 'PUT') { const b = await readBody(req); return sendJson(res, 200, await skills.writeSkillFile(name, rel, b.content, { reason: b.reason })); }
     }
+    if (parts.length === 2 && method === 'PUT') { const b = await readBody(req); return sendJson(res, 200, await skills.writeSkillFile(name, 'SKILL.md', b.content, { reason: b.reason })); }
+    if (parts[2] === 'enabled' && method === 'PUT') return sendJson(res, 200, await skills.setEnabled(name, !!(await readBody(req)).on));
+    if (parts[2] === 'reset' && method === 'POST') return sendJson(res, 200, await skills.reset(name));
+    if (parts[2] === 'history' && /^\d+$/.test(parts[3] || '') && method === 'GET') return sendJson(res, 200, { content: skills.historyContent(name, parts[3]) });
   }
   if (parts[0] === 'config') {
     if (parts.length === 1 && method === 'GET') return sendJson(res, 200, publicConfig());
@@ -415,7 +466,7 @@ ${mine}`;
     }
     return sendError(res, 404, 'not_found', '没有这个接口');
   }
-  // 实践的共用工具箱、经验本和空间管理
+  // 实践的已装程序（data/programs）和空间管理（经验本已停用，只留着读写旧内容）
   if (parts[0] === 'lab') {
     try {
       if (parts[1] === 'storage' && method === 'GET') return sendJson(res, 200, lab.storage());
@@ -520,7 +571,7 @@ ${mine}`;
       const job = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       const itemId = parts[1], assetId = parts[3];
       vetJobs.set(job, { status: 'running', itemId, at: Date.now() });
-      const script = path.join(root, '.claude', 'skills', 'make-video', 'scripts', 'montage.mjs');
+      const script = path.join(root, '.claude', 'skills', 'stage-montage', 'scripts', 'montage.mjs');
       vetQueue = vetQueue.then(() => new Promise((ok) => execFile(process.execPath, [script, 'vet', '--file', path.resolve(root, a.file)], { timeout: 15 * 60_000, maxBuffer: 1 << 24 }, async (err, stdout, stderr) => {
         try {
           if (err) throw new Error(String(stderr || err.message).trim().split('\n').pop());
@@ -623,6 +674,19 @@ ${mine}`;
     return sendError(res, 404, 'not_found', '没有这个 AI 接口');
   }
 
+  // 账号的读音表：配音时把这些词换成读法。生成视频时 Claude 发现念错、改好了的词会登记进来
+  if (parts[0] === 'accounts' && ID_RE.test(parts[1] || '') && parts[2] === 'pronunciations' && method === 'POST') {
+    const acc = store.get('accounts', parts[1]);
+    if (!acc) return sendError(res, 404, 'not_found', '没有这个账号');
+    const list = [...(acc.pronunciations || [])];
+    for (const x of (await readBody(req)).add || []) {
+      const word = String(x?.word || '').trim().slice(0, 40), say = String(x?.say || '').trim().slice(0, 60);
+      if (!word || !say) continue;
+      const i = list.findIndex((y) => y.word.toLowerCase() === word.toLowerCase());
+      if (i >= 0) list[i] = { word, say }; else list.push({ word, say });
+    }
+    return sendJson(res, 200, await store.update('accounts', parts[1], { pronunciations: list.slice(-300) }));
+  }
   // 数据接口：/api/<collection>/<id>
   const [col, id] = parts;
   if (!COLLECTIONS.includes(col) || !ID_RE.test(id || '') || parts.length !== 2) {

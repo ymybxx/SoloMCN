@@ -625,3 +625,27 @@ a.pick-src:hover{color:var(--blue)}
 /* 内容贴底：新写出的字一直在最下面可见 */
 .run-live .lv-tail{max-height:220px;overflow:auto;display:flex;flex-direction:column-reverse;padding:0 12px 10px}
 .run-live pre{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.6 inherit;font-family:inherit;opacity:.9}
+/* 技能改动 */
+.sk-group{font-size:11.5px;letter-spacing:.04em;margin:10px 10px 2px}
+.sk-switch{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer}
+.sk-switch input{accent-color:var(--ok);width:16px;height:16px}
+.ftabs{display:flex;flex-wrap:wrap;gap:6px}
+.ftab{border:1px solid var(--line,rgba(127,127,127,.25));background:none;border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--muted)}
+.ftab.on{border-color:var(--accent);color:var(--ink)}
+.ftab code{font-size:12px}
+.chg-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.chg-title{flex:1;min-width:160px}
+.chg-idea{margin:0;font-size:13.5px}
+.chg-sum{white-space:pre-wrap;font-size:13px;color:var(--muted);line-height:1.6}
+.chg-files{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:12.5px}
+.chg-file b.a{color:var(--ok);font-weight:600}.chg-file b.d{color:var(--bad);font-weight:600}
+.chg-refine{display:flex;gap:8px;flex-wrap:wrap}
+.chg-refine input{flex:1;min-width:180px}
+.btn.sm{padding:3px 10px;font-size:12px}
+.pol{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;flex-wrap:wrap}
+.diff{max-height:520px;overflow:auto;margin:0;font:12px/1.55 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);background:var(--bg2,rgba(127,127,127,.08));border-radius:8px;padding:8px 0}
+.diff .dl{display:block;padding:0 10px;white-space:pre-wrap;word-break:break-word}
+.diff .dl.a{background:color-mix(in srgb,var(--ok) 16%,transparent)}
+.diff .dl.d{background:color-mix(in srgb,var(--bad) 14%,transparent)}
+.diff .dl.h{color:var(--faint)}
+.diff .dl.f{font-weight:700;margin-top:8px;color:var(--ink)}

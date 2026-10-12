@@ -129,7 +129,7 @@ const TASKS = {
     name: '调研',
     maxTurns: 120,
     lab: true,
-    prompt: ({ itemId, labDir, sockDir, sharedDir, askAboveGB, prior }) => `/research-topic 内容 id：${itemId}；实验目录：${labDir}；本地通信目录：${sockDir}；共用工具箱：${sharedDir}/tools（经验本 ${sharedDir}/NOTES.md）；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
+    prompt: ({ itemId, labDir, sockDir, programsDir, askAboveGB, prior, craft }) => `/research-topic 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}；实验目录：${labDir}；本地通信目录：${sockDir}；已装程序目录：${programsDir}；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
   },
   // 下面三个在「设置」里选成「后台 Agent」时走这里，选「单次调用」时走 cli.js
   script: {
@@ -154,7 +154,7 @@ const TASKS = {
     name: '生成视频',
     lane: 'video',
     maxTurns: 400,
-    prompt: ({ itemId }) => `/make-video 内容 id：${itemId}`,
+    prompt: ({ itemId, craft }) => `/make-video 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}`,
     tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'].join(','),
     allowed: ['mcp__workbench__get_item', 'mcp__workbench__save_video', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'],
     denied: ['WebSearch', 'WebFetch', 'NotebookEdit'],
@@ -164,13 +164,31 @@ const TASKS = {
     name: '修改视频',
     lane: 'video',
     maxTurns: 200,
-    prompt: ({ itemId, feedback, images = [] }) => `/revise-video 内容 id：${itemId}\n修改意见：\n${feedback}` +
+    prompt: ({ itemId, feedback, images = [], craft }) => `/revise-video 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}\n修改意见：\n${feedback}` +
       (images.length ? `\n附图（用读文件工具逐张查看）：\n${images.map((p, i) => `图 ${i + 1}：${path.join(ROOT, p)}`).join('\n')}` : ''),
     tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'].join(','),
     allowed: ['mcp__workbench__get_item', 'mcp__workbench__save_video', 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'Agent', 'TodoWrite', 'ToolSearch'],
     denied: ['WebSearch', 'WebFetch', 'NotebookEdit'],
   },
+  // 改进技能：按想法、运行中提的建议、有冲突的出厂更新、定期整理，在草稿里改技能（见 skills.js），
+  // 改完按设置直接生效或等用户确认。不上网，输入只有用户的话和技能本身
+  skills: {
+    name: '改进技能',
+    lane: 'skills',
+    maxTurns: 150,
+    prompt: ({ changeId, mode, draft, extra }) => `/improve-skills 改动 id：${changeId}；方式：${mode}；草稿目录：${draft}${extra ? `\n${extra}` : ''}`,
+    tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'TodoWrite', 'ToolSearch'].join(','),
+    allowed: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'Skill', 'TodoWrite', 'ToolSearch'],
+    denied: ['WebSearch', 'WebFetch', 'NotebookEdit', 'mcp__workbench__*'],
+  },
 };
+
+// 自我进化开着时，各环节的提示里多一段：遇到坑就改进对应的技能。
+// 生成、修改视频这两种能读写文件、不上网，直接改技能文件（跑完平台对比、记一条改动）；
+// 其他能上网的运行不能改文件，用 improve_skill 提建议，由「改进技能」任务整理进去
+const EVOLVE_DIRECT = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，做完后直接改对应技能的文件（.claude/skills/<技能名>/ 下）：做法的坑改做法技能，工具的坑改工具技能，通用流程的问题改流程技能。要改，不要只往后追加：同主题的合并，过时的删掉；SKILL.md 保持简短，细节放附录。只为以后的运行改，不为了这一次临时改。最后在汇报里单独一行写「技能改动：改了什么、为什么」。';
+const EVOLVE_SUGGEST = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，用 improve_skill 提给对应的技能（做法的坑给做法技能，工具的坑给工具技能，通用流程的问题给这个环节的流程技能）。只提以后别的内容也用得上的经验。';
+const EVOLVE_TASKS = { video: EVOLVE_DIRECT, revise: EVOLVE_DIRECT, research: EVOLVE_SUGGEST, script: EVOLVE_SUGGEST, check: EVOLVE_SUGGEST, curate: EVOLVE_SUGGEST, ideas: EVOLVE_SUGGEST, teardown: EVOLVE_SUGGEST, analysis: EVOLVE_SUGGEST };
 
 const TOOL_NAMES = {
   get_feed: '读取渠道素材',
@@ -295,7 +313,7 @@ export function longestString(raw) {
   return best;
 }
 
-export function createAgent({ store, cwd, lab }) {
+export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
   // 调研任务的启动配置：在实验目录里运行，开 Claude Code 的沙盒（不能读家目录、只能写实验目录、只连白名单网站，
   // 被拦的命令不准退到沙盒外重试）；读写文件工具也只允许实验目录；技能复制一份进去，工作台工具用绝对路径指定
   function labLaunch(itemId) {
@@ -305,7 +323,7 @@ export function createAgent({ store, cwd, lab }) {
     const settings = {
       sandbox: {
         enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: true,
-        filesystem: { denyRead: ['~/'], allowRead: [dir, lab.shared, nodeDir, sock], allowWrite: [lab.shared, sock] },
+        filesystem: { denyRead: ['~/'], allowRead: [dir, lab.toolsDir, nodeDir, sock], allowWrite: [lab.toolsDir, sock] },
         // 本地通信（unix socket）只放行这条内容专用的临时目录：工具之间能通信（比如 REA 连 Ghidra），
         // 电脑上别的本地服务（Docker、SSH 代理等）连不上
         network: { allowedDomains: LAB_DOMAINS, strictAllowlist: true, allowUnixSockets: [sock] },
@@ -316,7 +334,7 @@ export function createAgent({ store, cwd, lab }) {
       cwd: dir,
       args: ['--settings', JSON.stringify(settings), '--mcp-config', JSON.stringify(mcp), '--strict-mcp-config'],
       tools: [...BUILTIN_TOOLS, 'Bash', 'Read', 'Write', 'Edit', 'TodoWrite'].join(','),
-      allowed: [...ALLOWED_TOOLS, 'Bash', 'TodoWrite', `Edit(/${dir}/**)`, `Read(/${dir}/**)`, `Edit(/${lab.shared}/**)`, `Read(/${lab.shared}/**)`],
+      allowed: [...ALLOWED_TOOLS, 'Bash', 'TodoWrite', `Edit(/${dir}/**)`, `Read(/${dir}/**)`, `Edit(/${lab.toolsDir}/**)`, `Read(/${lab.toolsDir}/**)`],
       denied: ['NotebookEdit', 'Glob', 'Grep'],
       // 依赖的缓存放进实验目录（家目录读写不了）；等人处理（登录、付款）最多 40 分钟，工具调用不能先超时
       // npm、git、pip 的个人配置文件都在家目录里，沙盒读不了会报权限错误：指到实验目录里的空文件
@@ -394,7 +412,7 @@ export function createAgent({ store, cwd, lab }) {
       if (!ID_RE.test(args.itemId || '') || !store.get('items', args.itemId)) throw Object.assign(new Error('找不到这条内容'), { status: 400 });
       args.labDir = lab.dirOf(args.itemId);
       args.sockDir = lab.sockDir(args.itemId);
-      args.sharedDir = lab.shared;
+      args.programsDir = lab.toolsDir;
       args.askAboveGB = lab.settings().askAboveGB;
       // 已有报告：7 天内默认在它基础上补；超过 7 天或用户选了「从头查」就全部重查
       const at = store.get('items', args.itemId).research?.at;
@@ -420,6 +438,25 @@ export function createAgent({ store, cwd, lab }) {
       args.accounts = (args.accounts || []).filter((c) => codes.includes(String(c)));
       if (!args.accounts.length) throw Object.assign(new Error('至少选一个账号'), { status: 400 });
       args.n = Math.min(5, Math.max(1, Number(args.n) || 3));
+    }
+    // 这条内容用的做法技能：写脚本时定的，或者系列指定的
+    if (['research', 'video', 'revise'].includes(task)) {
+      const it = store.get('items', args.itemId);
+      const acc = it?.accountId && store.get('accounts', it.accountId);
+      args.craft = it?.craft || (acc?.series || []).find((x) => x.id === it?.seriesId)?.craft || '';
+    }
+    if (task === 'skills') {
+      const r = skills?.rec(args.changeId);
+      if (!r) throw Object.assign(new Error('没有这条技能改动'), { status: 400 });
+      args.draft = skills.draftDir(args.changeId);
+      args.mode = { idea: '想法', suggest: '运行中发现', update: '合并出厂更新', tidy: '整理' }[r.source] || '想法';
+      const lines = [];
+      if (r.source === 'idea') lines.push(`想法：${r.idea}`);
+      if (r.source === 'suggest') lines.push(`建议来自一次${r.task ? `「${TASKS[r.task]?.name || r.task}」` : ''}运行${r.target ? `，它觉得该改 ${r.target}` : ''}：\n${r.suggestion}`);
+      if (r.source === 'update') { const d = skills.mergeDirs(args.changeId); lines.push(`要合并的技能：${(r.skills || []).join('、')}；旧出厂版：${d.old}；新出厂版：${d.next}；三方合不上的文件：${(r.conflicts || []).join('、')}`); }
+      const last = (r.refines || []).slice(-1)[0];
+      if (last) lines.push(`你上一轮已经在草稿里改过（改动都还在草稿里），当时的说明：\n${r.summary || '（无）'}\n用户看了以后说：「${last.text}」\n在草稿的基础上接着改。`);
+      args.extra = lines.join('\n');
     }
     return t;
   }
@@ -449,6 +486,7 @@ export function createAgent({ store, cwd, lab }) {
       const it = store.get('items', args.itemId);
       if (it && ['idea', 'script'].includes(it.stage || 'idea')) await store.update('items', args.itemId, { stage: 'production', updatedAt: Date.now() });
     }
+    try { hooks.onStart?.(id, task, args); } catch {}
     launch({ id, run, task, t, lane, prompt: t.prompt(args) });
     return { id, ...run };
   }
@@ -466,6 +504,7 @@ export function createAgent({ store, cwd, lab }) {
     const run = { ...saved, status: 'running', error: null, finishedAt: null, resumes: (saved.resumes || 0) + 1, steps: [...(saved.steps || [])] };
     run.steps.push({ at: Date.now(), kind: 'text', text: '从中断处继续' });
     await store.update('agentRuns', id, { status: 'running', error: null, finishedAt: null, resumes: run.resumes, steps: run.steps });
+    try { hooks.onStart?.(id, saved.task, saved.args || {}); } catch {}
     launch({ id, run, task: saved.task, t, lane, prompt: RESUME_PROMPT, resumeSession: saved.sessionId });
     return { id, ...run };
   }
@@ -487,6 +526,7 @@ export function createAgent({ store, cwd, lab }) {
     const run = { ...saved, status: 'running', error: null, finishedAt: null, steps: [...(saved.steps || [])], followUps: [...(saved.followUps || []), { at: Date.now(), text }] };
     run.steps.push({ at: Date.now(), kind: 'text', text: `追加要求：${text}` });
     await store.update('agentRuns', id, { status: 'running', error: null, finishedAt: null, steps: run.steps, followUps: run.followUps });
+    try { hooks.onStart?.(id, saved.task, saved.args || {}); } catch {}
     launch({ id, run, task: saved.task, t, lane, prompt: FOLLOWUP_PROMPT(text), resumeSession: saved.sessionId });
     return { id, ...run };
   }
@@ -499,7 +539,7 @@ export function createAgent({ store, cwd, lab }) {
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
       ['-p', prompt, ...(resumeSession ? ['--resume', resumeSession] : []),
         '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--max-turns', String(t.maxTurns),
-        '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY,
+        '--append-system-prompt', LANG_PROMPTS[uiLang()] + '\n' + CONTENT_OUTPUT_POLICY + (EVOLVE_TASKS[task] && skills?.settings().evolve ? '\n' + EVOLVE_TASKS[task] : ''),
         '--permission-mode', 'dontAsk', '--tools', lb?.tools ?? t.tools ?? BUILTIN_TOOLS.join(','),
         '--allowedTools', (lb?.allowed ?? t.allowed ?? ALLOWED_TOOLS).join(','), '--disallowedTools', (lb?.denied ?? t.denied ?? DENIED_TOOLS).join(','),
         ...(lb?.args || []),
@@ -610,7 +650,7 @@ export function createAgent({ store, cwd, lab }) {
           if (current[lane]?.id !== id || current[lane]?.stopped) {
             if (current[lane]?.id === id) {
               current[lane] = null;
-              store.update('agentRuns', id, { status: 'stopped', finishedAt: Date.now(), steps: run.steps });
+              store.update('agentRuns', id, { status: 'stopped', finishedAt: Date.now(), steps: run.steps }).then(() => ended(id));
             }
             return;
           }
@@ -644,6 +684,7 @@ export function createAgent({ store, cwd, lab }) {
           : TRANSIENT.test(errText) ? `网络中断，自动重试后仍然失败：${errText.slice(0, 200)}。网络恢复后点「从中断处继续」`
           : (errText.trim() || `claude 退出，代码 ${code}`).slice(0, 500),
       });
+      ended(id);
     };
     proc.on('error', (err) => finish(null, err));
     proc.on('close', (code) => {
@@ -676,10 +717,15 @@ export function createAgent({ store, cwd, lab }) {
       // 正在等待自动续跑：进程已经退出，直接收尾
       const lane = Object.keys(current).find((k) => current[k] === run);
       current[lane] = null;
-      store.update('agentRuns', id, { status: 'stopped', finishedAt: Date.now() });
+      store.update('agentRuns', id, { status: 'stopped', finishedAt: Date.now() }).then(() => ended(id));
     }
     return true;
   }
+  // 一次运行彻底结束（做完、失败、被停）：通知外面（技能改动要收尾、视频运行要对比技能）
+  function ended(id) {
+    const r = store.get('agentRuns', id);
+    if (r) Promise.resolve().then(() => hooks.onDone?.(id, r.task, r)).catch((e) => console.error('运行收尾出错：', e.message));
+  }
 
-  return { start, resume, followUp, say, stop, running: () => current.main?.id || null };
+  return { start, resume, followUp, say, stop, running: () => current.main?.id || null, runningIn: (lane) => current[lane]?.id || null, busy: (lane) => !!current[lane] };
 }

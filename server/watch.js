@@ -9,8 +9,10 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const FONT = ['/System/Library/Fonts/Supplemental/Arial.ttf', '/System/Library/Fonts/Helvetica.ttc', '/Library/Fonts/Arial.ttf'].find((f) => fs.existsSync(f));
-// 中文要用多语言模型（.en 结尾的只认英文），在 .env 里用 WHISPER_MODEL 指定模型文件；没配就跳过听写
-const WHISPER_MODEL = [process.env.WHISPER_MODEL].find((f) => f && fs.existsSync(f));
+// 中文要用多语言模型（.en 结尾的只认英文）：.env 里的 WHISPER_MODEL，或者已装程序目录 data/programs/whisper/ 里的模型
+// （transcribe 技能会把模型下到那里）；都没有就跳过听写
+const PROGRAMS_WHISPER = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'data', 'programs', 'whisper');
+const whisperModel = () => [process.env.WHISPER_MODEL, ...['ggml-medium.bin', 'ggml-small.bin', 'ggml-large-v3.bin', 'ggml-large-v3-turbo.bin', 'ggml-base.bin'].map((f) => path.join(PROGRAMS_WHISPER, f))].find((f) => f && fs.existsSync(f));
 const WHISPER_BIN = process.env.WHISPER_BIN || ['/opt/homebrew/bin/whisper-cli', '/usr/local/bin/whisper-cli'].find((f) => fs.existsSync(f));
 
 const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -37,7 +39,7 @@ async function sheets(file, dir, durationS) {
 }
 
 async function transcribe(file, dir) {
-  if (!WHISPER_BIN || !WHISPER_MODEL) return { text: '', skipped: '本机没有 whisper.cpp 或多语言模型，跳过语音转文字' };
+  if (!WHISPER_BIN || !whisperModel()) return { text: '', skipped: '本机没有 whisper.cpp 或多语言模型，跳过语音转文字' };
   const wav = path.join(dir, 'audio.wav');
   const out = path.join(dir, 'transcript');
   try {
@@ -46,7 +48,7 @@ async function transcribe(file, dir) {
     return { text: '', skipped: '视频里没有音轨' };
   }
   try {
-    await run(WHISPER_BIN, ['-m', WHISPER_MODEL, '-l', 'auto', '-f', wav, '-oj', '-of', out, '-np'], { timeout: 20 * 60_000 });
+    await run(WHISPER_BIN, ['-m', whisperModel(), '-l', 'auto', '-f', wav, '-oj', '-of', out, '-np'], { timeout: 20 * 60_000 });
     const segs = JSON.parse(fs.readFileSync(`${out}.json`, 'utf8')).transcription || [];
     const text = segs.map((s) => `[${mmss((s.offsets?.from || 0) / 1000)}] ${String(s.text || '').trim()}`).filter((l) => l.length > 8).join('\n');
     return { text: text.slice(0, 12000), skipped: text ? '' : '没听到人声' };

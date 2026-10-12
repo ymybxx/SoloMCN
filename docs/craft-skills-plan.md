@@ -62,7 +62,7 @@ Claude Code 自己就支持技能，而且自带三层渐进加载：
 3. **开关**：
    - 每个技能一个「启用」。关掉后不装进 `.claude/skills`，不占上下文。
    - 全局一个「允许 Claude 改进技能」，默认开。
-4. **记录 Claude 的改动**：每次运行前给 `.claude/skills` 存一份快照，跑完后对比。有改动就在动态里记一条：哪次运行、改了哪些文件、为什么（取自 Claude 的汇报）。每条都能看对比、能一键撤回。Claude 用普通编辑工具直接改，不需要专门接口。Claude 不能删除技能，删除只能用户来点。
+4. **记录 Claude 的改动**：生成、修改视频的运行（能读写文件、不上网）开跑前给 `.claude/skills` 存一份快照，跑完对比，Claude 用普通编辑工具直接改。调研、精选这些能上网的运行不能写文件，用 `improve_skill` 提建议，交给「改进技能」任务整理进草稿（网页内容可能借它混进技能，所以默认先给用户看）。每条改动都能看对比、能一键撤回。Claude 不能删除技能，删除只能用户来点。
 5. **资料归资料**：音色库、读音表、账号、系列放在 `data/`，密钥放在设置页。技能里不写具体账号、具体人、具体 key。
 
 6. **合并交给 Claude**：开着自我进化，技能迟早都会被 Claude 改过，出厂更新不能每次都让用户合并。出厂有新版时由 Claude 做三方合并（保留实践里改出来的经验，吸收出厂的改进），动态里记一条「已合并出厂更新」，能看对比、能撤回。只有 Claude 判断两边真的冲突、取舍不了时才问用户。
@@ -112,7 +112,7 @@ Claude Code 自己就支持技能，而且自带三层渐进加载：
 - 判断标准：**下次还会用吗**。会，就进技能；不会，就留在这条视频里。拿不准的先留在项目里，第二次又用到时再搬进技能（定期整理时也会检查有没有该搬的）。
 - 不用 brew、npm -g 之类往系统里装：会改到用户电脑的环境，也带不走。能放进 `data/programs` 的都放进去，技能里写的是这个路径。
 - 技能页加一栏「已装程序」：每样多大、哪些技能在用，没有技能提到的可以一键删。定期整理时 Claude 会标出这种没人用的。
-- 调研沙盒原来写 `videos/lab-shared/tools/`，改成写 `data/programs/`；登记表 `tools.json` 和 `lab_toolbox` 停用，内容搬进对应技能。
+- 调研沙盒原来写 `videos/lab-shared/tools/`，改成写 `data/programs/`。`lab_toolbox` 留着，改名「已装程序」：登记装了什么、在哪、上次用（平台用它做空间清理），怎么用的经验写进技能。经验本停用，内容搬进对应技能。
 
 ## 六、上限和选得准不准
 
@@ -149,12 +149,12 @@ Claude Code 自己就支持技能，而且自带三层渐进加载：
 | make-video 里 HyperFrames、解说员、配乐 | explainer-video/（+ presenter、synth-bgm 脚本） |
 | make-video 里画质、审片、体检、真实素材 | make-video/references/ |
 | `lab-shared/tools/tongyi-tts.mjs`（重复的一份） | 删掉，统一用 voice-over |
-| `tools/img.mjs` | image-gen 技能 |
+| `tools/img.mjs` | 留在平台代码（角色、封面这些平台功能在用；技能里暂时用不到，以后需要再包一个工具技能） |
 | whisper 用法、模型位置 | transcribe 技能 |
-| `voice-over/voices.json`（音色库） | `data/voices.json` |
+| `voice-over/voices.json`（音色库） | 留在 voice-over：它是配音工具支持哪些音色的说明，不是用户资料 |
 | 读音（比如 tulpa） | 资料：账号或系列的读音表，配音时自动套用 |
 | `lab-shared/NOTES.md` | 拆回对应技能后停用 |
-| `lab-shared/tools/`（ghidra、JDK、rea）和 `tools.json` | 程序搬到 `data/programs/`，用法写进一个 reverse-engineering 技能 |
+| `lab-shared/tools/`（ghidra、JDK、rea）和 `tools.json` | 程序搬到 `data/programs/`，登记表变成 `data/programs/programs.json`（已装程序：用途、装在哪、上次用，平台按它自动清理）；ghidra 这套的用法和坑写进用户自己的技能 |
 | 服务端写死的 `make-video/scripts/montage.mjs` 路径（素材体检） | 指向 stage-montage/scripts |
 | 调研沙盒里复制的一份技能 | 改成直接读 `.claude/skills`，各环节读的是同一份 |
 | revise-video「改一处就整条重渲染」（改个读音要 10 分钟） | 各做法的 revise.md 写明：时长不变的小改（换一句配音、改一条字幕、改一刀）只重做那几秒，再拼回原片 |

@@ -15,6 +15,8 @@ export function cleanSeries(list) {
     voice: s.voice ? clip(s.voice, 60) : null,
     // 解说员形象：角色库里的角色 id（data/characters/<id>/）
     character: /^[a-z0-9]{6,40}$/.test(s.character || '') ? s.character : null,
+    // 做法技能（stage-montage、explainer-video……）：这个系列的内容各环节按它做；不填就由 Claude 写脚本时按内容挑
+    craft: /^[a-z0-9][a-z0-9-]{0,60}$/.test(s.craft || '') ? s.craft : null,
     emotions: (Array.isArray(s.emotions) ? s.emotions : []).map((e) => clip(e, 10)).filter(Boolean).slice(0, 4),
     collections: Object.fromEntries(COLLECTION_PLATFORMS.map((p) => [p, clip(s.collections?.[p], 40)]).filter(([, v]) => v)),
     active: s.active !== false,

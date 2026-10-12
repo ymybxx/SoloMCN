@@ -19,7 +19,7 @@ const STAGE_IDX=Object.fromEntries(STAGES.map((s,i)=>[s.k,i]));
 
 const S={tab:'home',accounts:{},items:{},radar:null,analysis:null,db:null,sample:null,mode:'loading',aiOff:false,
   open:null,draft:null,filter:'all',ideaFilter:'all',picks:{},runs:{},pickOpen:null,pickAcc:new Set(),pickN:3,gen:null,pendingRender:false};
-const local={accounts:{},items:{},radar:{},notes:{},picks:{},agentRuns:{},settings:{}};
+const local={accounts:{},items:{},radar:{},notes:{},picks:{},agentRuns:{},settings:{},skillChanges:{}};
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -57,6 +57,7 @@ function queue(path,fn){const p=(chains[path]||Promise.resolve()).then(fn,fn);ch
 function merge(a,b){const o={...a};for(const k in b){const v=b[k];o[k]=(v&&typeof v==='object'&&!Array.isArray(v)&&a[k]&&typeof a[k]==='object'&&!Array.isArray(a[k]))?merge(a[k],v):v}return o}
 function applyLocal(col){
   if(col==='accounts')S.accounts={...local.accounts};
+  if(col==='skillChanges')S.skillChanges={...local.skillChanges};
   if(col==='items')S.items={...local.items};
   if(col==='radar')S.radar=local.radar.latest||null;
   if(col==='notes')S.analysis=local.notes.analysis||null;
@@ -103,7 +104,7 @@ const store={
 function dbErr(e){return e&&e.message&&!String(e.code||'').startsWith('http_')?e.message:'保存失败：连不上本地服务，确认 npm start 还在运行。'}
 async function loadState(){
   try{const d=await api('GET','/api/state');
-    const cols=['accounts','items','radar','notes','picks','agentRuns','settings'];
+    const cols=['accounts','items','radar','notes','picks','agentRuns','settings','skillChanges'];
     for(const c of cols)local[c]=d[c]||{};
     cols.forEach(c=>applyLocal(c));S.mode='synced';
   }catch(e){S.mode='offline'}
@@ -239,6 +240,8 @@ function vHome(){
       <div class="panel">${todoHtml}</div>
     </div>
     <aside class="grid">
+      ${ideaBox('ideaHome')}
+      ${(()=>{const xs=chgList(chgOpen).slice(0,5);return xs.length?`<div class="panel grid" style="gap:6px"><div class="label">技能改动</div><div class="list">${xs.map(c=>`<button class="row" data-act="goto-changes"><span class="pill ${(CHG_ST[c.status]||[])[1]||''}"><i></i>${esc((CHG_ST[c.status]||[c.status])[0])}</span><span class="t">${esc(c.title||'')}</span></button>`).join('')}</div></div>`:''})()}
       ${vDataService()}
       <div class="panel grid" style="gap:10px"><div class="label">发布前的红线</div>
         <ol class="rules"><li>不伪造新闻、事件、测试结果和数据</li><li>不用 AI 伪造真人的脸和声音</li><li>矩阵各号内容必须真的不同，换字幕换配音会被语义查重</li><li>评论由真人回复，不用机器人互动</li></ol></div>
@@ -1319,6 +1322,7 @@ function readSeriesForm(){
   const f=$('#seriesForm');const o={id:f.dataset.sid||''};
   for(const [el,k] of SERIES_TEXT)o[k]=$('#'+el).value.trim();
   o.voice=$('#fVoice').value||null;
+  o.craft=$('#sCraft')?.value||null;
   o.emotions=[...f.querySelectorAll('[data-group="semo"][aria-pressed="true"]')].map(b=>b.dataset.v);
   o.collections=Object.fromEntries(SERIES_COLL.map(c=>[c.k,$('#sColl-'+c.k).value.trim()]).filter(([,v])=>v));
   o.active=$('#sActive').checked;
@@ -1335,7 +1339,7 @@ function fillSeriesForm(o){
 function openSeriesModal(accId,sid){ // 右侧滑出的面板
   const a=S.accounts[accId];if(!a)return;
   const cur=sid?(a.series||[]).find(x=>x.id===sid):null;
-  const s=cur||{name:'',summary:'',audience:'',persona:'',voice:null,visual:'',emotions:[],structure:'',length:'',topics:'',collections:{},active:true};
+  const s=cur||{name:'',summary:'',audience:'',persona:'',voice:null,craft:null,visual:'',emotions:[],structure:'',length:'',topics:'',collections:{},active:true};
   const hist=cur?.history||[];
   const m=$('#modalRoot');
   m.innerHTML=`<div class="side-wrap" data-act="modal-bg"><form class="side-panel" id="seriesForm" role="dialog" aria-label="系列设置">
@@ -1364,6 +1368,8 @@ function openSeriesModal(accId,sid){ // 右侧滑出的面板
         <div class="field"><label for="sVisual">视觉风格</label><textarea id="sVisual" rows="2" placeholder="画面风格、色调、版式、常用素材">${esc(s.visual)}</textarea></div>
         <div class="field"><span class="lbl">主打情绪</span><div class="chips">${EMOTIONS.map(e=>`<button type="button" class="chip" aria-pressed="${(s.emotions||[]).includes(e)}" data-act="toggle-chip" data-group="semo" data-v="${e}">${e}</button>`).join('')}</div></div>
         <div class="field"><label for="sStructure">固定结构</label><textarea id="sStructure" rows="3" placeholder="开头怎么钩人 → 中间分几段 → 结尾怎么收">${esc(s.structure)}</textarea></div>
+        <div class="field"><label for="sCraft">做法 <span class="faint">（这个系列的内容各环节按哪个做法技能做）</span></label>
+          <select id="sCraft" data-cur="${esc(s.craft||'')}"><option value="">自动（写脚本时 Claude 按内容挑）</option>${s.craft?`<option value="${esc(s.craft)}" selected>${esc(s.craft)}</option>`:''}</select></div>
         <div class="field"><label for="sTopics">适合的题材</label><input type="text" id="sTopics" maxlength="300" value="${esc(s.topics)}" placeholder="AI 工具实测、AI 课程话术拆解"></div>
         <div class="field"><span class="lbl">各平台的合集 <span class="faint">（填合集名，发布时自动放进去；要先在平台上建好同名合集，目前抖音已接上）</span></span>
           <div class="coll-grid">${SERIES_COLL.map(c=>`<label class="coll"><span class="faint">${c.n}</span><input type="text" id="sColl-${c.k}" maxlength="40" value="${esc(s.collections?.[c.k]||'')}"></label>`).join('')}</div></div>
@@ -1386,6 +1392,9 @@ function openSeriesModal(accId,sid){ // 右侧滑出的面板
   });
   setTimeout(()=>$(cur?'#sFeedback':'#sBrief')?.focus(),30);
   loadCharBlock();
+  // 做法的选项：已启用的做法技能
+  api('GET','/api/skills').then(list=>{const el=$('#sCraft');if(!el)return;const c=el.dataset.cur;
+    el.innerHTML=`<option value="">自动（写脚本时 Claude 按内容挑）</option>${list.filter(x=>x.kind==='craft'&&(x.enabled||x.name===c)).map(x=>`<option value="${esc(x.name)}" ${x.name===c?'selected':''}>${esc(x.name)}｜${esc(String(x.description||'').replace(/^做法：/,'').slice(0,40))}</option>`).join('')}`}).catch(()=>{});
 }
 // 解说员形象：选角色、新建（上传参考图）、补齐表情差分、重画某个表情。生成中每 3 秒刷新一次
 const charFile=(c,f)=>`/api/characters/${c.id}/file/${f}?v=${c.updatedAt||0}`;
@@ -1476,61 +1485,150 @@ function vConnect(){
         <button class="btn" data-act="conf-image-save">保存</button>${im.configured?'<button class="btn ghost danger" data-act="conf-image-del">删除</button>':''}</div></div>
   </div>`;
 }
-/* ---------- 技能：每个环节的岗位说明，是你的本地数据 ---------- */
+/* ---------- 技能：每个环节怎么做，是你的本地数据；技能的每次变化都是一条「技能改动」 ---------- */
 async function loadSkills(){
-  try{S.skills=await api('GET','/api/skills');if(!S.skillSel&&S.skills.length)S.skillSel=S.skills[0].name;if(S.skillSel)await loadSkill(S.skillSel)}
-  catch(e){S.skills={down:e.message||'读取失败'}}
+  try{
+    const [list,set]=await Promise.all([api('GET','/api/skills'),api('GET','/api/skill-settings')]);
+    S.skills=list;S.skillSet=set;
+    if(!S.skillSel)S.skillSel='changes';
+    if(S.skillSel!=='changes')await loadSkill(S.skillSel);
+  }catch(e){S.skills={down:e.message||'读取失败'}}
   requestRender();
 }
-async function loadSkill(name){try{S.skillCur=await api('GET','/api/skills/'+encodeURIComponent(name))}catch(e){S.skillCur={err:e.message||'读取失败'}}requestRender()}
-const skillPill=x=>x.origin==='custom'?'<span class="pill"><i></i>自己加的</span>':x.update&&!x.modified?'<span class="pill"><i></i>新版待重启</span>':x.update?'<span class="pill warn"><i></i>出厂说明有更新</span>':x.modified?'<span class="pill ok"><i></i>改过</span>':'<span class="pill"><i></i>出厂</span>';
+async function loadSkill(name){
+  try{S.skillCur=await api('GET','/api/skills/'+encodeURIComponent(name));if(!S.skillFile||S.skillFile.name!==name)S.skillFile={name,path:'SKILL.md'};await loadSkillFile()}
+  catch(e){S.skillCur={err:e.message||'读取失败'}}
+  requestRender();
+}
+async function loadSkillFile(){
+  const f=S.skillFile;if(!f)return;
+  try{const r=await api('GET','/api/skills/'+encodeURIComponent(f.name)+'/file?path='+encodeURIComponent(f.path));S.skillFileCur={...f,...r}}
+  catch(e){S.skillFileCur={...f,err:e.message||'读取失败'}}
+  requestRender();
+}
+const SKILL_KIND={flow:'流程',craft:'做法',tool:'工具'};
+const SKILL_KIND_NOTE={flow:'每个环节的通用步骤，工作台点按钮时调用',craft:'一种内容各环节具体怎么做，按系列或内容选用',tool:'几处都会用的程序和它的用法'};
+const skillPill=x=>!x.enabled?'<span class="pill"><i></i>关着</span>':x.origin==='custom'?'<span class="pill"><i></i>自己加的</span>':x.update?'<span class="pill warn"><i></i>出厂更新待合并</span>':x.modified?'<span class="pill ok"><i></i>改过</span>':'<span class="pill"><i></i>出厂</span>';
+const CHG_SRC={idea:'你的想法',run:'运行中改的',suggest:'运行中的建议',update:'出厂更新',tidy:'定期整理',manual:'你改的'};
+const CHG_ST={queued:['排队中',''],working:['Claude 在改…','warn'],pending:['等你确认','warn'],applied:['已生效','ok'],rejected:['没要',''],reverted:['已撤回',''],failed:['没做完','bad']};
+const chgList=(filter)=>Object.entries(S.skillChanges||{}).map(([id,v])=>({id,...v})).filter(c=>c.status!=='empty'&&(!filter||filter(c))).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+const chgOpen=c=>['queued','working','pending','failed'].includes(c.status);
+function diffHtml(text){
+  if(!text)return '<p class="hint">没有文字上的差别。</p>';
+  return `<pre class="diff keep-scroll no-tr">${text.split('\n').map(l=>{const c=l.startsWith('=== ')?'f':l.startsWith('@@')?'h':l.startsWith('+')?'a':l.startsWith('-')?'d':'';return `<span class="dl ${c}">${esc(l)||' '}</span>`}).join('')}</pre>`;
+}
+function changeCard(c){
+  const [stL,stC]=CHG_ST[c.status]||[c.status,''];
+  const files=(c.files||[]).map(f=>`<span class="chg-file"><code class="no-tr">${esc(f.path)}</code>${f.binary?'':` <b class="a">+${f.plus||0}</b> <b class="d">−${f.minus||0}</b>`}${f.op==='add'?' 新文件':f.op==='del'?' 删除':''}</span>`).join('');
+  const d=S.chgDiff?.[c.id];
+  const acts=c.status==='pending'?`<div class="actions"><button class="btn primary" data-act="chg-apply" data-k="${c.id}">通过</button><button class="btn ghost" data-act="chg-reject" data-k="${c.id}">不要了</button></div>
+      <div class="chg-refine"><input id="chgRefine-${c.id}" placeholder="还要怎么改？说一句，Claude 接着这份改" maxlength="2000"><button class="btn ghost" data-act="chg-refine" data-k="${c.id}">再改改</button></div>`
+    :c.status==='applied'&&c.source!=='manual'||c.status==='applied'&&(c.files||[]).length?`<div class="actions"><button class="btn ghost" data-act="chg-revert" data-k="${c.id}">撤回</button></div>`
+    :c.status==='failed'?`<div class="actions"><button class="btn ghost" data-act="chg-retry" data-k="${c.id}">重试</button><button class="btn ghost" data-act="chg-reject" data-k="${c.id}">不要了</button></div>`:'';
+  return `<article class="panel grid chg" style="gap:8px">
+    <div class="chg-head"><span class="pill">${esc(CHG_SRC[c.source]||c.source)}</span><b class="chg-title">${esc(c.title||'')}</b><span class="pill ${stC}"><i></i>${stL}</span><span class="faint num">${esc(fmtTime(c.createdAt))}</span></div>
+    ${c.idea&&c.idea!==c.title?`<p class="chg-idea">「${esc(c.idea)}」</p>`:''}
+    ${(c.refines||[]).map(r=>`<p class="chg-idea faint">你又说：「${esc(r.text)}」</p>`).join('')}
+    ${c.summary?`<div class="chg-sum">${esc(c.summary)}</div>`:c.status==='working'||c.status==='queued'?'<p class="hint">Claude 正在找该改的技能，改好了会出现在这里。</p>':''}
+    ${c.error?`<p class="err">${esc(c.error)}</p>`:''}${c.note?`<p class="err">${esc(c.note)}</p>`:''}
+    ${files?`<div class="chg-files">${files}<button class="btn ghost sm" data-act="chg-diff" data-k="${c.id}">${d?'收起对比':'看对比'}</button></div>`:''}
+    ${d?(d.err?`<p class="err">${esc(d.err)}</p>`:d.text==null?'<p class="hint">读取中…</p>':diffHtml(d.text)):''}
+    ${acts}
+  </article>`;
+}
+// 提想法：总控台和技能页共用
+function ideaBox(id){
+  return `<div class="panel grid" style="gap:8px"><div class="label">想改进什么，说一句</div>
+    <p class="hint">比如「所有视频右下角加账号水印」「换装视频转场少一点」。Claude 会找到该改的技能，改好给你看，你点通过才生效。</p>
+    <textarea id="${id}" rows="3" maxlength="2000" placeholder="想到什么写什么"></textarea>
+    <div class="actions"><button class="btn primary" data-act="skill-idea" data-k="${id}">交给 Claude</button></div></div>`;
+}
+function vChanges(){
+  const set=S.skillSet||{evolve:true,policy:{}};
+  const open=chgList(chgOpen),done=chgList(c=>!chgOpen(c)).slice(0,30);
+  const pol=(k,n)=>`<label class="pol"><span>${n}</span><select data-skpol="${k}"><option value="auto" ${set.policy[k]==='auto'?'selected':''}>直接生效（能撤回）</option><option value="confirm" ${set.policy[k]==='confirm'?'selected':''}>先给我看</option></select></label>`;
+  return `${ideaBox('ideaSkills')}
+    <div class="panel grid" style="gap:10px">
+      <div class="blk-head"><div class="label">自我进化</div>
+        <label class="sk-switch"><input type="checkbox" data-act="skill-evolve" ${set.evolve?'checked':''}> ${set.evolve?'开着':'关着'}</label>
+        <div class="actions"><button class="btn ghost" data-act="skill-tidy">现在整理一下</button></div></div>
+      <p class="hint">开着时，Claude 在调研、写脚本、出片中遇到坑或找到更好的做法，会顺手改进对应的技能，每次都记在下面；攒多了每周自动整理一次（合并重复、删掉过时的）。</p>
+      <details><summary class="faint">哪些改动要先给你看</summary><div class="grid" style="gap:6px;margin-top:8px">
+        ${pol('idea','你的想法')}${pol('run','生成、修改视频时 Claude 直接改的')}${pol('suggest','调研、精选等能上网的运行提的建议')}${pol('update','出厂更新（有冲突的总是先给你看）')}${pol('tidy','定期整理')}
+        <p class="hint">能上网的运行读过网页，网页里的内容可能借它混进技能，所以默认先给你看。</p></div></details>
+    </div>
+    <div class="section-head" style="margin-top:6px"><h2>待处理</h2></div>
+    ${open.length?open.map(changeCard).join(''):'<div class="empty">没有要处理的改动。</div>'}
+    <div class="section-head" style="margin-top:6px"><h2>最近的改动</h2></div>
+    ${done.length?done.map(changeCard).join(''):'<div class="empty">还没有改动记录。</div>'}`;
+}
 function vSkills(){
   const L=S.skills;
   if(!L)return '<div class="empty">正在读取…</div>';
   if(L.down)return `<div class="empty"><strong>读取技能失败</strong>${esc(L.down)}</div>`;
-  const cur=S.skillCur&&S.skillCur.name===S.skillSel?S.skillCur:null;
-  const nav=L.map(x=>`<button class="chan-tab" role="tab" aria-selected="${S.skillSel===x.name}" data-act="skill-sel" data-k="${esc(x.name)}"><b class="no-tr">${esc(x.name)}</b>${skillPill(x)}</button>`).join('');
-  const text=cur?(S.skillDraft?.[cur.name]??cur.content):'';
-  const dirty=cur&&S.skillDraft?.[cur.name]!=null&&S.skillDraft[cur.name]!==cur.content;
-  // 没改过的技能：平台重启时会自动换成新版（重启前这里先提示一下，也可以现在就换）
-  const upd=cur?.update&&!cur.modified?`<div class="panel grid" style="gap:8px"><div class="label">出厂说明有新版本</div>
-      <p class="hint">你没改过这个技能，平台下次重启时会自动换成新版。想现在就用新版，点「现在换上」。</p>
-      <div class="actions"><button class="btn primary" data-act="skill-take-new">现在换上</button></div>
-      <details><summary class="faint">看新的出厂版本</summary><pre id="skillDefault" class="skill-pre keep-scroll no-tr">${esc(cur.defaultContent||'')}</pre></details></div>`
-    :cur?.update?`<div class="panel grid" style="gap:8px;border-color:var(--warn)"><div class="label">出厂说明有新版本</div>
-      <p class="hint">这个技能你改过，所以没有自动更新。可以让 Claude 把新版的改进合进你的版本（结果会先填进下面给你看），也可以直接用新版覆盖，或者保留你的版本。</p>
-      <div class="actions"><button class="btn primary" data-act="skill-merge" ${S.skillBusy?'disabled':''}>${S.skillBusy==='merge'?'Claude 合并中…':'让 Claude 合并'}</button>
-        <button class="btn ghost" data-act="skill-take-new">用新版覆盖</button><button class="btn ghost" data-act="skill-keep">保留我的版本</button></div>
-      <details><summary class="faint">看新的出厂版本</summary><pre id="skillDefault" class="skill-pre keep-scroll no-tr">${esc(cur.defaultContent||'')}</pre></details></div>`:'';
-  const merged=S.skillMerged&&cur&&S.skillMerged.name===cur.name?`<div class="panel" style="border-color:var(--ok)"><p class="hint">下面是 Claude 合并后的版本，检查一下，满意了点「采用合并结果」。</p><div class="actions"><button class="btn primary" data-act="skill-accept-merged">采用合并结果</button><button class="btn ghost" data-act="skill-merge-cancel">放弃</button></div></div>`:'';
-  const hist=cur?.history?.length?`<details class="vhist"><summary>历史版本（${cur.history.length}）</summary>${cur.history.map(at=>`<div class="row-s"><span class="num faint">${esc(fmtTime(at))}</span><button class="btn ghost" data-act="skill-hist" data-k="${at}">载入这一版</button></div>`).join('')}</details>`:'';
-  const editor=!cur?'<div class="panel"><p class="hint">正在读取…</p></div>':cur.err?`<div class="panel"><p class="err">${esc(cur.err)}</p></div>`:`
-    ${upd}${merged}
-    <div class="panel grid" style="gap:10px">
-      <div class="blk-head"><h3 class="no-tr">${esc(cur.name)}</h3>${skillPill(cur)}${dirty?'<span class="pill warn"><i></i>有改动没保存</span>':''}
-        <div class="actions">${cur.origin==='default'?'<button class="btn ghost" data-act="skill-reset">恢复出厂</button>':''}${dirty?'<button class="btn ghost" data-act="skill-discard">放弃改动</button>':''}<button class="btn primary" data-act="skill-save" ${dirty?'':'disabled'}>保存</button></div></div>
-      <p class="hint">${esc(cur.description)}</p>
-      <textarea id="skillText" class="skill-text no-tr" rows="28" spellcheck="false">${esc(text)}</textarea>
-      ${cur.files.length>1?`<p class="hint">这个技能目录里还有：${cur.files.filter(f=>f!=='SKILL.md').map(f=>`<code class="no-tr">${esc(f)}</code>`).join('、')}（在 <code>.claude/skills/${esc(cur.name)}/</code> 里，可以用编辑器改）</p>`:''}
-      ${hist}
-    </div>`;
-  return `<div class="section-head"><h2>技能</h2><p>每个环节怎么做，都写在这里的岗位说明里。改这里就是改流程，不用碰代码。这些是你的本地数据，不会提交到代码仓库；在 Claude Code 里直接跑这些技能，用的也是同一份。</p></div>
-    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${editor}</div></div>`;
+  const pending=chgList(c=>c.status==='pending').length;
+  const group=k=>{const xs=L.filter(x=>x.kind===k);return xs.length?`<div class="sk-group faint">${SKILL_KIND[k]}</div>`+xs.map(x=>`<button class="chan-tab" role="tab" aria-selected="${S.skillSel===x.name}" data-act="skill-sel" data-k="${esc(x.name)}"><b class="no-tr">${esc(x.name)}</b>${skillPill(x)}</button>`).join(''):''};
+  const nav=`<button class="chan-tab" role="tab" aria-selected="${S.skillSel==='changes'}" data-act="skill-sel" data-k="changes"><b>技能改动</b>${pending?`<span class="pill warn"><i></i>${pending} 条等你</span>`:''}</button>${group('flow')}${group('craft')}${group('tool')}`;
+  let body;
+  if(S.skillSel==='changes')body=vChanges();
+  else{
+    const cur=S.skillCur&&S.skillCur.name===S.skillSel?S.skillCur:null;
+    if(!cur)body='<div class="panel"><p class="hint">正在读取…</p></div>';
+    else if(cur.err)body=`<div class="panel"><p class="err">${esc(cur.err)}</p></div>`;
+    else{
+      const f=S.skillFileCur&&S.skillFileCur.name===cur.name?S.skillFileCur:null;
+      const key=cur.name+'/'+(f?.path||'');
+      const text=f&&!f.err&&!f.binary?(S.skillDraft?.[key]??f.content):'';
+      const dirty=f&&S.skillDraft?.[key]!=null&&S.skillDraft[key]!==f.content;
+      const tabs=cur.files.map(p=>`<button class="ftab ${f?.path===p?'on':''}" data-act="skill-file" data-k="${esc(p)}"><code class="no-tr">${esc(p)}</code></button>`).join('');
+      const editor=!f?'<p class="hint">读取中…</p>':f.err?`<p class="err">${esc(f.err)}</p>`:f.binary?`<p class="hint">这不是文本文件（${fmtSize(f.size)}），在 <code>.claude/skills/${esc(cur.name)}/</code> 里用别的程序打开。</p>`
+        :`<textarea id="skillText" class="skill-text no-tr" rows="26" spellcheck="false" ${cur.enabled?'':'readonly'}>${esc(text)}</textarea>
+          <div class="chg-refine"><input id="skillReason" placeholder="（可选）一句话写为什么改，会记在改动里" maxlength="300"><button class="btn ghost" data-act="skill-discard" ${dirty?'':'disabled'}>放弃改动</button><button class="btn primary" data-act="skill-save" ${dirty?'':'disabled'}>保存</button></div>`;
+      const chs=chgList(c=>(c.skills||[]).includes(cur.name)||c.target===cur.name).slice(0,20);
+      body=`<div class="panel grid" style="gap:10px">
+        <div class="blk-head"><h3 class="no-tr">${esc(cur.name)}</h3><span class="pill">${SKILL_KIND[cur.kind]||''}</span>${skillPill(cur)}${dirty?'<span class="pill warn"><i></i>有改动没保存</span>':''}
+          <div class="actions">${cur.kind!=='flow'?`<label class="sk-switch"><input type="checkbox" data-act="skill-enable" ${cur.enabled?'checked':''}> 启用</label>`:''}
+            ${cur.origin==='default'&&cur.modified?'<button class="btn ghost" data-act="skill-reset">恢复出厂</button>':''}${cur.origin==='custom'?'<button class="btn ghost danger" data-act="skill-delete">删除</button>':''}</div></div>
+        <p class="hint">${esc(cur.description)}</p>
+        ${cur.enabled?'':'<p class="hint">关着的技能不会装给 Claude，也不占它的上下文。打开后才能改。</p>'}
+        <div class="ftabs">${tabs}</div>
+        ${editor}
+      </div>
+      ${chs.length?`<div class="section-head" style="margin-top:6px"><h2>这个技能的改动</h2></div>${chs.map(changeCard).join('')}`:''}`;
+    }
+  }
+  return `<div class="section-head"><h2>技能</h2><p>每个环节怎么做都写在技能里：流程是各环节的通用步骤，做法是一种内容具体怎么做，工具是几处都会用的程序。一个技能就是一个文件夹，SKILL.md 是入口，其他文件是附录，Claude 用到才读。这些是你的本地数据，在 Claude Code 里直接跑用的也是同一份。</p></div>
+    <div class="chan-layout"><nav class="chan-nav" role="tablist">${nav}</nav><div class="grid" style="min-width:0">${body}</div></div>`;
 }
 async function skillAction(k,b){
-  const cur=S.skillCur;if(!cur)return;const name=cur.name;const url='/api/skills/'+encodeURIComponent(name);
-  const done=async(msg)=>{if(S.skillDraft)delete S.skillDraft[name];S.skillMerged=null;toast(msg);await loadSkills()};
   try{
-    if(k==='save'){await api('PUT',url,{content:S.skillDraft?.[name]??cur.content});await done('已保存，下次运行这个技能就用新的说明')}
-    else if(k==='reset'){await api('POST',url+'/reset');await done('已恢复成出厂说明，原来的版本存进了历史')}
-    else if(k==='take-new'){await api('POST',url+'/accept',{content:cur.defaultContent});await done('已换成新的出厂说明，原来的版本存进了历史')}
-    else if(k==='keep'){await api('POST',url+'/accept',{content:cur.content});await done('保留了你的版本，这次出厂更新不再提示')}
-    else if(k==='merge'){S.skillBusy='merge';render();const r=await api('POST',url+'/merge');S.skillDraft={...(S.skillDraft||{}),[name]:r.content};S.skillMerged={name};toast('合并好了，检查一下')}
-    else if(k==='accept-merged'){await api('POST',url+'/accept',{content:S.skillDraft?.[name]??cur.content});await done('已采用合并结果')}
+    if(k==='idea'){const el=$('#'+b.dataset.k);const text=(el?.value||'').trim();if(text.length<2)return toast('先写一句想改什么');b.disabled=true;await api('POST','/api/skill-changes/idea',{text});el.value='';toast('交给 Claude 了，改好会在「技能 → 技能改动」里等你确认');return}
+    if(k==='tidy'){await api('POST','/api/skill-changes/tidy');toast('已开始整理，好了会出现在下面');return}
+    if(k==='evolve'){S.skillSet=await api('PUT','/api/skill-settings',{evolve:b.checked});toast(b.checked?'自我进化已打开':'自我进化已关闭');render();return}
+    const cur=S.skillCur;if(!cur)return;const name=cur.name;const url='/api/skills/'+encodeURIComponent(name);
+    const f=S.skillFileCur;const key=name+'/'+(f?.path||'');
+    if(k==='save'){const reason=($('#skillReason')?.value||'').trim();await api('PUT',url+'/file?path='+encodeURIComponent(f.path),{content:S.skillDraft?.[key]??f.content,reason});if(S.skillDraft)delete S.skillDraft[key];toast('已保存，下次运行就用新的');await loadSkills()}
+    else if(k==='reset'){await api('POST',url+'/reset');S.skillDraft={};toast('已恢复出厂，原来的版本记在改动里，能撤回');await loadSkills()}
+    else if(k==='enable'){await api('PUT',url+'/enabled',{on:b.checked});toast(b.checked?'已启用':'已关闭，Claude 不会再用它');await loadSkills()}
+    else if(k==='delete'){await api('DELETE',url);S.skillSel='changes';S.skillCur=null;toast('已删除，记在改动里，能撤回');await loadSkills()}
   }catch(e){toast(e.message||'操作失败')}
-  S.skillBusy=null;render();
+  finally{if(b&&b.tagName==='BUTTON')b.disabled=false}
+  render();
 }
-/* ---------- 实践占用空间：共用工具箱、各内容的实验目录、经验本 ---------- */
+async function chgAction(k,id,b){
+  const url='/api/skill-changes/'+id;
+  try{
+    if(k==='diff'){if(S.chgDiff?.[id]){delete S.chgDiff[id];render();return}S.chgDiff={...(S.chgDiff||{}),[id]:{}};render();const r=await api('GET',url+'/diff');S.chgDiff[id]={text:r.diff};render();return}
+    if(k==='apply'){await api('POST',url+'/apply');toast('已生效，下次运行就用新的')}
+    else if(k==='reject'){await api('POST',url+'/reject');toast('不要了，技能没动')}
+    else if(k==='revert'){await api('POST',url+'/revert');toast('已撤回')}
+    else if(k==='retry'){await api('POST',url+'/retry');toast('重新交给 Claude 了')}
+    else if(k==='refine'){const el=$('#chgRefine-'+id);const text=(el?.value||'').trim();if(!text)return toast('写一下还要怎么改');await api('POST',url+'/refine',{text});toast('Claude 接着改，好了再给你看')}
+    if(S.chgDiff)delete S.chgDiff[id];
+    await loadSkills();
+  }catch(e){toast(e.message||'操作失败');if(k==='diff'){S.chgDiff[id]={err:e.message};render()}}
+}
+/* ---------- 实践占用空间：已装程序（data/programs）、各内容的实验目录 ---------- */
 async function loadLabStorage(){try{S.labStore=await api('GET','/api/lab/storage')}catch(e){S.labStore={down:e.message||'读取失败'}}requestRender()}
 const fmtSize=b=>b>=1024**3?(b/1024**3).toFixed(1)+' GB':b>=1024**2?Math.round(b/1024**2)+' MB':Math.max(1,Math.round((b||0)/1024))+' KB';
 const daysAgo=t=>{if(!t)return '—';const d=Math.floor((Date.now()-t)/864e5);return d<1?'今天':d+' 天前'};
@@ -1543,15 +1641,14 @@ function vLabStorage(){
   const tools=[...L.tools].sort((a,b)=>b.size-a.size).map(t=>`<tr><td><b>${esc(t.name)}</b>${t.purpose?`<div class="faint">${esc(t.purpose)}</div>`:''}</td><td class="n">${fmtSize(t.size)}</td><td class="num faint">${daysAgo(t.lastUsedAt)}</td><td><button class="btn ghost danger" data-act="lab-tool-rm" data-id="${esc(t.name)}">删除</button></td></tr>`).join('');
   const labs=[...L.labs].sort((a,b)=>b.size-a.size).map(l=>`<tr><td>${esc(l.title)}${l.slimmed?' <span class="faint">（已瘦身）</span>':''}</td><td class="n">${fmtSize(l.size)}</td><td class="num faint">${daysAgo(l.lastUsedAt)}</td><td style="white-space:nowrap">${l.exists?`<button class="btn ghost" data-act="open" data-id="${esc(l.itemId)}">打开</button>`:''}<button class="btn ghost" data-act="lab-slim" data-id="${esc(l.itemId)}">瘦身</button><button class="btn ghost danger" data-act="lab-rm" data-id="${esc(l.itemId)}">删除</button></td></tr>`).join('');
   const field=(k,label,unit,step)=>`<label class="cfg-field">${label}<span style="display:flex;align-items:center;gap:6px"><input type="number" data-labcfg="${k}" value="${s[k]}" min="0" step="${step}" style="width:6em"> ${unit}</span></label>`;
-  return `<div class="panel grid" style="gap:12px"><div class="blk-head"><h3>实践占用空间</h3><span class="faint">共 ${fmtSize(L.toolsTotal+L.labsTotal)}</span><div class="actions"><button class="btn ghost" data-act="lab-notes">经验本</button><button class="btn" data-act="lab-cleanup" ${S.labCleaning?'disabled':''}>${S.labCleaning?'清理中…':'立即清理'}</button></div></div>
-    <p class="hint">调研时动手实践会装工具、下依赖。大工具装在共用工具箱里，所有内容共用；每条内容还有自己的实验目录。每次调研结束会清掉下载缓存和解压过的安装包，另外每 6 小时按下面的规则自动清理。</p>
-    <div class="cfg-row">${field('toolIdleDays','工具多久没用就删','天',1)}${field('toolCapGB','工具箱上限','GB',1)}${field('labKeepDays','调研完多久给实验目录瘦身','天',1)}${field('askAboveGB','单个下载超过多大先问你','GB',0.5)}</div>
-    <div class="label">共用工具箱 <span class="faint" style="font-weight:400">${fmtSize(L.toolsTotal)}</span></div>
+  return `<div class="panel grid" style="gap:12px"><div class="blk-head"><h3>实践占用空间</h3><span class="faint">共 ${fmtSize(L.toolsTotal+L.labsTotal)}</span><div class="actions"><button class="btn" data-act="lab-cleanup" ${S.labCleaning?'disabled':''}>${S.labCleaning?'清理中…':'立即清理'}</button></div></div>
+    <p class="hint">调研、出片时动手实践会装程序、下依赖。大的程序和模型装在已装程序目录（data/programs）里，所有内容共用，怎么用写在相关技能里；每条内容还有自己的实验目录。每次调研结束会清掉下载缓存和解压过的安装包，另外每 6 小时按下面的规则自动清理。</p>
+    <div class="cfg-row">${field('toolIdleDays','程序多久没用就删','天',1)}${field('toolCapGB','已装程序上限','GB',1)}${field('labKeepDays','调研完多久给实验目录瘦身','天',1)}${field('askAboveGB','单个下载超过多大先问你','GB',0.5)}</div>
+    <div class="label">已装程序 <span class="faint" style="font-weight:400">${fmtSize(L.toolsTotal)}</span></div>
     ${tools?`<div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>工具</th><th class="n">大小</th><th>上次用</th><th></th></tr></thead><tbody>${tools}</tbody></table></div>`:'<p class="hint">还没有工具</p>'}
     <div class="label">各内容的实验目录 <span class="faint" style="font-weight:400">${fmtSize(L.labsTotal)} · 瘦身只留代码、记录和实践素材</span></div>
     ${labs?`<div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>内容</th><th class="n">大小</th><th>上次改动</th><th></th></tr></thead><tbody>${labs}</tbody></table></div>`:'<p class="hint">还没有实验目录</p>'}
-    ${typeof S.labNotes==='string'?`<div class="field"><label for="labNotes">经验本：Claude 每次调研开始时读、结束时追加。写错的、过时的直接改</label><textarea id="labNotes" rows="14" spellcheck="false">${esc(S.labNotes)}</textarea></div>
-      <div style="display:flex;gap:8px"><button class="btn primary" data-act="lab-notes-save">保存经验本</button><button class="btn ghost" data-act="lab-notes-close">收起</button></div>`:''}
+
   </div>`;
 }
 async function labCall(method,url,ok){try{const r=await api(method,url);toast(typeof ok==='function'?ok(r):ok)}catch(e){toast(e.message||'操作失败')}await loadLabStorage()}
@@ -1821,16 +1918,19 @@ document.addEventListener('click',e=>{
     case 'yt-key-save':ytKeySave();break;
     case 'yt-key-del':arm(b,'确认删除',async()=>{try{await api('DELETE','/api/hs/youtube/key');toast('已删除 key')}catch(e){toast(e.message||'删除失败')}await Promise.all([loadYtQuota(),loadFeed()])});break;
     case 'curate':agentRun('curate');break;
-    case 'skill-sel':S.skillSel=k;S.skillMerged=null;S.skillCur=null;render();loadSkill(k);break;
-    case 'skill-save':skillAction('save');break;
-    case 'skill-reset':arm(b,'确认恢复',()=>skillAction('reset'));break;
-    case 'skill-take-new':if(S.skillCur&&!S.skillCur.modified)skillAction('take-new');else arm(b,'确认覆盖',()=>skillAction('take-new'));break;
-    case 'skill-keep':skillAction('keep');break;
-    case 'skill-merge':skillAction('merge');break;
-    case 'skill-accept-merged':skillAction('accept-merged');break;
-    case 'skill-merge-cancel':if(S.skillDraft&&S.skillCur)delete S.skillDraft[S.skillCur.name];S.skillMerged=null;render();break;
-    case 'skill-discard':if(S.skillDraft&&S.skillCur)delete S.skillDraft[S.skillCur.name];render();break;
-    case 'skill-hist':api('GET','/api/skills/'+encodeURIComponent(S.skillCur.name)+'/history/'+k).then(r=>{S.skillDraft={...(S.skillDraft||{}),[S.skillCur.name]:r.content};render();toast('已载入这一版，点保存才生效')}).catch(e=>toast(e.message||'读取失败'));break;
+    case 'skill-sel':S.skillSel=k;S.skillCur=null;S.skillFileCur=null;render();if(k==='changes')loadSkills();else loadSkill(k);break;
+    case 'goto-changes':S.tab='skills';S.skillSel='changes';try{localStorage.setItem('wb.tab','skills')}catch(_){};history.replaceState(null,'','#skills');render();window.scrollTo(0,0);loadSkills();break;
+    case 'skill-file':S.skillFile={name:S.skillCur.name,path:k};S.skillFileCur=null;render();loadSkillFile();break;
+    case 'skill-save':skillAction('save',b);break;
+    case 'skill-reset':arm(b,'确认恢复',()=>skillAction('reset',b));break;
+    case 'skill-delete':arm(b,'确认删除',()=>skillAction('delete',b));break;
+    case 'skill-enable':skillAction('enable',b);break;
+    case 'skill-evolve':skillAction('evolve',b);break;
+    case 'skill-idea':skillAction('idea',b);break;
+    case 'skill-tidy':skillAction('tidy',b);break;
+    case 'skill-discard':if(S.skillDraft&&S.skillFileCur)delete S.skillDraft[S.skillFileCur.name+'/'+S.skillFileCur.path];render();break;
+    case 'chg-diff':case 'chg-apply':case 'chg-reject':case 'chg-refine':case 'chg-retry':chgAction(act.slice(4),k,b);break;
+    case 'chg-revert':arm(b,'确认撤回',()=>chgAction('revert',k,b));break;
     case 'setup-recheck':S.setup=null;render();loadSetup(true);break;
     case 'conf-claude-save':{const v=($('#confClaude')?.value||'').trim();if(!v){toast('先粘贴令牌');break}
       api('PUT','/api/config/claude',{token:v}).then(r=>{S.conf=r;toast('已保存，下次运行 Claude 时生效');render()}).catch(e=>toast(e.message||'保存失败'));break}
@@ -1923,7 +2023,7 @@ document.addEventListener('click',e=>{
     case 'modal-close':case 'modal-bg':S.tdView=null;$('#modalRoot').innerHTML='';break;
     case 'lab-answer':{const q=S.items[id]?.labAsk;if(!q)break;b.disabled=true;
       api('POST',`/api/items/${encodeURIComponent(id)}/lab/answer`,{id:q.id,result:k}).then(()=>toast({done:'好了，Claude 接着做',skip:'已跳过这一步',approve:'已同意，Claude 接着做',deny:'已拒绝，Claude 会跳过这一步'}[k]||'好了'),e=>toast(e.message||'操作失败'));break}
-    case 'lab-tool-rm':arm(b,'确认删除',()=>labCall('POST',`/api/lab/tools/${encodeURIComponent(id)}/remove`,'已删除，需要时 Claude 会按经验本重装'));break;
+    case 'lab-tool-rm':arm(b,'确认删除',()=>labCall('POST',`/api/lab/tools/${encodeURIComponent(id)}/remove`,'已删除，需要时 Claude 会按技能里写的方法重装'));break;
     case 'lab-slim':labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/slim`,r=>`瘦身完成，腾出 ${fmtSize(r.freed)}`);break;
     case 'lab-rm':arm(b,'确认删除',()=>labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/remove`,r=>`已删除，腾出 ${fmtSize(r.freed)}`));break;
     case 'lab-cleanup':S.labCleaning=true;render();labCall('POST','/api/lab/cleanup',r=>r.done.length?`清理了 ${r.done.length} 项`:'没有需要清理的').finally(()=>{S.labCleaning=false;render()});break;
@@ -1961,7 +2061,8 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('input',e=>{
   const t=e.target;
-  if(t.id==='skillText'&&S.skillCur){S.skillDraft={...(S.skillDraft||{}),[S.skillCur.name]:t.value};const sv=document.querySelector('[data-act="skill-save"]');if(sv)sv.disabled=t.value===S.skillCur.content;return}
+  if(t.id==='skillText'&&S.skillFileCur){const f=S.skillFileCur;S.skillDraft={...(S.skillDraft||{}),[f.name+'/'+f.path]:t.value};const dirty=t.value!==f.content;for(const a of ['skill-save','skill-discard']){const sv=document.querySelector(`[data-act="${a}"]`);if(sv)sv.disabled=!dirty}return}
+  if(t.dataset.skpol){api('PUT','/api/skill-settings',{policy:{[t.dataset.skpol]:t.value}}).then(r=>{S.skillSet=r;toast('已保存')}).catch(e=>toast(e.message||'保存失败'));return}
   if(t.id==='videoFb'){S.videoFb={...(S.videoFb||{}),[S.open]:t.value};return}
   if(t.id==='scriptFb'){S.scriptFb={...(S.scriptFb||{}),[S.open]:t.value};return}
   if(t.id==='accQ'){S.accQ=t.value;const q=t.value.trim().toLowerCase();document.querySelectorAll('.acc-row').forEach(r=>{r.hidden=!!q&&!r.dataset.search.includes(q)});return}

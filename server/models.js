@@ -31,6 +31,7 @@ export const FEATURES = [
   { key: 'publish', name: '生成发布信息', where: '流水线 → 内容详情', via: 'cli', default: 'sonnet', defaultEffort: 'medium' },
   { key: 'revise', name: '修改视频', where: '流水线 → 内容详情', via: 'cli', default: 'opus', defaultEffort: 'high' },
   { key: 'script', name: '写分镜脚本', where: '流水线 → 内容详情', via: 'cli', default: 'opus', defaultEffort: 'high', modes: ['agent', 'oneshot'], defaultMode: 'agent' },
+  { key: 'skills', name: '改进技能', where: '技能、总控台的想法', via: 'cli', default: 'opus', defaultEffort: 'high' },
   { key: 'analysis', name: 'AI 复盘', where: '数据复盘', via: 'cli', default: 'opus', defaultEffort: 'high', modes: ['agent', 'oneshot'], defaultMode: 'oneshot' },
 ];
 

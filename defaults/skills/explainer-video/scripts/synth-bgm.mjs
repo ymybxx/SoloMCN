@@ -5,7 +5,7 @@
 //   bgm.wav            配乐，响度对齐到 -14 LUFS（和曲库音乐一样响），混音时按曲库音乐的音量用
 //   sfx-NN-<名字>.wav   每个音效一个文件
 //   bgm.json           节拍网格、各段实际起点、音效清单，以及可以直接并进 audio_meta.json 的条目
-// 参数文件的写法见 make-video 技能的「配乐和音效」一节。
+// 参数文件的写法见 explainer-video 技能的 references/bgm.md。
 import fs from 'node:fs';
 import path from 'node:path';
 

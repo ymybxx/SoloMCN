@@ -3,8 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 // picks：选题雷达里 Claude 精选的素材；agentRuns：后台调起 Claude 的运行记录
-// settings：页面上的设置，比如各功能用什么模型
-export const COLLECTIONS = ['accounts', 'items', 'radar', 'notes', 'picks', 'agentRuns', 'settings'];
+// settings：页面上的设置，比如各功能用什么模型；skillChanges：技能的每一次改动（见 skills.js）
+export const COLLECTIONS = ['accounts', 'items', 'radar', 'notes', 'picks', 'agentRuns', 'settings', 'skillChanges'];
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 
