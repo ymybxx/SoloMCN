@@ -671,19 +671,6 @@ async function handleApi(req, res, parts) {
     return sendError(res, 404, 'not_found', '没有这个 AI 接口');
   }
 
-  // 账号的读音表：配音时把这些词换成读法。生成视频时 Claude 发现念错、改好了的词会登记进来
-  if (parts[0] === 'accounts' && ID_RE.test(parts[1] || '') && parts[2] === 'pronunciations' && method === 'POST') {
-    const acc = store.get('accounts', parts[1]);
-    if (!acc) return sendError(res, 404, 'not_found', '没有这个账号');
-    const list = [...(acc.pronunciations || [])];
-    for (const x of (await readBody(req)).add || []) {
-      const word = String(x?.word || '').trim().slice(0, 40), say = String(x?.say || '').trim().slice(0, 60);
-      if (!word || !say) continue;
-      const i = list.findIndex((y) => y.word.toLowerCase() === word.toLowerCase());
-      if (i >= 0) list[i] = { word, say }; else list.push({ word, say });
-    }
-    return sendJson(res, 200, await store.update('accounts', parts[1], { pronunciations: list.slice(-300) }));
-  }
   // 数据接口：/api/<collection>/<id>
   const [col, id] = parts;
   if (!COLLECTIONS.includes(col) || !ID_RE.test(id || '') || parts.length !== 2) {

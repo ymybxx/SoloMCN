@@ -756,10 +756,9 @@ server.registerTool(
       contact_sheet: VIDEO_PATH.optional().describe('检查用的缩略图拼图，如 videos/xxx/snapshots/contact-sheet.jpg'),
       duration_s: z.number().positive().max(600).describe('成片时长（秒）'),
       notes: z.string().max(1000).optional().describe('仅供后台查看的制作记录：素材来源、改动和未解决的问题；不要复制成画面、字幕或旁白'),
-      pronunciations: z.array(z.object({ word: z.string().min(1).max(40), say: z.string().min(1).max(60) })).max(30).optional().describe('这次发现念错、改写后念对了的词，登记进账号的读音表，下次配音自动套用'),
     },
   },
-  tool(async ({ item_id, mp4, project, contact_sheet, duration_s, notes, pronunciations }) => {
+  tool(async ({ item_id, mp4, project, contact_sheet, duration_s, notes }) => {
     const abs = path.resolve(ROOT, mp4);
     if (!abs.startsWith(path.join(ROOT, 'videos') + path.sep) || !existsSync(abs) || !statSync(abs).isFile()) throw new Error(`找不到视频文件 ${mp4}`);
     const it = await call('GET', `/api/items/${item_id}`);
@@ -767,7 +766,6 @@ server.registerTool(
     const prev = it.video && it.video.mp4 !== mp4 ? [{ mp4: it.video.mp4, durationS: it.video.durationS, notes: it.video.notes, at: it.video.at, version: it.video.version || 1 }, ...(it.video.history || [])].slice(0, 10) : it.video?.history || [];
     const video = { history: prev, version: it.video && it.video.mp4 !== mp4 ? (it.video.version || 1) + 1 : it.video?.version || 1, mp4, project: (project || path.dirname(path.dirname(mp4))).replace(/\/$/, ''), contactSheet: contact_sheet || null, durationS: Math.round(duration_s * 10) / 10, notes: notes || '', sizeMB: Math.round(statSync(abs).size / 1e5) / 10, at: Date.now() };
     await call('PATCH', `/api/items/${item_id}`, { video, stage: ['idea', 'script', 'production'].includes(it.stage || 'idea') ? 'scheduled' : it.stage, updatedAt: Date.now() });
-    if (pronunciations?.length && it.accountId) await call('POST', `/api/accounts/${it.accountId}/pronunciations`, { add: pronunciations }).catch(() => {});
     return { saved: true, ...video };
   }),
 );
@@ -815,8 +813,6 @@ server.registerTool(
         // 这条内容用的做法技能（写脚本时定的，或者系列指定的），各环节读那个技能里对应的文件
         craft: it.craft || (a?.series || []).find((v) => v.id === it.seriesId)?.craft || null,
       },
-      // 账号的读音表：配音前把这些词换成读法（字幕仍显示原文）
-      pronunciations: a?.pronunciations?.length ? a.pronunciations : undefined,
       // account 里的人群、人设、风格、配音、情绪，是按这条内容所属的系列取的（没有系列就用账号上的）
       account: a && (() => { const c = creativeOf(a, it); return { code: a.code, name: a.name, brief: a.brief || undefined, audience: c.audience, persona: c.persona, style: c.visual, platforms: (a.platforms || []).map((p) => PLATFORM_NAMES[p] || p), emotions: c.emotions, voice: c.voice }; })(),
       // 这条内容属于哪个系列：人群、主角、画面、结构、时长都按它
