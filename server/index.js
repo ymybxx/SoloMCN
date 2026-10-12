@@ -508,12 +508,6 @@ async function handleApi(req, res, parts) {
     if (!it) return sendError(res, 404, 'not_found', '找不到这条内容');
     if (parts.length === 3 && method === 'POST') {
       const body = await readBody(req);
-      // 同一个网址已经截过的不重复截（重新调研时常会再截一遍），直接返回已有的；页面变了要重截就传 refresh
-      const norm = (u) => String(u || '').trim().replace(/#.*$/, '').replace(/\/+$/, '');
-      const had = (it.assets || []).filter((a) => a.source !== 'practice' && a.url && norm(a.url) === norm(body.url) && (a.kind === 'image' || body.videos));
-      if (had.length && !body.refresh) {
-        return sendJson(res, 200, { title: had[0].title, files: had.map((a) => ({ id: a.id, kind: a.kind, file: a.file, part: a.part })), existing: true, hint: '这个网址之前已经截过，直接用已有的素材；页面有变化要重截就加 refresh: true' });
-      }
       try {
         const r = await captureSource({ root, itemId: parts[1], url: String(body.url || ''), fullPage: body.fullPage !== false, videos: !!body.videos });
         const at = Date.now();

@@ -612,12 +612,11 @@ server.registerTool(
     inputSchema: {
       item_id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).describe('内容 id'),
       url: z.string().url().describe('公开网页的网址'),
-      refresh: z.boolean().optional().describe('这个网址之前截过、但页面有变化要重截时传 true；不传的话截过的网址直接返回已有的素材'),
       note: z.string().max(300).describe('这张图/这段视频里有什么、能当什么画面用，例如“Claude Haiku 5.5 定价表，第二屏是价格对比”'),
       videos: z.boolean().optional().describe('是否顺带下载页面里的视频，默认 false'),
     },
   },
-  tool(async ({ item_id, url, note, videos, refresh }) => call('POST', `/api/items/${item_id}/assets`, { url, note, videos: !!videos, refresh: !!refresh }, 240000)),
+  tool(async ({ item_id, url, note, videos }) => call('POST', `/api/items/${item_id}/assets`, { url, note, videos: !!videos }, 240000)),
 );
 
 // ---------- B站视频素材 ----------
