@@ -1582,8 +1582,8 @@ function vChanges(){
         <div class="actions"><button class="btn ghost" data-act="skill-tidy">现在整理一下</button></div></div>
       <p class="hint">开着时，Claude 在调研、写脚本、出片中遇到坑或找到更好的做法，会顺手改进对应的技能，每次都记在下面；攒多了每周自动整理一次（合并重复、删掉过时的）。</p>
       <details><summary class="faint">哪些改动要先给你看</summary><div class="grid" style="gap:6px;margin-top:8px">
-        ${pol('idea','你的想法')}${pol('run','生成、修改视频时 Claude 直接改的')}${pol('suggest','调研、精选等能上网的运行提的建议')}${pol('update','出厂更新（有冲突的总是先给你看）')}${pol('tidy','定期整理')}
-        <p class="hint">能上网的运行读过网页，网页里的内容可能借它混进技能，所以默认先给你看。</p></div></details>
+        ${pol('idea','你的想法')}${pol('run','生成、修改视频时 Claude 直接改的')}${pol('update','出厂更新（有冲突的总是先给你看）')}${pol('tidy','定期整理')}
+</div></details>
     </div>
     <div class="section-head" style="margin-top:6px"><h2>待处理</h2></div>
     ${open.length?open.map(changeCard).join(''):'<div class="empty">没有要处理的改动。</div>'}
