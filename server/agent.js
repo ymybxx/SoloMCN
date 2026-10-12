@@ -510,11 +510,13 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
       if (!dirty) return;
       dirty = false;
       run.live = liveView();
-      store.update('agentRuns', id, { steps: run.steps, sessionId: run.sessionId, model: run.model || null, live: run.live });
+      store.update('agentRuns', id, { steps: run.steps, stepTotal: run.stepTotal, sessionId: run.sessionId, model: run.model || null, live: run.live });
     };
     const timer = setInterval(flush, 1500);
+    // 只留最近 MAX_STEPS 条步骤（记录文件不至于越来越大），总共做了多少步另外记
     const step = (kind, text) => {
       run.steps.push({ at: Date.now(), kind, text: String(text).slice(0, 300) });
+      run.stepTotal = Math.max(run.stepTotal || 0, run.steps.length - 1) + 1;
       if (run.steps.length > MAX_STEPS) run.steps.splice(0, run.steps.length - MAX_STEPS);
       dirty = true;
     };
@@ -623,6 +625,7 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
       current[lane] = null;
       await store.update('agentRuns', id, {
         steps: run.steps,
+        stepTotal: run.stepTotal,
         sessionId: run.sessionId,
         // model 是指定的主模型；modelsUsed 是实际用到的全部，Claude Code 做内部小任务会顺带用轻量模型
         model: run.model || Object.keys(result?.modelUsage || {})[0] || null,

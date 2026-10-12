@@ -285,6 +285,8 @@ const lastRun=task=>runList().find(r=>r.task===task);
 // 写脚本、预审、复盘的调用方式：设置里没改过就用默认（和 server/models.js 保持一致）
 const DEFAULT_MODES={script:'agent',check:'oneshot',analysis:'oneshot'};
 const modeOf=k=>{const m=(local.settings.modes||{})[k];return m==='agent'||m==='oneshot'?m:DEFAULT_MODES[k]};
+// 总步数：平台只留最近 600 条步骤，总共做了多少步单独记在 stepTotal（以前的记录没有，就数留下的）
+const stepsOf=r=>Math.max(r.stepTotal||0,(r.steps||[]).length);
 const itemRun=(task,id)=>runList().find(r=>r.task===task&&r.args?.itemId===id);
 // 内容详情里显示后台 Agent 的进度：运行中显示最近几步，失败显示原因，刚完成显示汇报
 const KIND_LABEL={tool:'操作',text:'说明',error:'出错',user:'你'};
@@ -310,7 +312,7 @@ function vLog(run,tall){
 // 运行状态标签
 function runPill(run){
   const st={running:['warn','中'],done:['ok',' · 完成'],failed:['bad',' · 失败'],stopped:['',' · 已停止']}[run.status]||['',''];
-  return `<span class="pill ${st[0]}"><i></i>Claude ${esc(run.name)}${st[1]} · ${vDur(run)}${run.steps?.length?' · '+run.steps.length+' 步':''}</span>`;
+  return `<span class="pill ${st[0]}"><i></i>Claude ${esc(run.name)}${st[1]} · ${vDur(run)}${run.steps?.length?' · '+stepsOf(run)+' 步':''}</span>`;
 }
 // 内容详情里显示后台 Agent 的进度
 function vRunMini(run){
@@ -320,7 +322,7 @@ function vRunMini(run){
   if(run.status==='running')return `<div class="run-mini">${head}${vLog(run)}</div>`;
   const canResume=(run.status==='failed'||run.status==='stopped')&&run.sessionId&&!laneBusy(run);
   const resumeBtn=canResume?`<button class="btn" data-act="agent-resume" data-id="${esc(run.id)}">从中断处继续</button>`:'';
-  const past=`<details class="run-past"><summary>查看过程（${(run.steps||[]).length} 步）</summary>${vLog(run)}</details>`;
+  const past=`<details class="run-past"><summary>查看过程（${stepsOf(run)} 步${stepsOf(run)>(run.steps||[]).length?`，这里只列最近 ${run.steps.length} 步`:''}）</summary>${vLog(run)}</details>`;
   if(run.status==='failed')return `<div class="run-mini">${head}<p class="err">${esc(run.error||'失败')}</p>${resumeBtn?`<div>${resumeBtn} <span class="hint">接着上次的会话做，已经做好的部分不会重做</span></div>`:''}${past}</div>`;
   if(run.status==='stopped')return `<div class="run-mini">${head}${resumeBtn?`<div>${resumeBtn}</div>`:''}${past}</div>`;
   if(run.status==='done'&&recent)return `<div class="run-mini">${head}${run.result?`<p class="hint">Claude：${mdLite(run.result.slice(0,300))}</p>`:''}${past}</div>`;
