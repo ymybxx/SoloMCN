@@ -134,7 +134,8 @@ function endGen(){S.gen=null;renderStatus()}
 function requestRender(){const a=document.activeElement;const v=$('#view');if(a&&v.contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)){S.pendingRender=true;renderStatus();return}render()}
 $('#view').addEventListener('focusout',()=>{if(S.pendingRender)setTimeout(()=>{const a=document.activeElement;if(!(a&&$('#view').contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))){S.pendingRender=false;render()}},180)});
 
-function render(){renderStatus();renderTabs();renderBanner();
+function render(){if(composing){renderAfterCompose=true;return}
+  renderStatus();renderTabs();renderBanner();
   const v={home:vHome,radar:vRadar,ideas:vIdeas,feed:vFeed,settings:vSettings,pipeline:vPipeline,calendar:vCalendar,accounts:vAccounts,data:vData,sources:vSources,skills:vSkills}[S.tab];
   const html=v();keepLogScroll($('#view'),()=>{$('#view').innerHTML=html});
   if(S.tab==='sources'){const t=$('#poolText');if(t)t.value=S.poolText||'';const u=$('#poolUser');if(u)u.value=S.poolUser||''}
@@ -324,10 +325,22 @@ function keepLogScroll(container,fn){
   // 自己会滚动的输入框、长文本（技能说明等）：重新渲染后回到原来的位置，不然一刷新就弹回顶部
   const kept={};
   container?.querySelectorAll('textarea[id],.keep-scroll[id]').forEach(el=>{if(el.scrollTop)kept[el.id]=el.scrollTop});
+  // 正在打的字：运行进度一刷新整块会重画，输入框里打了一半的字、光标和焦点都要接回去。
+  // 只接「页面本来要显示的内容没变」的框（换了文件、提交后清空这类本来就该变的不接）
+  const typed={};
+  container?.querySelectorAll('input[id]:not([type=checkbox]):not([type=radio]):not([type=file]),textarea[id]').forEach(el=>{if(el.value!==el.defaultValue)typed[el.id]={value:el.value,def:el.defaultValue}});
+  const act=document.activeElement,actId=container?.contains(act)&&act.id?act.id:null;
+  const sel=actId&&typeof act.selectionStart==='number'?[act.selectionStart,act.selectionEnd]:null;
   fn();
   container?.querySelectorAll('.run-log').forEach(l=>{const v=saved[l.dataset.run];l.scrollTop=!v||v.bottom?l.scrollHeight:v.top});
+  for(const [id,t] of Object.entries(typed)){const el=document.getElementById(id);if(el&&el.defaultValue===t.def&&el.value!==t.value)el.value=t.value}
   for(const [id,top] of Object.entries(kept)){const el=document.getElementById(id);if(el)el.scrollTop=top}
+  if(actId){const el=document.getElementById(actId);if(el&&el!==document.activeElement){el.focus({preventScroll:true});if(sel)try{el.setSelectionRange(sel[0],sel[1])}catch(_){}}}
 }
+// 用输入法打中文时（拼音还没上屏）不重画，上屏后再补一次，不然拼音会被打断
+let composing=false,renderAfterCompose=false;
+document.addEventListener('compositionstart',()=>{composing=true});
+document.addEventListener('compositionend',()=>{composing=false;if(renderAfterCompose){renderAfterCompose=false;setTimeout(render,0)}});
 // 全屏查看一次运行
 function renderRunView(){
   const root=$('#runViewRoot');if(!root)return;
