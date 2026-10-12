@@ -636,7 +636,8 @@ a.pick-src:hover{color:var(--blue)}
 .chg-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .chg-title{flex:1;min-width:160px}
 .chg-idea{margin:0;font-size:13.5px}
-.chg-sum{white-space:pre-wrap;font-size:13px;color:var(--muted);line-height:1.6}
+.chg-sum{white-space:pre-wrap;font-size:13.5px;color:var(--ink);line-height:1.65}
+.chg-sum code,.chg-idea code{font-size:12.5px}
 .chg-files{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:12.5px}
 .chg-file b.a{color:var(--ok);font-weight:600}.chg-file b.d{color:var(--bad);font-weight:600}
 .chg-refine{display:flex;gap:8px;flex-wrap:wrap}

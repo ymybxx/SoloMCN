@@ -1528,10 +1528,14 @@ const chgList=(filter)=>Object.entries(S.skillChanges||{}).map(([id,v])=>({id,..
 const chgOpen=c=>['queued','working','pending','failed'].includes(c.status);
 function diffHtml(text){
   if(!text)return '<p class="hint">没有文字上的差别。</p>';
-  return `<pre class="diff keep-scroll no-tr">${text.split('\n').map(l=>{const c=l.startsWith('=== ')?'f':l.startsWith('@@')?'h':l.startsWith('+')?'a':l.startsWith('-')?'d':'';return `<span class="dl ${c}">${esc(l)||' '}</span>`}).join('')}</pre>`;
+  return `<pre class="diff no-tr">${text.split('\n').map(l=>{const c=l.startsWith('=== ')?'f':l.startsWith('@@')?'h':l.startsWith('+')?'a':l.startsWith('-')?'d':'';const t=c==='f'?l.slice(4):c==='h'?'⋯':l;return `<span class="dl ${c}">${esc(t)||' '}</span>`}).join('')}</pre>`;
 }
+const chgMd=t=>mdLite(t).replace(/`([^`\n]+)`/g,'<code>$1</code>');
+// 等你确认的改动直接把逐行对比摊开，不用再点
+function loadDiff(id){S.chgDiff={...(S.chgDiff||{}),[id]:{}};api('GET','/api/skill-changes/'+id+'/diff').then(r=>{S.chgDiff[id]={text:r.diff};requestRender()},e=>{S.chgDiff[id]={err:e.message||'读取失败'};requestRender()})}
 function changeCard(c){
   const [stL,stC]=CHG_ST[c.status]||[c.status,''];
+  if(c.status==='pending'&&(c.files||[]).length&&!S.chgDiff?.[c.id]&&!S.chgDiffShut?.[c.id])setTimeout(()=>{if(!S.chgDiff?.[c.id])loadDiff(c.id)},0);
   const files=(c.files||[]).map(f=>`<span class="chg-file"><code class="no-tr">${esc(f.path)}</code>${f.binary?'':` <b class="a">+${f.plus||0}</b> <b class="d">−${f.minus||0}</b>`}${f.op==='add'?' 新文件':f.op==='del'?' 删除':''}</span>`).join('');
   const d=S.chgDiff?.[c.id];
   const acts=c.status==='pending'?`<div class="actions"><button class="btn primary" data-act="chg-apply" data-k="${c.id}">通过</button><button class="btn ghost" data-act="chg-reject" data-k="${c.id}">不要了</button></div>
@@ -1542,10 +1546,11 @@ function changeCard(c){
     <div class="chg-head"><span class="pill">${esc(CHG_SRC[c.source]||c.source)}</span><b class="chg-title">${esc(c.idea?(c.idea.length>28?c.idea.slice(0,28)+'…':c.idea):c.title||'')}</b><span class="pill ${stC}"><i></i>${stL}</span><span class="faint num">${esc(fmtTime(c.createdAt))}</span></div>
     ${c.idea&&c.idea.length>28?`<p class="chg-idea">「${esc(c.idea)}」</p>`:''}
     ${(c.refines||[]).map(r=>`<p class="chg-idea faint">你又说：「${esc(r.text)}」</p>`).join('')}
-    ${c.summary?`<div class="chg-sum">${esc(c.summary)}</div>`:c.status==='working'||c.status==='queued'?'<p class="hint">Claude 正在找该改的技能，改好了会出现在这里。</p>':''}
+    ${c.suggestion?`<p class="chg-idea">运行中提的：「${esc(c.suggestion)}」</p>`:''}
+    ${c.summary?`<div class="chg-sum">${chgMd(c.summary)}</div>`:c.status==='working'||c.status==='queued'?'<p class="hint">Claude 正在找该改的技能，改好了会出现在这里。</p>':''}
     ${c.error?`<p class="err">${esc(c.error)}</p>`:''}${c.note?`<p class="err">${esc(c.note)}</p>`:''}
     ${files?`<div class="chg-files">${files}<button class="btn ghost sm" data-act="chg-diff" data-k="${c.id}">${d?'收起对比':'看对比'}</button></div>`:''}
-    ${d?(d.err?`<p class="err">${esc(d.err)}</p>`:d.text==null?'<p class="hint">读取中…</p>':diffHtml(d.text)):''}
+    ${d?(d.err?`<p class="err">${esc(d.err)}</p>`:d.text==null?'<p class="hint">读取改动中…</p>':`<div class="label" style="margin-top:4px">具体改动 <span class="faint" style="font-weight:400">绿色是加上的，红色是删掉的</span></div>${diffHtml(d.text)}`):''}
     ${acts}
   </article>`;
 }
@@ -1652,7 +1657,7 @@ async function skillAction(k,b){
 async function chgAction(k,id,b){
   const url='/api/skill-changes/'+id;
   try{
-    if(k==='diff'){if(S.chgDiff?.[id]){delete S.chgDiff[id];render();return}S.chgDiff={...(S.chgDiff||{}),[id]:{}};render();const r=await api('GET',url+'/diff');S.chgDiff[id]={text:r.diff};render();return}
+    if(k==='diff'){if(S.chgDiff?.[id]){delete S.chgDiff[id];S.chgDiffShut={...(S.chgDiffShut||{}),[id]:1};render();return}if(S.chgDiffShut)delete S.chgDiffShut[id];loadDiff(id);render();return}
     if(k==='apply'){await api('POST',url+'/apply');toast('已生效，下次运行就用新的')}
     else if(k==='reject'){await api('POST',url+'/reject');toast('不要了，技能没动')}
     else if(k==='revert'){await api('POST',url+'/revert');toast('已撤回')}
