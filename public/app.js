@@ -88,7 +88,10 @@ function syncDrawer(){
   const sig=drawerSigOf(id,it);
   const a=document.activeElement;const typing=a&&$('#drawerRoot').contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
   if(sig!==drawerSig&&!typing){drawerSig=sig;renderDrawer();return}
-  const upd=(el,html)=>{if(el)keepLogScroll(el,()=>{el.innerHTML=html})};
+  // 正在输入时不整体重画，但按钮和进度这些小块照常更新；等输入框失去焦点再补一次整体重画（见下面的 focusout）
+  if(sig!==drawerSig)S.drawerStale=true;
+  const upd=(el,html)=>{if(el&&el.innerHTML!==html)keepLogScroll(el,()=>{el.innerHTML=html})};
+  upd($('#scriptActs'),aiActions('script',id,!!(S.draft?.script??it.script)));
   if(modeOf('script')==='agent')upd($('#scriptRun'),vRunMini(rs));
   if(modeOf('check')==='agent')upd($('#checkRun'),vRunMini(rc));
   upd($('#videoRun'),vRunMini(rv));
@@ -96,6 +99,10 @@ function syncDrawer(){
   upd($('#researchRun'),vRunMini(re));
   upd($('#pubStatus'),vPubStatus(it));
 }
+$('#drawerRoot').addEventListener('focusout',()=>setTimeout(()=>{
+  const a=document.activeElement;if(!S.drawerStale||(a&&$('#drawerRoot').contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)))return;
+  S.drawerStale=false;syncDrawer();
+},200));
 const store={
   set(col,id,data){local[col][id]=data;applyLocal(col);return queue(col+'/'+id,()=>api('PUT',`/api/${col}/${id}`,data))},
   update(col,id,patch){local[col][id]=merge(local[col][id]||{},patch);applyLocal(col);return queue(col+'/'+id,()=>api('PATCH',`/api/${col}/${id}`,patch))},
@@ -1833,7 +1840,7 @@ function renderDrawer(){
         ${it.research?vResearch(it.research,!d.script):'<p class="hint">写脚本之前先调研：上网查真实的价格、工具能力、操作步骤和反方观点，写成每条都有出处的报告；同时把能当画面的网页截图和官方视频收集成素材，做视频时直接用。写脚本时会以它为依据，台词里的数字都能追溯来源。一般 3–10 分钟。</p>'}
       </div>
       <div class="blk">
-        <div class="blk-head"><h3>分镜脚本</h3><span class="faint" style="font-size:12px">${modeOf('script')==='agent'?'后台 Agent':'单次调用'}</span><div class="actions">${aiActions('script',id,!!d.script)}</div></div>
+        <div class="blk-head"><h3>分镜脚本</h3><span class="faint" style="font-size:12px">${modeOf('script')==='agent'?'后台 Agent':'单次调用'}</span><div class="actions" id="scriptActs">${aiActions('script',id,!!d.script)}</div></div>
         <textarea id="dScript" placeholder="点「AI 写脚本」，Claude 会按这个账号的人设写一份可直接制作的分镜。你也可以自己写。">${esc(d.script)}</textarea>
         <div id="scriptRun">${modeOf('script')==='agent'?vRunMini(itemRun('script',id)):''}</div>
         ${modeOf('script')==='agent'?vSay(itemRun('script',id)):''}
