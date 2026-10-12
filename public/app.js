@@ -137,7 +137,8 @@ $('#view').addEventListener('focusout',()=>{if(S.pendingRender)setTimeout(()=>{c
 function render(){if(composing){renderAfterCompose=true;return}
   renderStatus();renderTabs();renderBanner();
   const v={home:vHome,radar:vRadar,ideas:vIdeas,feed:vFeed,settings:vSettings,pipeline:vPipeline,calendar:vCalendar,accounts:vAccounts,data:vData,sources:vSources,skills:vSkills}[S.tab];
-  const html=v();keepLogScroll($('#view'),()=>{$('#view').innerHTML=html});
+  // 内容和上次一模一样就不动页面：后台任务每走一步都会触发一次重画，大多数页面其实没变，整块替换会让正在滑的页面和框跳动
+  const html=v();if(html!==S.lastViewHtml||S.lastViewTab!==S.tab){S.lastViewHtml=html;S.lastViewTab=S.tab;keepLogScroll($('#view'),()=>{$('#view').innerHTML=html})}
   if(S.tab==='sources'){const t=$('#poolText');if(t)t.value=S.poolText||'';const u=$('#poolUser');if(u)u.value=S.poolUser||''}
 
 }
@@ -1526,9 +1527,9 @@ const CHG_SRC={idea:'你的想法',run:'运行中改的',suggest:'运行中的�
 const CHG_ST={queued:['排队中',''],working:['Claude 在改…','warn'],pending:['等你确认','warn'],applied:['已生效','ok'],rejected:['没要',''],reverted:['已撤回',''],failed:['没做完','bad']};
 const chgList=(filter)=>Object.entries(S.skillChanges||{}).map(([id,v])=>({id,...v})).filter(c=>c.status!=='empty'&&(!filter||filter(c))).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 const chgOpen=c=>['queued','working','pending','failed'].includes(c.status);
-function diffHtml(text){
+function diffHtml(text,id){
   if(!text)return '<p class="hint">没有文字上的差别。</p>';
-  return `<pre class="diff no-tr">${text.split('\n').map(l=>{const c=l.startsWith('=== ')?'f':l.startsWith('@@')?'h':l.startsWith('+')?'a':l.startsWith('-')?'d':'';const t=c==='f'?l.slice(4):c==='h'?'⋯':l;return `<span class="dl ${c}">${esc(t)||' '}</span>`}).join('')}</pre>`;
+  return `<pre class="diff no-tr keep-scroll"${id?` id="diff-${esc(id)}"`:""}>${text.split('\n').map(l=>{const c=l.startsWith('=== ')?'f':l.startsWith('@@')?'h':l.startsWith('+')?'a':l.startsWith('-')?'d':'';const t=c==='f'?l.slice(4):c==='h'?'⋯':l;return `<span class="dl ${c}">${esc(t)||' '}</span>`}).join('')}</pre>`;
 }
 const chgMd=t=>mdLite(t).replace(/`([^`\n]+)`/g,'<code>$1</code>');
 // 等你确认的改动直接把逐行对比摊开，不用再点
@@ -1550,7 +1551,7 @@ function changeCard(c){
     ${c.summary?`<div class="chg-sum">${chgMd(c.summary)}</div>`:c.status==='working'||c.status==='queued'?'<p class="hint">Claude 正在找该改的技能，改好了会出现在这里。</p>':''}
     ${c.error?`<p class="err">${esc(c.error)}</p>`:''}${c.note?`<p class="err">${esc(c.note)}</p>`:''}
     ${files?`<div class="chg-files">${files}<button class="btn ghost sm" data-act="chg-diff" data-k="${c.id}">${d?'收起对比':'看对比'}</button></div>`:''}
-    ${d?(d.err?`<p class="err">${esc(d.err)}</p>`:d.text==null?'<p class="hint">读取改动中…</p>':`<div class="label" style="margin-top:4px">具体改动 <span class="faint" style="font-weight:400">绿色是加上的，红色是删掉的</span></div>${diffHtml(d.text)}`):''}
+    ${d?(d.err?`<p class="err">${esc(d.err)}</p>`:d.text==null?'<p class="hint">读取改动中…</p>':`<div class="label" style="margin-top:4px">具体改动 <span class="faint" style="font-weight:400">绿色是加上的，红色是删掉的</span></div>${diffHtml(d.text,c.id)}`):''}
     ${acts}
   </article>`;
 }
