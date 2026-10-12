@@ -1036,4 +1036,21 @@ server.registerTool(
   tool(async ({ text }) => call('POST', '/api/lab/notes/append', { text })),
 );
 
+server.registerTool(
+  'lab_ask_claude',
+  {
+    title: '问 Claude',
+    description: '实验里要看某个 Claude 模型怎么回答时用（测提示词写法、测模型行为、对比几种规则）。沙盒里调不了模型，由工作台在沙盒外替你问一次，不带任何工具，返回它的回答原文。' +
+      '用的是用户自己的 Claude 订阅额度，每条内容每天最多 40 次，先想清楚要问哪几道题。不要为此去开 claude.ai 让用户登录。' +
+      'system 是这次对话的系统提示词（不填就是一句「You are a helpful assistant.」，不会带上 Claude Code 自己的提示词）。',
+    inputSchema: {
+      item_id: ITEM_ID,
+      prompt: z.string().min(1).max(20000).describe('要问的内容（用户消息）'),
+      model: z.string().regex(/^(haiku|sonnet|opus|claude-[a-z0-9.-]{3,60})$/).optional().describe('用哪个模型：简写 haiku / sonnet / opus 指向当前最新版（默认 haiku）；要测某个具体版本就写完整名，比如 claude-haiku-4-5-20251001'),
+      system: z.string().max(8000).optional().describe('系统提示词，测规则写法时把规则放这里'),
+    },
+  },
+  tool(async ({ item_id, ...body }) => call('POST', `/api/items/${item_id}/lab/claude`, body, 240_000)),
+);
+
 await server.connect(new StdioServerTransport());

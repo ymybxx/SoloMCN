@@ -47,6 +47,7 @@ const store = await createStore(path.join(root, 'data', 'db.json'), { onChange: 
 // 调研里的动手实践：实验目录、录制实验画面、实践浏览器、等人处理（登录、付款、花钱确认）
 const lab = createLab({ root, store });
 const characters = createCharacters({ root });
+const labClaudeCalls = new Map(); // 调研实验里问 Claude 的次数：内容 id:日期 -> 次数
 lab.clearStale();
 // 定时清理实践占用的空间：启动一分钟后一次，之后每 6 小时一次
 const labCleanup = () => { try { const r = lab.cleanup(); if (r.done.length) console.log(`实践空间清理：${r.done.length} 项`); } catch (err) { console.error('实践空间清理出错：', err.message); } };
@@ -436,6 +437,23 @@ ${mine}`;
   // 实践：Claude 通过 MCP 工具调用（录制、存素材、操作实践浏览器、请人处理），页面调用 answer
   if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts.length === 3 && method === 'GET') {
     return sendJson(res, 200, lab.files(parts[1]) || { dir: null, files: [] });
+  }
+  // 调研实验里问 Claude：沙盒里调不了模型，由工作台在沙盒外用单次调用去问（不给任何工具），每条内容每天最多 40 次
+  if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts[3] === 'claude' && parts.length === 4 && method === 'POST') {
+    const body = await readBody(req);
+    const prompt = String(body.prompt || '').slice(0, 20_000);
+    // 简写（haiku / sonnet / opus，指向当前最新）或完整模型名（测某个具体版本，比如 claude-haiku-4-5-20251001）
+    const model = ['haiku', 'sonnet', 'opus'].includes(body.model) || /^claude-[a-z0-9.-]{3,60}$/.test(body.model || '') ? body.model : 'haiku';
+    if (!prompt.trim()) return sendError(res, 400, 'bad_request', 'prompt 不能空');
+    const day = new Date().toISOString().slice(0, 10), key = `${parts[1]}:${day}`;
+    labClaudeCalls.set(key, (labClaudeCalls.get(key) || 0) + 1);
+    if (labClaudeCalls.get(key) > 40) return sendError(res, 429, 'limit', '这条内容今天已经问了 40 次 Claude，留着额度做别的；实验就用已经拿到的回答');
+    try {
+      const r = await runClaude(prompt, { model, systemPrompt: body.system == null ? 'You are a helpful assistant.' : String(body.system).slice(0, 8000) });
+      return sendJson(res, 200, { text: r.text, model: r.model || model, used: labClaudeCalls.get(key), limit: 40 });
+    } catch (err) {
+      return sendError(res, 502, 'claude_failed', String(err.message || err).split('\n')[0].slice(0, 300));
+    }
   }
   if (parts[0] === 'items' && ID_RE.test(parts[1] || '') && parts[2] === 'lab' && parts[3] === 'ask' && parts.length === 5 && method === 'GET') {
     try { return sendJson(res, 200, lab.askStatus(parts[1], parts[4])); } catch (err) { return sendError(res, err.status || 500, 'not_found', err.message); }

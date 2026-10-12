@@ -47,7 +47,7 @@ export function loginErrorMessage() {
  * - onText：流式收到的文字增量
  * 返回 { text, structured, truncated, model }
  */
-export function runClaude(prompt, { model = 'opus', effort, schema, onText, signal, cwd, images = [] } = {}) {
+export function runClaude(prompt, { model = 'opus', effort, schema, onText, signal, cwd, images = [], systemPrompt } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new AIError('cancelled', '已停止。'));
     const args = [
@@ -58,6 +58,8 @@ export function runClaude(prompt, { model = 'opus', effort, schema, onText, sign
       // 不给任何工具，只要它直接回答；要看图时只给读文件
       '--tools', images.length ? 'Read' : '',
       ...(images.length ? ['--allowedTools', 'Read', ...[...new Set(images.map((f) => path.dirname(f)))].flatMap((d) => ['--add-dir', d])] : []),
+      // 给了 systemPrompt 就整个替换掉 Claude Code 自带的系统提示词（测模型本身的表现时用）
+      ...(systemPrompt != null ? ['--system-prompt', systemPrompt] : []),
       '--strict-mcp-config', // 不加载项目的 MCP 服务
       '--permission-mode', 'dontAsk',
       '--no-session-persistence',
