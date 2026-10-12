@@ -145,21 +145,21 @@ Voice-over needs no key: hosted voices after logging in to HyperFrames, otherwis
 
 ## Changing the process = editing a paragraph
 
-Each step is a job description (a Claude Code skill) that you view and edit on the Skills page:
+How each step is done lives in skills (standard Claude Code skills: a folder whose `SKILL.md` is the entry point, with appendices Claude reads only when needed). View and edit them on the Skills page. There are three kinds:
 
-| Skill | Responsible for |
-|---|---|
-| `curate-topics` | Picking topics worth making from the trending lists |
-| `account-ideas` | Ideas that fit each channel and series |
-| `research-topic` | Web research and footage capture |
-| `write-script` | A storyboard script ready to produce |
-| `precheck-content` | Pre-publish check |
-| `make-video` / `revise-video` | Making the video, revising it from feedback |
-| `review-data` | Analytics review |
+| Kind | Skills | Responsible for |
+|---|---|---|
+| Flow | `curate-topics` `account-ideas` `research-topic` `write-script` `precheck-content` `make-video` `revise-video` `review-data` | The generic steps: curating, ideas, research, scripts, pre-checks, making and revising videos, analytics |
+| Craft | `explainer-video` `stage-montage` | How one kind of content is made at each step: explainer videos, real-footage edits (outfit-swap, stage mashups). A series picks its craft, or Claude picks per item |
+| Tool | `voice-over` `transcribe` | Programs used in several places: voice-over, speech-to-text |
 
-Want sharper topics, shorter scripts or a different visual style? Edit the skill. No code involved.
+Want sharper topics, shorter scripts or a different visual style? Edit the skill. No code involved. Or type an idea on the dashboard, such as "add the channel watermark to every video": Claude finds the skills to change, shows you a line-by-line diff, and nothing changes until you approve. A new style is a new craft skill.
 
-Skills are your local data: the repo only ships defaults (`defaults/skills/`), copied to `.claude/skills/` on first start, and your edits are never committed. When a default improves, skills you haven't touched update automatically; edited ones show a notice and Claude can merge the improvements into your version. Running `/curate-topics` and friends directly in Claude Code uses the same files.
+**Self-improvement**: when it's on (the default), Claude improves the relevant skill whenever it hits a pitfall or finds a better way during research, scripting or video work. Every change to a skill, whether yours, Claude's or a factory update, is recorded as a skill change you can diff and revert, and a weekly tidy-up merges duplicates. The Skills page lets you choose which kinds apply right away and which wait for you.
+
+Skills are your local data: the repo only ships defaults (`defaults/skills/`), copied to `.claude/skills/` on first start, and your edits are never committed. When a default improves, untouched skills update directly; edited ones get a file-by-file three-way merge, and anything that can't merge cleanly goes to Claude and waits for your approval. Running `/curate-topics` and friends directly in Claude Code uses the same files.
+
+**What background runs can do**: Claude runs started by the workbench can read and write project files, run commands and browse the web, and the keys and logins you configured in the workbench (Claude subscription, DashScope, image generation, YouTube, Bilibili) are passed to them as environment variables. It works on your own computer with your own accounts, so run it only on a machine you trust.
 
 Pick the model and effort for each step in Settings (Opus, Sonnet, Haiku…). New model versions are used automatically: **when Claude gets better, SoloMCN gets better.**
 

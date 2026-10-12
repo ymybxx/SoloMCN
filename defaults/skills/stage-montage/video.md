@@ -14,7 +14,7 @@
      ],
      "auto": { "beatsPerCut": 4, "seed": 1, "sections": [ {"from": 60, "to": 75, "beatsPerCut": 2} ] },
      "pins": [ {"from": 120.4, "to": 126.6, "src": "d1"} ],
-     "texts": [ {"text": "苏新皓《竞速游戏》一键换装", "from": 3.2, "to": 6, "size": 0.065, "y": 0.12} ],
+     "texts": [ {"text": "<歌手>《<歌名>》一键换装", "from": 3.2, "to": 6, "size": 0.065, "y": 0.12} ],
      "labels": true
    }
    ```

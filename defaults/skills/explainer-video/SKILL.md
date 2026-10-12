@@ -1,6 +1,6 @@
 ---
 name: explainer-video
-description: 做法：解说视频（HyperFrames 动态图文 + 配音，系列配了角色时加解说员）。没有指定其他做法的内容默认用它。生成视频、修改视频时读这里对应的文件；调研和写脚本按流程技能的通用做法。
+description: 做法：解说视频（HyperFrames 动态图文 + 配音，系列配了角色时加解说员）。没有指定其他做法的内容默认用它。写脚本、生成视频、修改视频时读这里对应的文件；调研按流程技能的通用做法。
 metadata:
   kind: craft
 ---
@@ -13,7 +13,8 @@ metadata:
 
 | 环节 | 文件 |
 |---|---|
-| 调研、写脚本 | 没有单独的文件，按 research-topic、write-script 的通用做法 |
+| 调研 | 没有单独的文件，按 research-topic 的通用做法 |
+| 写脚本：开头 3 秒抛主题和钩子、讲得小白能懂 | `script.md`（格式仍按 write-script） |
 | 生成视频：建项目、按 faceless-explainer 做、画面质量 | `video.md` |
 | 修改视频 | `revise.md` |
 
