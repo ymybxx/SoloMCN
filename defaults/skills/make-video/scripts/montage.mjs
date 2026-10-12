@@ -673,7 +673,9 @@ function schedule(spec, dir) {
   const idx = (s, p, h) => (s * (N + 1) + p) * (H + 1) + h; // p = N 表示没有上一场
   let cur = new Float64Array(N * (N + 1) * (H + 1)).fill(Infinity);
   const back = [];
-  for (let s = 0; s < N; s++) cur[idx(s, N, 1)] = okAt[s][0] != null ? 0 : 2;
+  // 片头第一拍必须从一开始就认准他的场次起（都不行时才退而求其次）
+  const startOk = srcs.map((x, k) => okAt[k][0] != null && idOk(x, from + okAt[k][0], from + okAt[k][0] + 1.2));
+  for (let s = 0; s < N; s++) cur[idx(s, N, 1)] = startOk[s] ? 0 : startOk.some(Boolean) ? Infinity : okAt[s][0] != null ? 0 : 2;
   for (let i = 1; i < B.length; i++) {
     const nxt = new Float64Array(cur.length).fill(Infinity);
     const bk = new Int32Array(cur.length).fill(-1);
