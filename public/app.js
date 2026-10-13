@@ -1108,14 +1108,14 @@ function vDyTopics(){
   else if(L?.bound)body=`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="dyl-start">换个账号登录</button><button class="btn ghost" data-act="dyl-check" ${S.dyChecking?'disabled':''}>${S.dyChecking?'检查中…':'检查登录'}</button><button class="btn ghost danger" data-act="dyl-logout">退出登录</button></div>`;
   else body=`${run?.status==='failed'?`<p class="err">${esc(run.message)}</p>`:''}<div><button class="btn" data-act="dyl-start">扫码登录抖音小号</button></div>`;
   const C=S.dyCamps;
-  const camps=!C?'<p class="hint">读取中…</p>':C.err?`<p class="err">${esc(C.err)}</p>`:!C.list.length?'<p class="hint">还没有。在 App 里刷到征稿话题（比如 #vibe知识大赏），把话题名记在这里。</p>':C.list.map(c=>`<div class="dy-camp"><div class="blk-head"><b>#${esc(c.name)}</b><span class="faint">${fmtBig(c.views)} 播放 · ${fmtBig(c.users)} 人参与${c.viewsPerDay?` · 日均 ${fmtBig(c.viewsPerDay)}`:''}</span><div class="actions"><button class="btn ghost sm" data-act="dyc-rm" data-k="${esc(c.cid)}">删掉</button></div></div>${c.desc?`<p class="hint" style="white-space:pre-wrap">${esc(c.desc)}</p>`:''}</div>`).join('');
+  const camps=!C?'<p class="hint">读取中…</p>':C.err?`<p class="err">${esc(C.err)}</p>`:!C.list.length?'<p class="hint">还没有。生成抖音发布信息时查到的征稿会自动出现在这里；自动查不到的（比如没登录小号时），在 App 里刷到了就把话题名记在这里。</p>':C.list.map(c=>`<div class="dy-camp"><div class="blk-head"><b>#${esc(c.name)}</b>${c.auto?'<span class="pill"><i></i>自动发现</span>':''}<span class="faint">${fmtBig(c.views)} 播放 · ${fmtBig(c.users)} 人参与${c.viewsPerDay?` · 日均 ${fmtBig(c.viewsPerDay)}`:''}</span><div class="actions"><button class="btn ghost sm" data-act="dyc-rm" data-k="${esc(c.cid)}">删掉</button></div></div>${c.desc?`<p class="hint" style="white-space:pre-wrap">${esc(c.desc)}</p>`:''}</div>`).join('');
   return `<div class="panel grid" style="gap:10px"><div class="blk-head"><h3>查话题用的小号 <span class="faint" style="font-weight:400">可选</span></h3>${pill}</div>
     ${body}
     <p class="hint">生成发布信息时，平台会用它搜同类热门视频，看大家都带了哪些话题（像征稿话题这种不用事先知道名字也能找到）。搜索时会弹出一个抖音窗口，抖音要你滑一下验证就在那个窗口里滑。和「账号矩阵」里发布用的抖音账号分开，建议用小号；只读，不点赞、不评论、不发布。不登录也能查话题联想、话题详情和热点，只是少了这一步。</p></div>
-  <div class="panel grid" style="gap:10px"><div class="blk-head"><h3>记下的征稿话题</h3></div>
+  <div class="panel grid" style="gap:10px"><div class="blk-head"><h3>征稿话题</h3></div>
     <div class="chg-refine"><input id="dyCampName" placeholder="话题名，比如 vibe知识大赏" maxlength="40"><button class="btn" data-act="dyc-add" ${S.dyAdding?'disabled':''}>${S.dyAdding?'查询中…':'记下'}</button></div>
     ${camps}
-    <p class="hint">平台会查它的规则（必带话题、标题前缀、截止、流量扶持）和热度。之后生成抖音发布信息时一起考虑：内容对得上、没过截止，就照规则参加。</p></div>`;
+    <p class="hint">生成抖音发布信息时自动查到的征稿（话题简介里写着规则的）会自动记在这里；自动查不到的，你在 App 里看到了就手动记一下。每次生成都会考虑这里的征稿：内容对得上、没过截止，就照规则参加。不想要的点「删掉」。</p></div>`;
 }
 async function dyLoginStart(){try{S.dyLoginRun=await api('POST','/api/douyin/login/start')}catch(e){toast(e.message||'打开登录窗口失败');return}render();dyLoginPoll()}
 async function dyLoginPoll(){

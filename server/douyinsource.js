@@ -212,6 +212,10 @@ export function createDouyinSource({ root, store }) {
         const cids = [...byCid.keys()].slice(0, 30);
         const det = cids.length ? await detailsOn(await openWww(ctx, cids[0]), cids) : {};
         const candidates = cids.map((cid) => ({ ...byCid.get(cid), ...(det[cid] || {}) }));
+        // 自动查到的征稿（简介里写着征稿规则的话题）记进列表，以后每次都考虑，渠道页里也看得到
+        const known = new Set(campaignList().map((x) => x.cid));
+        const auto = candidates.filter((c) => c.campaign && !known.has(c.cid) && (c.fromVideos || c.viewsPerDay > 100_000));
+        if (auto.length) await store.set('settings', 'douyinCampaigns', { list: [...campaignList(), ...auto.map((c) => ({ name: c.name, cid: c.cid, addedAt: Date.now(), auto: true }))] });
         return { words, searched: found.tags.length > 0, sampledVideos: found.sampled || 0, note: found.note || '', candidates, hotspots: hot, activities: acts, at: Date.now() };
       });
     }));
