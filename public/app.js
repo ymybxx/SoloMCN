@@ -1629,7 +1629,7 @@ function changeCard(c){
 // 提想法：总控台和技能页共用
 function ideaBox(id){
   return `<div class="panel grid" style="gap:8px"><div class="label">想改进什么，说一句</div>
-    <p class="hint">比如「所有视频右下角加账号水印」「换装视频转场少一点」。Claude 会找到该改的技能，改好给你看，你点通过才生效。</p>
+    <p class="hint">比如「所有视频右下角加账号水印」「装上某个开源技能，配一个新做法，再建个系列用它」。Claude 会找到该改的技能，改好给你看，你点通过才生效。</p>
     <textarea id="${id}" rows="3" maxlength="2000" placeholder="想到什么写什么"></textarea>
     <div class="actions"><button class="btn primary" data-act="skill-idea" data-k="${id}">交给 Claude</button></div></div>`;
 }

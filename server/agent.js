@@ -193,6 +193,7 @@ const TOOL_NAMES = {
   save_analysis: '保存复盘',
   save_video: '保存视频',
   save_research: '保存调研报告',
+  save_series: '保存系列',
   lab_ask_claude: '问 Claude',
   x_search: '搜索推特',
   x_user_tweets: '读取推特用户',

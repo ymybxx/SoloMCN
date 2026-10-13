@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { creativeOf } from './series.js';
+import { creativeOf, cleanSeries } from './series.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -90,6 +90,44 @@ server.registerTool(
       hotVideos: r.videos.map((v) => `[${v.category}] ${v.title}｜播放 ${v.views}｜赞 ${v.likes}｜${v.url}`),
       notes: r.notes,
     };
+  }),
+);
+
+server.registerTool(
+  'save_series',
+  {
+    title: '新建或修改系列',
+    description:
+      '给一个账号新建系列，或改已有系列（按系列名认，同名就改，只改你给的字段）。用户在总控台说「建一个 xx 系列」「把 xx 系列的做法换成 yy」时用。' +
+      '先用 get_accounts 看账号和已有系列；没说哪个账号时，用户只有一个在用的账号就用它，有好几个就选最贴合的并在汇报里说明。',
+    inputSchema: {
+      account: z.string().describe('账号代号或名称'),
+      name: z.string().max(30).describe('系列名'),
+      summary: z.string().max(200).optional().describe('一句话定位'),
+      audience: z.string().max(200).optional().describe('目标人群'),
+      persona: z.string().max(400).optional().describe('主角和语气'),
+      visual: z.string().max(400).optional().describe('视觉风格'),
+      structure: z.string().max(600).optional().describe('固定结构'),
+      length: z.string().max(40).optional().describe('时长，比如 60–90 秒'),
+      topics: z.string().max(300).optional().describe('适合的题材'),
+      emotions: z.array(z.string()).max(4).optional().describe('主打情绪：感动、怀旧、好笑、反差、爽感、代入、治愈、震惊、好奇'),
+      craft: z.string().optional().describe('这个系列用的做法技能名，比如 explainer-video'),
+    },
+  },
+  tool(async ({ account, name, ...fields }) => {
+    const { accounts } = await call('GET', '/api/state');
+    const key = String(account).trim();
+    const [aid, acc] = Object.entries(accounts).find(([, a]) => a.code === key || a.name === key) || [];
+    if (!aid) throw new Error(`没有这个账号：${key}`);
+    const list = [...(acc.series || [])];
+    const at = list.findIndex((x) => x.name === name.trim());
+    const given = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+    if (at >= 0) {
+      const { history = [], ...snap } = list[at];
+      list[at] = { ...cleanSeries([{ ...snap, ...given }])[0], id: snap.id, character: snap.character, history: [{ ...snap, savedAt: Date.now() }, ...history].slice(0, 5) };
+    } else list.push({ ...cleanSeries([{ name, ...given }])[0], history: [] });
+    await call('PUT', `/api/accounts/${aid}`, { ...acc, series: list });
+    return { ok: true, account: acc.code, series: list.map((x) => x.name), [at >= 0 ? 'updated' : 'created']: name };
   }),
 );
 
