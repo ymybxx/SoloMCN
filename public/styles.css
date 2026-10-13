@@ -658,5 +658,5 @@ a.pick-src:hover{color:var(--blue)}
 .dy-tag i{font-style:normal;color:var(--muted);font-size:11.5px}
 .dy-tag b{color:var(--warn);font-size:11px}
 .dy-camp{display:grid;gap:4px;padding:8px 0;border-top:1px solid var(--line,rgba(127,127,127,.2))}
-.guide-in{min-width:260px;flex:1}
-.section-head .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.guide-row{display:flex;margin:-6px 0 12px}
+.guide-in{flex:1;min-width:0;width:100%}

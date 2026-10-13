@@ -697,7 +697,8 @@ function vRadar(){
   const run=runningRun('curate')||lastRun('curate');const busy=runningMain();
   const picks=pickList();const by=s=>picks.filter(p=>p.status===s);const todo=by('new'),done=by('ideas'),dropped=by('dropped');
   return `<div class="section-head"><h2>选题雷达</h2><p>Claude 读这一轮各渠道的素材，挑出值得做的主题；你决定给哪些账号出题，或者不做</p>
-      <div class="actions"><input id="curateGuide" class="guide-in" maxlength="500" placeholder="这次的方向（可选），比如：找适合抖音 vibe知识大赏 征稿的素材"><button class="btn primary" data-act="curate" ${busy?'disabled':''}>${runningRun('curate')?'Claude 精选中…':busy?'Claude 正在跑别的任务':'让 Claude 精选'}</button></div></div>
+      <div class="actions"><button class="btn primary" data-act="curate" ${busy?'disabled':''}>${runningRun('curate')?'Claude 精选中…':busy?'Claude 正在跑别的任务':'让 Claude 精选'}</button></div></div>
+    <div class="guide-row"><input id="curateGuide" class="guide-in" maxlength="500" placeholder="这次的方向（可选，写了 Claude 按它来挑）：比如 找适合抖音 vibe知识大赏 征稿的素材"></div>
     ${vRun(run)}
     <div class="section-head sub"><h3>待决定</h3><p>${todo.length} 个</p></div>
     <div class="pick-list">${todo.map(vPick).join('')||'<div class="empty"><strong>没有待决定的主题</strong>点「让 Claude 精选」，或者在「素材」里把单条素材送进来</div>'}</div>
