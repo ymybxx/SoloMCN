@@ -127,7 +127,7 @@ const TASKS = {
   // 调研可以动手实践：这条内容的代码、实验、结果放实验目录（videos/lab-<内容 id>/）
   research: {
     name: '调研',
-    maxTurns: 120,
+    maxTurns: 300,
     lab: true,
     prompt: ({ itemId, labDir, programsDir, askAboveGB, prior, craft }) => `/research-topic 内容 id：${itemId}${craft ? `；做法：${craft}` : ''}；实验目录：${labDir}；已装程序目录：${programsDir}；单个下载超过 ${askAboveGB} GB 先问用户${prior ? `；${prior}` : ''}`,
   },

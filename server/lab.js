@@ -20,6 +20,7 @@ import { CHROME, slimProfile } from './publish/browser.js';
 
 export const ASK_TIMEOUT_MS = 40 * 60_000; // 等人处理最多等多久
 const RECORD_MAX_SEC = 30;
+const RECORD_LONG_MIN = 15; // 连续录屏最长几分钟
 const SNAPSHOT_MAX = 15_000;
 const IDLE_CLOSE_MS = 10 * 60_000; // 实践浏览器闲置多久自动关掉
 const MEDIA_KIND = { '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.webp': 'image', '.gif': 'image', '.mp4': 'video', '.webm': 'video', '.mov': 'video' };
@@ -83,35 +84,60 @@ export function looksLikeCard(text) {
 }
 
 // 用 Chrome 的屏幕直播逐帧抓画面（带时间戳），再用系统 ffmpeg 按真实时间拼成视频；不用另装 Playwright 的 ffmpeg
-async function screencast(page, seconds, outMp4) {
+// 录网页：Chrome 的画面推流，每一帧边到边写进临时目录（长录屏不占内存），停下时用 ffmpeg 按真实时间间隔合成视频
+async function startCast(page, outMp4) {
+  const dir = fs.mkdtempSync(outMp4 + '-frames-');
   const frames = [];
   const cdp = await page.context().newCDPSession(page);
   cdp.on('Page.screencastFrame', async (f) => {
-    frames.push({ t: f.metadata.timestamp, data: f.data });
+    const file = path.join(dir, `${String(frames.length).padStart(6, '0')}.jpg`);
+    frames.push({ t: f.metadata.timestamp, file });
+    fs.writeFileSync(file, Buffer.from(f.data, 'base64'));
     await cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {});
   });
   const vp = page.viewportSize() || { width: 1280, height: 720 };
   await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 90, maxWidth: vp.width, maxHeight: vp.height, everyNthFrame: 1 });
+  const startedAt = Date.now();
+  let done = null;
+  const stop = () => (done ||= (async () => {
+    await cdp.send('Page.stopScreencast').catch(() => {});
+    await cdp.detach().catch(() => {});
+    try {
+      if (frames.length < 2) throw new Error('没录到画面（页面可能没有在动）');
+      // 最后一帧停留到按下停止的那一刻（画面不动时 Chrome 不推新帧）
+      const end = frames[0].t + (Date.now() - startedAt) / 1000;
+      const lines = [];
+      frames.forEach((f, i) => lines.push(`file '${f.file}'`, `duration ${Math.max(0.001, (frames[i + 1]?.t ?? Math.max(end, f.t + 1 / 30)) - f.t).toFixed(4)}`));
+      lines.push(`file '${frames.at(-1).file}'`);
+      fs.writeFileSync(path.join(dir, 'list.txt'), lines.join('\n'));
+      execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'list.txt'),
+        '-vf', 'fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p', '-c:v', 'libx264', outMp4], { timeout: 600_000 });
+      return { frames: frames.length, seconds: Math.round((Date.now() - startedAt) / 1000) };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  })());
+  return { stop, startedAt };
+}
+
+async function screencast(page, seconds, outMp4) {
+  const cast = await startCast(page, outMp4);
   await page.waitForTimeout(seconds * 1000);
-  await cdp.send('Page.stopScreencast').catch(() => {});
-  await cdp.detach().catch(() => {});
-  if (frames.length < 2) throw new Error('没录到画面（页面可能没有在动）');
-  const dir = fs.mkdtempSync(outMp4 + '-frames-');
-  try {
-    const lines = [];
-    frames.forEach((f, i) => {
-      const file = path.join(dir, `${String(i).padStart(5, '0')}.jpg`);
-      fs.writeFileSync(file, Buffer.from(f.data, 'base64'));
-      lines.push(`file '${file}'`, `duration ${Math.max(0.001, (frames[i + 1]?.t ?? f.t + 1 / 30) - f.t).toFixed(4)}`);
-    });
-    lines.push(`file '${path.join(dir, `${String(frames.length - 1).padStart(5, '0')}.jpg`)}'`);
-    fs.writeFileSync(path.join(dir, 'list.txt'), lines.join('\n'));
-    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'list.txt'),
-      '-vf', 'fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p', '-c:v', 'libx264', outMp4], { timeout: 120_000 });
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-  return frames.length;
+  return (await cast.stop()).frames;
+}
+
+// 录屏时点击前在点击位置画一个圈，看得出点了哪里
+async function showClick(page, locator) {
+  const b = await locator.boundingBox({ timeout: 5_000 }).catch(() => null);
+  if (!b) return;
+  await page.evaluate(({ x, y }) => {
+    const d = document.createElement('div');
+    d.style.cssText = `position:fixed;left:${x - 18}px;top:${y - 18}px;width:36px;height:36px;border-radius:50%;border:3px solid #ff4d4f;background:rgba(255,77,79,.25);z-index:2147483647;pointer-events:none;transition:transform .5s,opacity .5s`;
+    document.body.appendChild(d);
+    requestAnimationFrame(() => { d.style.transform = 'scale(1.6)'; d.style.opacity = '0'; });
+    setTimeout(() => d.remove(), 700);
+  }, { x: b.x + b.width / 2, y: b.y + b.height / 2 }).catch(() => {});
+  await page.waitForTimeout(350);
 }
 
 export function createLab({ root, store }) {
@@ -251,7 +277,8 @@ export function createLab({ root, store }) {
       sessions.set(site, s);
     }
     clearTimeout(s.timer);
-    s.timer = setTimeout(() => closeSession(site), IDLE_CLOSE_MS);
+    const idle = () => { if (s.cast) s.timer = setTimeout(idle, IDLE_CLOSE_MS); else closeSession(site); }; // 录着屏不自动关
+    s.timer = setTimeout(idle, IDLE_CLOSE_MS);
     return s;
   }
 
@@ -284,11 +311,17 @@ export function createLab({ root, store }) {
       case 'snapshot':
         break;
       case 'click':
+        if (s.cast) await showClick(page, el());
         await el().click({ timeout: 15_000 });
         break;
       case 'fill':
         if (looksLikeCard(text)) throw bad('这看起来是银行卡号：支付信息只能由人自己填。用 lab_ask_user（kind: payment）请用户在弹出的窗口里完成');
-        await el().fill(String(text ?? ''), { timeout: 15_000 });
+        // 录着屏时一个字一个字打出来，画面上看得到在输入
+        if (s.cast && text) {
+          await showClick(page, el());
+          await el().fill('', { timeout: 15_000 });
+          await el().pressSequentially(String(text), { delay: Math.max(15, Math.min(60, 12_000 / String(text).length)), timeout: 60_000 });
+        } else await el().fill(String(text ?? ''), { timeout: 15_000 });
         break;
       case 'press':
         await page.keyboard.press(String(key || 'Enter'));
@@ -337,7 +370,28 @@ export function createLab({ root, store }) {
         extra.assets = await addAssets(itemId, [{ kind: 'video', file: rel(out), part: '实践录屏', url: page.url(), title: await page.title().catch(() => ''), note }]);
         break;
       }
+      // 连续录屏：record_start 之后的打开、点击、输入、等待都录进去，record_stop 存成一段素材（最长 RECORD_LONG_MIN 分钟，到了自动停）
+      case 'record_start': {
+        if (s.cast) throw bad('已经在录了，先 record_stop');
+        const out = path.join(dirOf(itemId), 'media', `web-${stamp()}.mp4`);
+        const cast = await startCast(page, out);
+        s.cast = { ...cast, out, note, itemId };
+        s.cast.auto = setTimeout(() => { s.cast?.stop().catch(() => {}); }, RECORD_LONG_MIN * 60_000);
+        extra.recording = `开始录屏，最长 ${RECORD_LONG_MIN} 分钟`;
+        break;
+      }
+      case 'record_stop': {
+        if (!s.cast) throw bad('没有在录屏，先 record_start');
+        const c = s.cast;
+        s.cast = null;
+        clearTimeout(c.auto);
+        const r = await c.stop();
+        extra.recorded = r;
+        extra.assets = await addAssets(itemId, [{ kind: 'video', file: rel(c.out), part: '实践录屏', url: page.url(), title: await page.title().catch(() => ''), note: note || c.note }]);
+        break;
+      }
       case 'close':
+        if (s.cast) { clearTimeout(s.cast.auto); await s.cast.stop().catch(() => {}); s.cast = null; }
         await closeSession(name);
         return { closed: name };
       default:
