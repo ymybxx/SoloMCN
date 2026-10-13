@@ -2,14 +2,15 @@
 // - 搜同类热门视频，统计它们带的话题（要登录一个抖音小号；抖音弹滑块验证时，在弹出的窗口里由你自己滑）
 // - 话题联想、话题详情（播放量、参与人数、创建时间、简介里的征稿规则）、关联热点：不用登录
 // - 创作者中心的官方活动：要登录
-// 都是只读：不点赞、不评论、不发布。结果缓存 3 小时。这些是抖音网页自己用的接口，抖音改版了要跟着调。
+// 都是只读：不点赞、不评论、不发布。结果缓存 12 小时，每次只搜一个词、话题详情最多查 12 个，免得主站拒绝连接。这些是抖音网页自己用的接口，抖音改版了要跟着调。
 import path from 'node:path';
 import { createBrowserAccounts, sleep } from './publish/browser.js';
 
 const ACC = 'default';
 const CREATOR = 'https://creator.douyin.com/';
 const CREATOR_HOME = 'https://creator.douyin.com/creator-micro/home';
-const TTL = 3 * 3600_000;
+// 少访问抖音主站：主站对同一个网络出口的频繁访问会暂时拒绝连接（换浏览器也打不开）
+const TTL = 12 * 3600_000;
 const VERIFY_WAIT = 5 * 60_000;
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 
@@ -120,7 +121,7 @@ export function createDouyinSource({ root, store }) {
         } catch {}
       });
       const notes = [];
-      for (const w of words.slice(0, 2)) {
+      for (const w of words.slice(0, 1)) {
         const before = videos.length;
         await page.goto(`https://www.douyin.com/search/${encodeURIComponent(w)}?type=video`, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
         // 等搜索结果；弹了验证就提醒你去滑，最多等 5 分钟；没弹验证、20 秒还没结果，算这次搜不到
@@ -177,7 +178,7 @@ export function createDouyinSource({ root, store }) {
         const byCid = new Map();
         for (const t of found.tags) if (t.cid) byCid.set(t.cid, { name: t.name, cid: t.cid, fromVideos: { videos: t.videos, recent: t.recent, likes: t.likes } });
         for (const x of sug) if (!byCid.has(x.cid)) byCid.set(x.cid, { name: x.name, cid: x.cid, fromSuggest: true });
-        const cids = [...byCid.keys()].slice(0, 30);
+        const cids = [...byCid.keys()].slice(0, 12);
         const det = cids.length ? await detailsOn(await openWww(ctx, cids[0]), cids) : {};
         const candidates = cids.map((cid) => ({ ...byCid.get(cid), ...(det[cid] || {}) }));
         return { words, searched: found.tags.length > 0, sampledVideos: found.sampled || 0, note: found.note || '', candidates, hotspots: hot, activities: acts, at: Date.now() };
