@@ -77,7 +77,7 @@ function applyLocal(col){
 function drawerSigOf(id,it){
   const rs=itemRun('script',id),rc=itemRun('check',id),rv=itemRun('video',id),rr=itemRun('revise',id),re=itemRun('research',id),any=runningOnItem(id),anyV=runningVideo();
   const pb=it.publish||{};
-  return [(it.scriptHistory||[]).length,it.labAsk?.id,it.labAsk?.status,(it.assets||[]).map(a=>a.id).join(','),pb.gen?.status,pb.cover,JSON.stringify(Object.fromEntries(Object.entries(pb.results||{}).map(([k,v])=>[k,v.status]))),!!pb.platforms,re?.id,re?.status,it.research?.at,rs?.id,rs?.status,rc?.id,rc?.status,rv?.id,rv?.status,rr?.id,rr?.status,any?.id,anyV?.id,it.stage,JSON.stringify(it.precheck||null),JSON.stringify(it.video||null)].join('|');
+  return [pb.douyinPick?.status,pb.douyinPick?.at,pb.douyinPick?.applied?.at,!!S.dyLogin?.bound,(it.scriptHistory||[]).length,it.labAsk?.id,it.labAsk?.status,(it.assets||[]).map(a=>a.id).join(','),pb.gen?.status,pb.cover,JSON.stringify(Object.fromEntries(Object.entries(pb.results||{}).map(([k,v])=>[k,v.status]))),!!pb.platforms,re?.id,re?.status,it.research?.at,rs?.id,rs?.status,rc?.id,rc?.status,rv?.id,rv?.status,rr?.id,rr?.status,any?.id,anyV?.id,it.stage,JSON.stringify(it.precheck||null),JSON.stringify(it.video||null)].join('|');
 }
 let drawerSig='';
 function syncDrawer(){
@@ -592,18 +592,30 @@ const pubSelNote=(it,k)=>{const n=PUB_PLATFORMS.find(x=>x.k===k)?.n||k;
 // 抖音：查到的话题、征稿、热点和 Claude 的选择理由
 const fmtBig=n=>n==null?'?':n>=1e8?(n/1e8).toFixed(1)+'亿':n>=1e4?Math.round(n/1e4)+'万':String(n);
 function vDouyinPick(pk,v){
-  if(!pk)return '';
-  if(pk.error)return `<p class="hint">${esc(pk.error)}</p>`;
-  const chips=(pk.picked||[]).map(t=>`<span class="dy-tag">#${esc(t.name)}<i>${t.views!=null?`${fmtBig(t.views)}播放`:''}${t.users?` · ${fmtBig(t.users)}人参与`:''}${t.viewsPerDay?` · 日均${fmtBig(t.viewsPerDay)}`:''}</i>${t.campaign?'<b>征稿</b>':''}</span>`).join('');
-  const cands=(pk.candidates||[]).map(c=>`<tr><td>#${esc(c.name)}${c.saved?' <span class="faint">记下的</span>':''}${c.campaign?' <span class="faint">征稿</span>':''}</td><td class="n">${fmtBig(c.views)}</td><td class="n">${fmtBig(c.users)}</td><td class="n">${fmtBig(c.viewsPerDay)}</td><td class="n">${c.fromVideos?c.fromVideos.videos:'—'}</td></tr>`).join('');
-  return `<div class="dy-pick">
-    <div class="dy-tags">${chips}</div>
-    ${pk.campaign?`<p><b>参加征稿</b> #${esc(pk.campaign)}</p>`:''}${v.hotspot?`<p><b>关联热点</b> ${esc(v.hotspot)} <span class="faint">（自动发布暂时不会选它，发布时自己在抖音页面上选一下）</span></p>`:''}
-    ${pk.reasons?`<div class="chg-sum">${esc(pk.reasons)}</div>`:''}
-    <details><summary class="faint">查到的候选话题（${(pk.candidates||[]).length}）· 搜的是：${esc((pk.words||[]).join('、'))}${pk.searched?` · 看了 ${pk.sampledVideos} 条同类热门视频`:' · 没搜同类视频，只有话题联想'}</summary>
-      ${pk.note?`<p class="hint">${esc(pk.note)}</p>`:''}
-      <div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>话题</th><th class="n">播放</th><th class="n">参与</th><th class="n">日均</th><th class="n">同类视频里</th></tr></thead><tbody>${cands}</tbody></table></div></details>
-  </div>`;
+  if(S.dyLogin===undefined){S.dyLogin=null;loadDyLogin()}
+  const logged=!!S.dyLogin?.bound;const running=pk?.status==='running';
+  const btn=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn" data-act="dy-find" ${running||!logged?'disabled':''}>${running?'正在找…':pk?.status==='done'?'重新找话题和活动':'找话题和活动'}</button>${!logged?'<span class="hint">要先在「渠道 → 抖音」扫码登录查话题用的小号</span>':'<span class="hint">搜同类热门视频带的话题，查征稿规则和热点，给出话题和标题的修改方案，你确认了才改</span>'}</div>`;
+  let body='';
+  if(running)body=`<p class="hint busy">${esc(pk.message||'正在找…')}</p>`;
+  else if(pk?.status==='failed')body=`<p class="err">${esc(pk.error||'没找到')}</p>`;
+  else if(pk?.status==='done'&&pk.proposal){
+    const P=pk.proposal;const titleChanged=P.title&&P.title!==v.title;
+    const chips=(pk.picked||[]).map(t=>`<span class="dy-tag">#${esc(t.name)}<i>${t.views!=null?`${fmtBig(t.views)}播放`:''}${t.users?` · ${fmtBig(t.users)}人参与`:''}${t.viewsPerDay?` · 日均${fmtBig(t.viewsPerDay)}`:''}</i>${t.campaign?'<b>征稿</b>':''}</span>`).join('');
+    const cands=(pk.candidates||[]).map(c=>`<tr><td>#${esc(c.name)}${c.campaign?' <span class="faint">征稿</span>':''}</td><td class="n">${fmtBig(c.views)}</td><td class="n">${fmtBig(c.users)}</td><td class="n">${fmtBig(c.viewsPerDay)}</td><td class="n">${c.fromVideos?c.fromVideos.videos:'—'}</td></tr>`).join('');
+    body=`<div class="dy-pick">
+      <div class="label">方案${pk.applied?` <span class="pill ok"><i></i>已按方案修改${pk.applied.title?'':'（标题没改）'}</span>`:''}</div>
+      <div class="dy-tags">${chips}</div>
+      ${P.campaign?`<p><b>参加征稿</b> #${esc(P.campaign)}</p>`:''}
+      <p><b>关联热点</b> ${P.hotspot?esc(P.hotspot):'<span class="faint">不关联</span>'}</p>
+      ${titleChanged?`<p><b>标题</b> ${esc(v.title)} → <b>${esc(P.title)}</b></p>${pk.applied?'':'<label class="sk-switch"><input type="checkbox" id="dyTitleToo" checked> 标题也改成这个</label>'}`:'<p><b>标题</b> <span class="faint">不用改</span></p>'}
+      ${P.reasons?`<div class="chg-sum">${esc(P.reasons)}</div>`:''}
+      ${pk.applied?'':'<div class="actions"><button class="btn primary" data-act="dy-apply">按这个改</button></div>'}
+      <details><summary class="faint">查到的候选话题（${(pk.candidates||[]).length}）· 搜的是：${esc((pk.words||[]).join('、'))}${pk.searched?` · 看了 ${pk.sampledVideos} 条同类热门视频`:''}</summary>
+        ${pk.note?`<p class="hint">${esc(pk.note)}</p>`:''}
+        <div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>话题</th><th class="n">播放</th><th class="n">参与</th><th class="n">日均</th><th class="n">同类视频里</th></tr></thead><tbody>${cands}</tbody></table></div></details>
+    </div>`;
+  }
+  return `<div class="grid" style="gap:8px">${btn}${body}${v.hotspot&&!body?`<p class="hint">关联热点：${esc(v.hotspot)}</p>`:''}</div>`;
 }
 function vPublish(it,id){
   if(!it.video)return '<p class="hint">视频做好后在这里生成封面、标题和话题，确认后勾选平台发布。</p>';
@@ -1095,11 +1107,9 @@ function vChanYoutube(){
       <li>拿不到字幕全文和视频文件：官方接口只给视频作者本人下字幕</li></ul></div>`;
 }
 // 查话题用的抖音小号（可选）：发布前搜同类热门视频带了哪些话题；和发布账号分开
-async function loadDyLogin(){try{S.dyLogin=await api('GET','/api/douyin/login')}catch{S.dyLogin=null}requestRender()}
-async function loadDyCamps(){try{S.dyCamps=await api('GET','/api/douyin/campaigns')}catch(e){S.dyCamps={err:e.message}}requestRender()}
+async function loadDyLogin(){try{S.dyLogin=await api('GET','/api/douyin/login')}catch{S.dyLogin=null}requestRender();if(S.open)syncDrawer()}
 function vDyTopics(){
   if(S.dyLogin===undefined){S.dyLogin=null;loadDyLogin()}
-  if(S.dyCamps===undefined){S.dyCamps=null;loadDyCamps()}
   const L=S.dyLogin,run=S.dyLoginRun;const busy=run&&!['done','failed'].includes(run.status);
   const pill=!L?'<span class="pill"><i></i>读取中…</span>':L.bound?'<span class="pill ok"><i></i>已登录</span>':'<span class="pill"><i></i>没登录</span>';
   let body='';
@@ -1107,15 +1117,10 @@ function vDyTopics(){
   else if(busy)body='<p class="hint busy">正在确认登录状态…</p>';
   else if(L?.bound)body=`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="dyl-start">换个账号登录</button><button class="btn ghost" data-act="dyl-check" ${S.dyChecking?'disabled':''}>${S.dyChecking?'检查中…':'检查登录'}</button><button class="btn ghost danger" data-act="dyl-logout">退出登录</button></div>`;
   else body=`${run?.status==='failed'?`<p class="err">${esc(run.message)}</p>`:''}<div><button class="btn" data-act="dyl-start">扫码登录抖音小号</button></div>`;
-  const C=S.dyCamps;
-  const camps=!C?'<p class="hint">读取中…</p>':C.err?`<p class="err">${esc(C.err)}</p>`:!C.list.length?'<p class="hint">还没有。生成抖音发布信息时查到的征稿会自动出现在这里；自动查不到的（比如没登录小号时），在 App 里刷到了就把话题名记在这里。</p>':C.list.map(c=>`<div class="dy-camp"><div class="blk-head"><b>#${esc(c.name)}</b>${c.auto?'<span class="pill"><i></i>自动发现</span>':''}<span class="faint">${fmtBig(c.views)} 播放 · ${fmtBig(c.users)} 人参与${c.viewsPerDay?` · 日均 ${fmtBig(c.viewsPerDay)}`:''}</span><div class="actions"><button class="btn ghost sm" data-act="dyc-rm" data-k="${esc(c.cid)}">删掉</button></div></div>${c.desc?`<p class="hint" style="white-space:pre-wrap">${esc(c.desc)}</p>`:''}</div>`).join('');
-  return `<div class="panel grid" style="gap:10px"><div class="blk-head"><h3>查话题用的小号 <span class="faint" style="font-weight:400">可选</span></h3>${pill}</div>
+  return `<div class="panel grid" style="gap:10px"><div class="blk-head"><h3>查话题用的小号 <span class="faint" style="font-weight:400">发布前找抖音话题要用</span></h3>${pill}</div>
     ${body}
-    <p class="hint">生成发布信息时，平台会用它搜同类热门视频，看大家都带了哪些话题（像征稿话题这种不用事先知道名字也能找到）。搜索时会弹出一个抖音窗口，抖音要你滑一下验证就在那个窗口里滑。和「账号矩阵」里发布用的抖音账号分开，建议用小号；只读，不点赞、不评论、不发布。不登录也能查话题联想、话题详情和热点，只是少了这一步。</p></div>
-  <div class="panel grid" style="gap:10px"><div class="blk-head"><h3>征稿话题</h3></div>
-    <div class="chg-refine"><input id="dyCampName" placeholder="话题名，比如 vibe知识大赏" maxlength="40"><button class="btn" data-act="dyc-add" ${S.dyAdding?'disabled':''}>${S.dyAdding?'查询中…':'记下'}</button></div>
-    ${camps}
-    <p class="hint">生成抖音发布信息时自动查到的征稿（话题简介里写着规则的）会自动记在这里；自动查不到的，你在 App 里看到了就手动记一下。每次生成都会考虑这里的征稿：内容对得上、没过截止，就照规则参加。不想要的点「删掉」。</p></div>`;
+    <p class="hint">发布页抖音那一栏的「找话题和活动」要用它：搜同类热门视频，看大家都带了哪些话题（征稿话题不用事先知道名字也能找到），再查征稿规则和热点。搜索时会弹出一个抖音窗口，抖音要你滑一下验证就在那个窗口里滑。和「账号矩阵」里发布用的抖音账号分开，建议用小号；只读，不点赞、不评论、不发布。</p></div>
+`;
 }
 async function dyLoginStart(){try{S.dyLoginRun=await api('POST','/api/douyin/login/start')}catch(e){toast(e.message||'打开登录窗口失败');return}render();dyLoginPoll()}
 async function dyLoginPoll(){
@@ -2015,8 +2020,8 @@ document.addEventListener('click',e=>{
     case 'dyl-done':api('POST','/api/douyin/login/done').catch(e=>toast(e.message||'操作失败'));break;
     case 'dyl-check':S.dyChecking=true;render();api('POST','/api/douyin/login/check').then(r=>toast(r.ok?'登录有效':'登录已失效，重新扫码登录一次'),e=>toast(e.message||'检查失败')).finally(()=>{S.dyChecking=false;loadDyLogin()});break;
     case 'dyl-logout':arm(b,'确认退出',async()=>{try{await api('POST','/api/douyin/login/logout');toast('已退出抖音小号')}catch(e){toast(e.message||'操作失败')}loadDyLogin()});break;
-    case 'dyc-add':{const el=$('#dyCampName');const name=(el?.value||'').trim();if(!name){toast('写一下话题名');break}S.dyAdding=true;render();api('POST','/api/douyin/campaigns',{name}).then(r=>{S.dyCamps=r;const i=$('#dyCampName');if(i)i.value='';toast('记下了')},e=>toast(e.message||'没查到这个话题')).finally(()=>{S.dyAdding=false;render()});break}
-    case 'dyc-rm':arm(b,'确认删掉',()=>api('DELETE','/api/douyin/campaigns/'+encodeURIComponent(k)).then(()=>loadDyCamps(),e=>toast(e.message||'操作失败')));break;
+    case 'dy-find':b.disabled=true;api('POST',`/api/publish/items/${S.open}/douyin-find`).catch(e=>toast(e.message||'没找成')).finally(()=>{b.disabled=false});break;
+    case 'dy-apply':api('POST',`/api/publish/items/${S.open}/douyin-apply`,{title:$('#dyTitleToo')?$('#dyTitleToo').checked:true}).then(()=>toast('已按方案修改，发布时会带上这些话题'),e=>toast(e.message||'没改成'));break;
     case 'bl-done':api('POST','/api/bili/login/done').catch(e=>toast(e.message||'操作失败'));S.biliLoginRun={...S.biliLoginRun,status:'checking'};render();break;
     case 'bl-check':S.biliLoginChecking=true;render();api('POST','/api/bili/login/check').then(r=>toast(r.ok?'登录有效，已更新登录信息':'登录已失效，重新扫码登录一次'),e=>toast(e.message||'检查失败')).finally(()=>{S.biliLoginChecking=false;loadBiliLogin()});break;
     case 'bl-logout':arm(b,'确认退出',async()=>{try{await api('POST','/api/bili/login/logout');toast('已退出 B站素材登录')}catch(e){toast(e.message||'操作失败')}loadBiliLogin()});break;

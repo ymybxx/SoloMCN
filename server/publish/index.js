@@ -100,20 +100,20 @@ ${withCover && imageReady() ? '- cover_prompt：竖版封面图的生成提示�
 }
 
 // 抖音：拿查到的话题、征稿、热点，让 Claude 定最终的话题、标题和关联热点
-export const DOUYIN_PICK = { type: 'object', required: ['title', 'desc', 'tags', 'campaign', 'hotspot', 'reasons'], properties: { title: { type: 'string' }, desc: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, campaign: { type: 'string' }, hotspot: { type: 'string' }, reasons: { type: 'string' } } };
+export const DOUYIN_PICK = { type: 'object', required: ['title', 'tags', 'campaign', 'hotspot', 'reasons'], properties: { title: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, campaign: { type: 'string' }, hotspot: { type: 'string' }, reasons: { type: 'string' } } };
 const fmtN = (n) => (n >= 1e8 ? `${(n / 1e8).toFixed(1)}亿` : n >= 1e4 ? `${Math.round(n / 1e4)}万` : String(n ?? '?'));
 export function douyinPickPrompt(item, draft, data) {
   const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : '?');
   const cands = data.candidates.map((c) => `- #${c.name}：播放 ${fmtN(c.views)}，参与 ${fmtN(c.users)} 人，创建 ${day(c.createdAt)}，平均每天 ${fmtN(c.viewsPerDay)} 播放${c.fromVideos ? `；同类热门视频里出现 ${c.fromVideos.videos} 次（近两周 ${c.fromVideos.recent} 次）` : ''}${c.saved ? '；用户记下的征稿' : ''}${c.desc ? `\n  简介：${c.desc.replace(/\s+/g, ' ').slice(0, 600)}` : ''}`).join('\n');
   const hot = data.hotspots.slice(0, 20).map((h) => `- ${h.word}（热度 ${fmtN(h.hot)}）`).join('\n');
   const acts = data.activities.map((a) => `- ${a.name}（${a.category}${a.reward ? `，奖励 ${a.reward}` : ''}，截止 ${day(a.end)}）：${a.pitch}`).join('\n');
-  return `给这条抖音视频定最终的标题、描述、话题，决定要不要参加征稿或活动、要不要关联热点。今天是 ${new Date().toISOString().slice(0, 10)}。
+  return `给这条抖音视频定话题，决定要不要参加征稿或活动、要不要关联热点，以及标题要不要跟着改。今天是 ${new Date().toISOString().slice(0, 10)}。
 
 视频：${item.title}
 钩子：${item.hook || ''}
 概要：${item.angle || ''}
 
-已经写好的初稿：
+现在的发布信息：
 标题：${draft.title}
 描述：${draft.desc}
 话题：${(draft.tags || []).join('、')}
@@ -128,7 +128,7 @@ ${acts ? `\n创作者中心的官方活动：\n${acts}\n` : ''}
 - tags 3–5 个，不带 #，不带空格，只从候选里选或沿用初稿：一个覆盖面大的话题，加两三个精准的（同类热门视频常用、和内容贴、最近涨得快的）。和内容无关的大话题不要（比如联想出来的「爱情」）。
 - 征稿：简介里写了征稿规则、而且这条内容符合、没过截止的，就参加：带上它的必带话题，按它的规则改标题（比如要求的标题前缀），campaign 写话题名；没有合适的写空字符串。官方活动同理，参加就把活动要求的话题带上。
 - hotspot：只有这条内容真和某个热点有关才选一个，原样写热点词；没关系就写空字符串。不硬蹭。
-- title 不超过 30 字（加了征稿前缀也算在内），desc 一到三句，可以在初稿基础上改。不夸大，不写没依据的数字。
+- title：征稿要求标题前缀，或者带上热门说法明显更好时才改，不超过 30 字（前缀也算在内）；不需要改就原样写现在的标题。不夸大，不写没依据的数字。
 - reasons：两到四行，给用户看：选了哪些话题、为什么（带上播放量这类数字），参加了哪个征稿或活动、规则是什么、截止哪天，关联了哪个热点或为什么没关联。`;
 }
 
@@ -155,36 +155,46 @@ export function createPublisher({ store, root, douyin }) {
   };
   const coverDir = (it) => path.join(it.video?.project || 'videos/_covers', 'publish');
 
-  // ---------- 抖音：查话题、征稿、热点，让 Claude 定最终的话题、标题和关联热点 ----------
-  // 查不到（抖音改版、网络问题）就保留初稿，发布照常
-  async function pickDouyin(itemId, draft) {
-    if (!douyin) return;
+  // ---------- 抖音：点「找话题和活动」时查话题、征稿、热点，Claude 给出方案，你确认后才改 ----------
+  async function findDouyin(itemId) {
     const it = getItem(itemId);
-    const words = (draft.keywords?.length ? draft.keywords : draft.tags || []).slice(0, 3);
-    if (!words.length) return;
-    await store.update('items', itemId, { publish: { gen: { status: 'running', message: '正在查抖音的话题、征稿和热点（会弹出一个抖音窗口；要验证的话在那个窗口里滑一下）', at: Date.now() } } });
-    try {
-      const data = await douyin.research({ words, search: true });
-      const base = it.publish?.platforms?.douyin || { title: draft.title, desc: draft.desc, tags: draft.tags };
-      await store.update('items', itemId, { publish: { gen: { status: 'running', message: 'Claude 正在挑抖音话题', at: Date.now() } } });
-      const account = store.get('accounts', it.accountId) || {};
-      const { structured: r } = await runClaude(douyinPickPrompt(it, base, data), { model: modelFor(store, 'publish'), effort: effortFor(store, 'publish'), schema: DOUYIN_PICK });
-      if (!r) throw new Error('Claude 没有返回结果');
-      const tags = (r.tags || []).map((t) => String(t).replace(/^#/, '').replace(/\s+/g, '').trim()).filter(Boolean).slice(0, 5);
-      const stat = (name) => data.candidates.find((c) => c.name?.toLowerCase() === name.toLowerCase()) || null;
-      await store.update('items', itemId, { publish: {
-        platforms: { douyin: { title: String(r.title || base.title).trim(), desc: String(r.desc || base.desc).trim(), tags, hotspot: String(r.hotspot || '').trim() } },
-        douyinPick: {
-          at: Date.now(), reasons: String(r.reasons || '').trim(), campaign: String(r.campaign || '').trim(), hotspot: String(r.hotspot || '').trim(),
+    const cur = it.publish?.platforms?.douyin;
+    if (!cur) throw Object.assign(new Error('先生成发布信息'), { status: 400 });
+    if (!douyin?.loggedIn()) throw Object.assign(new Error('先在「渠道 → 抖音」扫码登录查话题用的小号'), { status: 400 });
+    if (it.publish?.douyinPick?.status === 'running') throw Object.assign(new Error('正在找，稍等'), { status: 409 });
+    await store.set('items', itemId, { ...it, publish: { ...it.publish, douyinPick: { status: 'running', message: '正在搜同类热门视频（会弹出一个抖音窗口；要验证的话在那个窗口里滑一下）', at: Date.now() } } });
+    (async () => {
+      try {
+        const words = [...(cur.keywords || []), it.title, ...(cur.tags || [])].filter(Boolean).slice(0, 3);
+        const data = await douyin.research({ words, search: true });
+        await store.update('items', itemId, { publish: { douyinPick: { message: 'Claude 正在挑话题', at: Date.now() } } });
+        const { structured: r } = await runClaude(douyinPickPrompt(it, cur, data), { model: modelFor(store, 'publish'), effort: effortFor(store, 'publish'), schema: DOUYIN_PICK });
+        if (!r) throw new Error('Claude 没有返回方案');
+        const tags = (r.tags || []).map((t) => String(t).replace(/^#/, '').replace(/\s+/g, '').trim()).filter(Boolean).slice(0, 5);
+        const stat = (name) => data.candidates.find((c) => c.name?.toLowerCase() === name.toLowerCase()) || null;
+        const full = { status: 'done', at: Date.now(), message: '',
+          proposal: { title: String(r.title || cur.title).trim(), tags, campaign: String(r.campaign || '').trim(), hotspot: String(r.hotspot || '').trim(), reasons: String(r.reasons || '').trim() },
           picked: tags.map((t) => { const c = stat(t); return { name: t, views: c?.views ?? null, users: c?.users ?? null, viewsPerDay: c?.viewsPerDay ?? null, campaign: !!c?.campaign }; }),
-          searched: data.searched, sampledVideos: data.sampledVideos, words: data.words, note: data.note || '', account: account.code || '',
-          candidates: data.candidates.slice(0, 20).map((c) => ({ name: c.name, views: c.views ?? null, users: c.users ?? null, viewsPerDay: c.viewsPerDay ?? null, campaign: !!c.campaign, fromVideos: c.fromVideos || null, saved: !!c.saved })),
-          error: null,
-        },
-      } });
-    } catch (err) {
-      await store.update('items', itemId, { publish: { douyinPick: { at: Date.now(), error: `没查到抖音话题，用的是初稿：${String(err.message).split('\n')[0].slice(0, 200)}` } } });
-    }
+          searched: data.searched, sampledVideos: data.sampledVideos, words: data.words, note: data.note || '',
+          candidates: data.candidates.slice(0, 20).map((c) => ({ name: c.name, views: c.views ?? null, users: c.users ?? null, viewsPerDay: c.viewsPerDay ?? null, campaign: !!c.campaign, fromVideos: c.fromVideos || null })),
+          error: null, applied: null };
+        const now = getItem(itemId);
+        await store.set('items', itemId, { ...now, publish: { ...now.publish, douyinPick: full } });
+      } catch (err) {
+        await store.update('items', itemId, { publish: { douyinPick: { status: 'failed', error: String(err.message).split('\n')[0].slice(0, 300), at: Date.now() } } });
+      }
+    })();
+    return { ok: true };
+  }
+  // 按方案改：话题、关联热点照方案；标题你选了才改
+  async function applyDouyin(itemId, { title = true } = {}) {
+    const it = getItem(itemId);
+    const pk = it.publish?.douyinPick;
+    if (pk?.status !== 'done' || !pk.proposal) throw Object.assign(new Error('还没有方案，先点「找话题和活动」'), { status: 400 });
+    const cur = it.publish.platforms?.douyin || {};
+    const next = { ...cur, tags: pk.proposal.tags, hotspot: pk.proposal.hotspot, ...(title ? { title: pk.proposal.title } : {}) };
+    await store.update('items', itemId, { publish: { platforms: { douyin: next }, douyinPick: { applied: { at: Date.now(), title: !!title } } } });
+    return next;
   }
 
   // ---------- 生成发布信息 + 封面 ----------
@@ -200,14 +210,12 @@ export function createPublisher({ store, root, douyin }) {
     await store.update('items', itemId, { publish: { gen: { status: 'running', message: coverOnly ? '正在截取封面' : missingOnly ? `Claude 正在补写${missing.map((k) => PUBLISH_PLATFORMS.find((p) => p.k === k)?.n || k).join('、')}的文案` : 'Claude 正在写各平台的标题、描述和话题', at: Date.now() } } });
     (async () => {
       try {
-        const clean = (p) => ({ title: String(p.title || '').trim(), desc: String(p.desc || '').trim(), tags: (p.tags || []).map((t) => String(t).replace(/^#/, '').trim()).filter(Boolean) });
+        const clean = (p) => ({ title: String(p.title || '').trim(), desc: String(p.desc || '').trim(), tags: (p.tags || []).map((t) => String(t).replace(/^#/, '').trim()).filter(Boolean), ...(p.keywords?.length ? { keywords: p.keywords.map((w) => String(w).trim()).filter(Boolean).slice(0, 3) } : {}) });
         if (missingOnly) {
           const account = store.get('accounts', it.accountId) || {};
           const { structured: r } = await runClaude(infoPrompt(it, account, missing, false, root), { model: modelFor(store, 'publish'), effort: effortFor(store, 'publish'), schema: infoSchema(missing, false), images: watchImages(it) });
           if (!r) throw new Error('Claude 没有返回发布信息');
-          await store.update('items', itemId, { publish: { platforms: Object.fromEntries(missing.map((k) => [k, clean(r[k] || {})])) } });
-          if (missing.includes('douyin')) await pickDouyin(itemId, r.douyin || {});
-          await store.update('items', itemId, { publish: { gen: { status: 'done', message: '', at: Date.now() } } });
+          await store.update('items', itemId, { publish: { platforms: Object.fromEntries(missing.map((k) => [k, clean(r[k] || {})])), gen: { status: 'done', message: '', at: Date.now() } } });
           return;
         }
         let t = coverTime ?? it.publish?.coverTime;
@@ -219,7 +227,6 @@ export function createPublisher({ store, root, douyin }) {
           t = r.cover_time;
           prompt = r.cover_prompt || prompt;
           await store.update('items', itemId, { publish: { platforms: Object.fromEntries(PUBLISH_KEYS.map((k) => [k, clean(r[k] || {})])), coverPrompt: prompt || null, selected: it.publish?.selected || ['douyin'], gen: { status: 'running', message: '正在做封面', at: Date.now() } } });
-          await pickDouyin(itemId, r.douyin || {});
         }
         // 三种比例：cover 3:4（抖音竖封面、小红书）· coverWide 16:9（B站、YouTube）· coverWide43 4:3（抖音横封面）
         const ts = Date.now();
@@ -324,7 +331,7 @@ export function createPublisher({ store, root, douyin }) {
         let result;
         try {
           const info = it.publish.platforms[p] || {};
-          const out = await browsers[p].publish(it.accountId, { mp4: abs(it.video.mp4), cover: absOrNull(coverFor(p)), cover2: absOrNull(cover2For(p)), title: info.title, desc: info.desc, tags: info.tags, collection: collectionFor(p) }, log);
+          const out = await browsers[p].publish(it.accountId, { mp4: abs(it.video.mp4), cover: absOrNull(coverFor(p)), cover2: absOrNull(cover2For(p)), title: info.title, desc: info.desc, tags: info.tags, hotspot: p === 'douyin' ? info.hotspot || '' : '', collection: collectionFor(p) }, log);
           result = { status: 'done', steps, error: null, screenshot: null, at: Date.now(), ...(out?.url ? { url: out.url } : {}) };
         } catch (err) {
           result = { status: 'failed', steps, error: err.message.split('\n')[0].slice(0, 300), screenshot: err.screenshot ? path.relative(root, err.screenshot) : null, at: Date.now() };
@@ -357,6 +364,8 @@ export function createPublisher({ store, root, douyin }) {
     browsers,
     loginStatus: (id) => Object.values(browsers).map((b) => b.loginStatus(id)).find(Boolean) || null,
     generateInfo,
+    findDouyin,
+    applyDouyin,
     publish,
     manualDone,
     manualCancel,

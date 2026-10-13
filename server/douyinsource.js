@@ -2,7 +2,6 @@
 // - 搜同类热门视频，统计它们带的话题（要登录一个抖音小号；抖音弹滑块验证时，在弹出的窗口里由你自己滑）
 // - 话题联想、话题详情（播放量、参与人数、创建时间、简介里的征稿规则）、关联热点：不用登录
 // - 创作者中心的官方活动：要登录
-// - 你记下的征稿话题（在 App 里刷到的）：存在 settings/douyinCampaigns，每次都一起考虑
 // 都是只读：不点赞、不评论、不发布。结果缓存 3 小时。这些是抖音网页自己用的接口，抖音改版了要跟着调。
 import path from 'node:path';
 import { createBrowserAccounts, sleep } from './publish/browser.js';
@@ -157,42 +156,12 @@ export function createDouyinSource({ root, store }) {
     });
   }
 
-  // ---------- 你记下的征稿话题 ----------
-  const campaignList = () => store.get('settings', 'douyinCampaigns')?.list || [];
-  async function addCampaign(name) {
-    name = String(name || '').trim().replace(/^#/, '').slice(0, 40);
-    if (!name) throw bad('写一下话题名');
-    const found = await queue(() => session(true, async (ctx) => {
-      const page = ctx.pages()[0] || (await ctx.newPage());
-      await page.goto(CREATOR, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
-      const sug = await suggestOn(page, name);
-      return sug.find((x) => x.name.toLowerCase() === name.toLowerCase()) || null;
-    }));
-    if (!found) throw bad(`抖音上没找到 #${name} 这个话题，检查一下名字`);
-    const list = campaignList().filter((x) => x.cid !== found.cid);
-    await store.set('settings', 'douyinCampaigns', { list: [...list, { name: found.name, cid: found.cid, addedAt: Date.now() }] });
-    cache.clear();
-    return campaigns();
-  }
-  async function removeCampaign(cid) {
-    await store.set('settings', 'douyinCampaigns', { list: campaignList().filter((x) => x.cid !== String(cid)) });
-    return { list: campaignList() };
-  }
-  async function campaigns() {
-    const list = campaignList();
-    if (!list.length) return { list: [] };
-    const det = await cached(`camp:${list.map((x) => x.cid).join(',')}`, () => queue(() => session(true, async (ctx) => {
-      const page = ctx.pages()[0] || (await ctx.newPage());
-      return detailsOn(await openWww(ctx, list[0].cid), list.map((x) => x.cid));
-    })));
-    return { list: list.map((x) => ({ ...x, ...(det[x.cid] || {}) })) };
-  }
-
   // ---------- 发布前用的总查询 ----------
   // words：描述这条视频内容的几个搜索词（观众会怎么搜这类视频）
   async function research({ words = [], search = true } = {}) {
     words = [...new Set(words.map((w) => String(w).trim()).filter(Boolean))].slice(0, 6);
     if (!words.length) throw bad('至少给一个关键词');
+    if (!loggedIn()) throw bad('先在「渠道 → 抖音」扫码登录查话题用的小号');
     return cached(`r:${search ? 1 : 0}:${words.join('|')}`, () => queue(async () => {
       const found = search ? await searchTags(words).catch((e) => ({ tags: [], note: `搜同类视频出错：${e.message.split('\n')[0]}` })) : { tags: [], note: '' };
       return session(true, async (ctx) => {
@@ -204,18 +173,13 @@ export function createDouyinSource({ root, store }) {
         const acts = loggedIn() ? await activitiesOn(page) : [];
         // 搜到的话题没带 id 的，用联想补上 id
         for (const t of found.tags.filter((x) => !x.cid).slice(0, 10)) t.cid = (await suggestOn(page, t.name)).find((x) => x.name === t.name)?.cid || null;
-        // 候选：同类视频里出现的 + 联想到的 + 你记下的征稿
+        // 候选：同类视频里出现的 + 联想到的
         const byCid = new Map();
         for (const t of found.tags) if (t.cid) byCid.set(t.cid, { name: t.name, cid: t.cid, fromVideos: { videos: t.videos, recent: t.recent, likes: t.likes } });
         for (const x of sug) if (!byCid.has(x.cid)) byCid.set(x.cid, { name: x.name, cid: x.cid, fromSuggest: true });
-        for (const c of campaignList()) byCid.set(c.cid, { ...(byCid.get(c.cid) || { name: c.name, cid: c.cid }), saved: true });
         const cids = [...byCid.keys()].slice(0, 30);
         const det = cids.length ? await detailsOn(await openWww(ctx, cids[0]), cids) : {};
         const candidates = cids.map((cid) => ({ ...byCid.get(cid), ...(det[cid] || {}) }));
-        // 自动查到的征稿（简介里写着征稿规则的话题）记进列表，以后每次都考虑，渠道页里也看得到
-        const known = new Set(campaignList().map((x) => x.cid));
-        const auto = candidates.filter((c) => c.campaign && !known.has(c.cid) && (c.fromVideos || c.viewsPerDay > 100_000));
-        if (auto.length) await store.set('settings', 'douyinCampaigns', { list: [...campaignList(), ...auto.map((c) => ({ name: c.name, cid: c.cid, addedAt: Date.now(), auto: true }))] });
         return { words, searched: found.tags.length > 0, sampledVideos: found.sampled || 0, note: found.note || '', candidates, hotspots: hot, activities: acts, at: Date.now() };
       });
     }));
@@ -224,7 +188,7 @@ export function createDouyinSource({ root, store }) {
   // ---------- 登录（查话题用的小号，和发布账号分开） ----------
   return {
     research,
-    campaigns, addCampaign, removeCampaign,
+    loggedIn,
     login: {
       status: () => acc.status(ACC),
       start: () => acc.startLogin(ACC),

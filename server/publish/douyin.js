@@ -82,6 +82,25 @@ export function createDouyin({ dataDir }) {
         }
       }
 
+      // 关联热点：发布页上「关联热点」那一栏，搜热点词、选中第一个对得上的。选不上不影响发布，记一笔、截个图
+      if (info.hotspot) {
+        const word = String(info.hotspot);
+        log(`关联热点「${word}」`);
+        try {
+          const row = page.locator('div:has(> div:text-is("关联热点")), div:has(> span:text-is("关联热点"))').last();
+          await row.scrollIntoViewIfNeeded({ timeout: 8000 });
+          await row.locator('.semi-select, input').first().click({ timeout: 8000 });
+          await page.keyboard.type(word.slice(0, 20));
+          const opt = page.locator('.semi-select-option, [role="option"]').filter({ hasText: word.slice(0, 6) }).first();
+          await opt.click({ timeout: 10_000 });
+          await row.getByText(word.slice(0, 6)).first().waitFor({ state: 'visible', timeout: 4000 });
+        } catch {
+          const f = await acc.shot(page, 'hotspot');
+          log(`没能自动选上关联热点，发出去后可以在抖音里补选（截图：${f}）`);
+          await page.keyboard.press('Escape').catch(() => {});
+        }
+      }
+
       log('等视频上传完成');
       await page.getByText('重新上传').first().waitFor({ state: 'visible', timeout: 15 * 60_000 });
 

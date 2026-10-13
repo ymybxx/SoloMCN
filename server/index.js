@@ -232,6 +232,9 @@ async function handleApi(req, res, parts) {
       if (parts[1] === 'items' && ID_RE.test(parts[2] || '') && method === 'POST') {
         if (parts[3] === 'info') return sendJson(res, 200, await publisher.generateInfo(parts[2], { coverOnly: !!body.coverOnly, missingOnly: !!body.missingOnly, coverTime: body.coverTime != null && body.coverTime !== '' && Number.isFinite(Number(body.coverTime)) ? Number(body.coverTime) : undefined, coverPrompt: body.coverPrompt ? String(body.coverPrompt).slice(0, 2000) : undefined, mode: body.mode === 'frame' ? 'frame' : body.mode === 'ai' ? 'ai' : undefined }));
         if (parts[3] === 'go') return sendJson(res, 200, await publisher.publish(parts[2], body.platforms, body.manual));
+        // 抖音：找话题和活动（要先登录查话题用的小号），给出方案；你确认后按方案改
+        if (parts[3] === 'douyin-find') return sendJson(res, 200, await publisher.findDouyin(parts[2]));
+        if (parts[3] === 'douyin-apply') return sendJson(res, 200, await publisher.applyDouyin(parts[2], { title: body.title !== false }));
         if (parts[3] === 'manual' && ['done', 'cancel'].includes(parts[5])) return sendJson(res, 200, await (parts[5] === 'done' ? publisher.manualDone : publisher.manualCancel)(parts[2], parts[4]));
         // 在 Finder 里显示这条内容的视频或封面（只认这条内容登记过的文件）
         if (parts[3] === 'reveal') {
@@ -377,7 +380,7 @@ async function handleApi(req, res, parts) {
       if (parts[2] === 'logout' && method === 'POST') return sendJson(res, 200, L.logout());
     }
   }
-  // 抖音话题：查话题用的小号登录、你记下的征稿、按关键词查候选话题和热点
+  // 抖音话题：查话题用的小号登录、按关键词查候选话题、征稿和热点
   if (parts[0] === 'douyin') {
     try {
       if (parts[1] === 'login') {
@@ -388,11 +391,6 @@ async function handleApi(req, res, parts) {
         if (parts[2] === 'progress' && parts[3] && method === 'GET') { const st = L.progress(parts[3]); return st ? sendJson(res, 200, st) : sendError(res, 404, 'not_found', '没有这次登录'); }
         if (parts[2] === 'check' && method === 'POST') return sendJson(res, 200, await L.check());
         if (parts[2] === 'logout' && method === 'POST') return sendJson(res, 200, L.logout());
-      }
-      if (parts[1] === 'campaigns') {
-        if (parts.length === 2 && method === 'GET') return sendJson(res, 200, await douyin.campaigns());
-        if (parts.length === 2 && method === 'POST') return sendJson(res, 200, await douyin.addCampaign((await readBody(req)).name));
-        if (parts.length === 3 && method === 'DELETE') return sendJson(res, 200, await douyin.removeCampaign(parts[2]));
       }
       if (parts[1] === 'topics' && method === 'GET') {
         const q = new URL(req.url, 'http://localhost').searchParams;
