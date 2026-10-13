@@ -175,7 +175,9 @@ function renderBanner(){
   const off=S.mode==='offline'?'<div class="banner">连不上本地服务。在项目目录运行 <b>npm start</b>，然后刷新页面。</div>':'';
   // 调研实践中 Claude 在等人处理（登录、付款、花钱确认）：不管在哪个页面都提醒
   const waits=Object.entries(S.items||{}).filter(([,i])=>i.labAsk?.status==='waiting');
-  $('#banner').innerHTML=off+waits.map(([id,i])=>`<div class="banner warn">Claude 在等你处理：${esc(i.title)} · ${esc((ASK_TEXT[i.labAsk.kind]||ASK_TEXT.other)[0])}${i.labAsk.site?' · '+esc(i.labAsk.site):''} <button class="btn sm" data-act="open" data-id="${esc(id)}">去处理</button></div>`).join('');
+  // 查抖音话题时抖音弹了滑块验证：在弹出的抖音窗口里滑一下
+  const dyv=local.settings?.douyinVerify?.waiting&&Date.now()-(local.settings.douyinVerify.at||0)<6*60e3?'<div class="banner warn">抖音要你验证一下：在弹出的抖音窗口里把滑块拖到位，查话题接着就继续。5 分钟内没滑就跳过这一步。</div>':'';
+  $('#banner').innerHTML=off+dyv+waits.map(([id,i])=>`<div class="banner warn">Claude 在等你处理：${esc(i.title)} · ${esc((ASK_TEXT[i.labAsk.kind]||ASK_TEXT.other)[0])}${i.labAsk.site?' · '+esc(i.labAsk.site):''} <button class="btn sm" data-act="open" data-id="${esc(id)}">去处理</button></div>`).join('');
 }
 // 实践中 Claude 在等人处理：登录、付款（人在弹出的窗口里自己弄）、花钱确认、其他
 const ASK_TEXT={login:['要登录','已经弹出这个网站的 Chrome 窗口，在里面登录，弄好后点「登录好了」'],payment:['要付款或绑卡','已经弹出这个网站的 Chrome 窗口，在里面自己完成付款或绑卡（银行卡、密码这些不经过 Claude），弄好后点「付好了」'],spend:['要花钱','同意的话 Claude 接着做这一步；不同意它会跳过，在实践记录里写明'],other:['需要你做一件事','做完点「好了」']};
@@ -587,6 +589,22 @@ const pubSelNote=(it,k)=>{const n=PUB_PLATFORMS.find(x=>x.k===k)?.n||k;
   return manualOf(it.accountId,k)?'<span class="pub-sel-note faint">你自己发，工作台只帮你准备好要复制的东西</span>'
     :S.pubAcc?.[it.accountId]?.[k]?.bound?'<span class="pub-sel-note faint">自动发 · 账号已绑定</span>'
     :`<span class="pub-sel-note err">自动发要先在「账号矩阵」绑定${n}，或者勾右边的「手动发」</span>`};
+// 抖音：查到的话题、征稿、热点和 Claude 的选择理由
+const fmtBig=n=>n==null?'?':n>=1e8?(n/1e8).toFixed(1)+'亿':n>=1e4?Math.round(n/1e4)+'万':String(n);
+function vDouyinPick(pk,v){
+  if(!pk)return '';
+  if(pk.error)return `<p class="hint">${esc(pk.error)}</p>`;
+  const chips=(pk.picked||[]).map(t=>`<span class="dy-tag">#${esc(t.name)}<i>${t.views!=null?`${fmtBig(t.views)}播放`:''}${t.users?` · ${fmtBig(t.users)}人参与`:''}${t.viewsPerDay?` · 日均${fmtBig(t.viewsPerDay)}`:''}</i>${t.campaign?'<b>征稿</b>':''}</span>`).join('');
+  const cands=(pk.candidates||[]).map(c=>`<tr><td>#${esc(c.name)}${c.saved?' <span class="faint">记下的</span>':''}${c.campaign?' <span class="faint">征稿</span>':''}</td><td class="n">${fmtBig(c.views)}</td><td class="n">${fmtBig(c.users)}</td><td class="n">${fmtBig(c.viewsPerDay)}</td><td class="n">${c.fromVideos?c.fromVideos.videos:'—'}</td></tr>`).join('');
+  return `<div class="dy-pick">
+    <div class="dy-tags">${chips}</div>
+    ${pk.campaign?`<p><b>参加征稿</b> #${esc(pk.campaign)}</p>`:''}${v.hotspot?`<p><b>关联热点</b> ${esc(v.hotspot)} <span class="faint">（自动发布暂时不会选它，发布时自己在抖音页面上选一下）</span></p>`:''}
+    ${pk.reasons?`<div class="chg-sum">${esc(pk.reasons)}</div>`:''}
+    <details><summary class="faint">查到的候选话题（${(pk.candidates||[]).length}）· 搜的是：${esc((pk.words||[]).join('、'))}${pk.searched?` · 看了 ${pk.sampledVideos} 条同类热门视频`:' · 没搜同类视频，只有话题联想'}</summary>
+      ${pk.note?`<p class="hint">${esc(pk.note)}</p>`:''}
+      <div class="tbl-wrap"><table class="pool-tbl"><thead><tr><th>话题</th><th class="n">播放</th><th class="n">参与</th><th class="n">日均</th><th class="n">同类视频里</th></tr></thead><tbody>${cands}</tbody></table></div></details>
+  </div>`;
+}
 function vPublish(it,id){
   if(!it.video)return '<p class="hint">视频做好后在这里生成封面、标题和话题，确认后勾选平台发布。</p>';
   const pb=it.publish||{};
@@ -605,6 +623,7 @@ function vPublish(it,id){
       <div class="field"><label for="pub-${p.k}-title">标题${p.k==='x'?' <span class="faint">（只在工作台里看，不发出去）</span>':lim?` <span class="faint">（不超过 ${lim} 字，现在 ${String(v.title||'').length}）</span>`:''}</label><input type="text" id="pub-${p.k}-title" data-pub="${p.k}" data-f="title" value="${esc(v.title||'')}"></div>
       <div class="field"><label for="pub-${p.k}-desc">${p.k==='x'?`推文正文 <span class="faint" id="pub-x-weight">（连话题现在 ${tweetWeight(tweetText(v.desc,v.tags))}/280，超出会从正文末尾截掉）</span>`:'描述'}</label><textarea id="pub-${p.k}-desc" data-pub="${p.k}" data-f="desc" rows="${p.k==='xhs'||p.k==='x'?6:3}">${esc(v.desc||'')}</textarea></div>
       <div class="field"><label for="pub-${p.k}-tags">话题（空格分隔）</label><input type="text" id="pub-${p.k}-tags" data-pub="${p.k}" data-f="tags" value="${esc((v.tags||[]).join(' '))}"></div>
+      ${p.k==='douyin'?vDouyinPick(pb.douyinPick,v):''}
     </div>`}).join('');
   return `<div class="pub-grid">${cover}<div class="pub-forms">${plats}</div></div>
     ${ai?`<details class="pub-prompt"><summary>封面图提示词</summary><textarea id="pubCoverPrompt" rows="4">${esc(pb.coverPrompt||'')}</textarea><p class="hint">改完点上面的「AI 画一张」，按这段重新生成。</p></details>`:''}
@@ -1075,9 +1094,39 @@ function vChanYoutube(){
       <li>精选、调研和运营时，Claude 可以随时按任意关键词搜 YouTube、读视频的完整简介和数据、读热门评论，用的是同一份额度</li>
       <li>拿不到字幕全文和视频文件：官方接口只给视频作者本人下字幕</li></ul></div>`;
 }
+// 查话题用的抖音小号（可选）：发布前搜同类热门视频带了哪些话题；和发布账号分开
+async function loadDyLogin(){try{S.dyLogin=await api('GET','/api/douyin/login')}catch{S.dyLogin=null}requestRender()}
+async function loadDyCamps(){try{S.dyCamps=await api('GET','/api/douyin/campaigns')}catch(e){S.dyCamps={err:e.message}}requestRender()}
+function vDyTopics(){
+  if(S.dyLogin===undefined){S.dyLogin=null;loadDyLogin()}
+  if(S.dyCamps===undefined){S.dyCamps=null;loadDyCamps()}
+  const L=S.dyLogin,run=S.dyLoginRun;const busy=run&&!['done','failed'].includes(run.status);
+  const pill=!L?'<span class="pill"><i></i>读取中…</span>':L.bound?'<span class="pill ok"><i></i>已登录</span>':'<span class="pill"><i></i>没登录</span>';
+  let body='';
+  if(run&&run.status==='waiting')body=`<p class="hint">${esc(run.message)}</p><div><button class="btn primary" data-act="dyl-done">我已登录</button></div>`;
+  else if(busy)body='<p class="hint busy">正在确认登录状态…</p>';
+  else if(L?.bound)body=`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="dyl-start">换个账号登录</button><button class="btn ghost" data-act="dyl-check" ${S.dyChecking?'disabled':''}>${S.dyChecking?'检查中…':'检查登录'}</button><button class="btn ghost danger" data-act="dyl-logout">退出登录</button></div>`;
+  else body=`${run?.status==='failed'?`<p class="err">${esc(run.message)}</p>`:''}<div><button class="btn" data-act="dyl-start">扫码登录抖音小号</button></div>`;
+  const C=S.dyCamps;
+  const camps=!C?'<p class="hint">读取中…</p>':C.err?`<p class="err">${esc(C.err)}</p>`:!C.list.length?'<p class="hint">还没有。在 App 里刷到征稿话题（比如 #vibe知识大赏），把话题名记在这里。</p>':C.list.map(c=>`<div class="dy-camp"><div class="blk-head"><b>#${esc(c.name)}</b><span class="faint">${fmtBig(c.views)} 播放 · ${fmtBig(c.users)} 人参与${c.viewsPerDay?` · 日均 ${fmtBig(c.viewsPerDay)}`:''}</span><div class="actions"><button class="btn ghost sm" data-act="dyc-rm" data-k="${esc(c.cid)}">删掉</button></div></div>${c.desc?`<p class="hint" style="white-space:pre-wrap">${esc(c.desc)}</p>`:''}</div>`).join('');
+  return `<div class="panel grid" style="gap:10px"><div class="blk-head"><h3>查话题用的小号 <span class="faint" style="font-weight:400">可选</span></h3>${pill}</div>
+    ${body}
+    <p class="hint">生成发布信息时，平台会用它搜同类热门视频，看大家都带了哪些话题（像征稿话题这种不用事先知道名字也能找到）。搜索时会弹出一个抖音窗口，抖音要你滑一下验证就在那个窗口里滑。和「账号矩阵」里发布用的抖音账号分开，建议用小号；只读，不点赞、不评论、不发布。不登录也能查话题联想、话题详情和热点，只是少了这一步。</p></div>
+  <div class="panel grid" style="gap:10px"><div class="blk-head"><h3>记下的征稿话题</h3></div>
+    <div class="chg-refine"><input id="dyCampName" placeholder="话题名，比如 vibe知识大赏" maxlength="40"><button class="btn" data-act="dyc-add" ${S.dyAdding?'disabled':''}>${S.dyAdding?'查询中…':'记下'}</button></div>
+    ${camps}
+    <p class="hint">平台会查它的规则（必带话题、标题前缀、截止、流量扶持）和热度。之后生成抖音发布信息时一起考虑：内容对得上、没过截止，就照规则参加。</p></div>`;
+}
+async function dyLoginStart(){try{S.dyLoginRun=await api('POST','/api/douyin/login/start')}catch(e){toast(e.message||'打开登录窗口失败');return}render();dyLoginPoll()}
+async function dyLoginPoll(){
+  const run=S.dyLoginRun;if(!run)return;
+  try{S.dyLoginRun=await api('GET','/api/douyin/login/progress/'+encodeURIComponent(run.id))}catch(e){S.dyLoginRun=null;await loadDyLogin();return}
+  const r=S.dyLoginRun;if(r.status==='done'||r.status==='failed'){if(r.status==='done'){toast('抖音小号登录好了');S.dyLoginRun=null}await loadDyLogin()}else setTimeout(dyLoginPoll,2000);
+  requestRender();
+}
 function vChanDouyin(){
-  const c=chan('douyin');if(!c)return vChanStatus('douyin');
-  return `${vChanStatus('douyin')}
+  const c=chan('douyin');if(!c)return vChanStatus('douyin')+vDyTopics();
+  return `${vChanStatus('douyin')}${vDyTopics()}
     <div class="panel grid" style="gap:12px">${vCfgHead('douyin','抓取设置')}<div class="cfg-row">${intervalSelect('douyin')}</div></div>
     <div class="panel grid" style="gap:6px"><div class="label">抓的是什么</div><ul class="rules">
       <li>抖音网页版的热搜榜，50 条，加 5 条左右「实时上升」：还没进前 50、正在往上涨的词。不用登录，不占推特号池</li>
@@ -1962,6 +2011,12 @@ document.addEventListener('click',e=>{
     case 'q-test':qTest(Number(k),b.dataset.ch||'x');break;
     case 'ytl-start':ytLoginStart();break;
     case 'bl-start':biliLoginStart();break;
+    case 'dyl-start':dyLoginStart();break;
+    case 'dyl-done':api('POST','/api/douyin/login/done').catch(e=>toast(e.message||'操作失败'));break;
+    case 'dyl-check':S.dyChecking=true;render();api('POST','/api/douyin/login/check').then(r=>toast(r.ok?'登录有效':'登录已失效，重新扫码登录一次'),e=>toast(e.message||'检查失败')).finally(()=>{S.dyChecking=false;loadDyLogin()});break;
+    case 'dyl-logout':arm(b,'确认退出',async()=>{try{await api('POST','/api/douyin/login/logout');toast('已退出抖音小号')}catch(e){toast(e.message||'操作失败')}loadDyLogin()});break;
+    case 'dyc-add':{const el=$('#dyCampName');const name=(el?.value||'').trim();if(!name){toast('写一下话题名');break}S.dyAdding=true;render();api('POST','/api/douyin/campaigns',{name}).then(r=>{S.dyCamps=r;const i=$('#dyCampName');if(i)i.value='';toast('记下了')},e=>toast(e.message||'没查到这个话题')).finally(()=>{S.dyAdding=false;render()});break}
+    case 'dyc-rm':arm(b,'确认删掉',()=>api('DELETE','/api/douyin/campaigns/'+encodeURIComponent(k)).then(()=>loadDyCamps(),e=>toast(e.message||'操作失败')));break;
     case 'bl-done':api('POST','/api/bili/login/done').catch(e=>toast(e.message||'操作失败'));S.biliLoginRun={...S.biliLoginRun,status:'checking'};render();break;
     case 'bl-check':S.biliLoginChecking=true;render();api('POST','/api/bili/login/check').then(r=>toast(r.ok?'登录有效，已更新登录信息':'登录已失效，重新扫码登录一次'),e=>toast(e.message||'检查失败')).finally(()=>{S.biliLoginChecking=false;loadBiliLogin()});break;
     case 'bl-logout':arm(b,'确认退出',async()=>{try{await api('POST','/api/bili/login/logout');toast('已退出 B站素材登录')}catch(e){toast(e.message||'操作失败')}loadBiliLogin()});break;

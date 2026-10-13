@@ -61,10 +61,10 @@ export const PUBLISH_PLATFORMS = [
   { k: 'x', n: '推特', ready: true },
 ];
 
-const PLATFORM_INFO = { type: 'object', required: ['title', 'desc', 'tags'], properties: { title: { type: 'string' }, desc: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } } };
+const PLATFORM_INFO = { type: 'object', required: ['title', 'desc', 'tags'], properties: { title: { type: 'string' }, desc: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } } } };
 // 各平台文案要求；生成时可以只写其中几个（比如新接入的平台补文案）
 const PLATFORM_RULES = {
-  douyin: 'douyin：title 不超过 30 字，前几个字就要有钩子；desc 一到三句，最后一句引导评论；tags 3–5 个，和内容相关、大家会搜的词，不带 #',
+  douyin: 'douyin：title 不超过 30 字，前几个字就要有钩子；desc 一到三句，最后一句引导评论；tags 3–5 个，和内容相关、大家会搜的词，不带 #；keywords 2–3 个，观众会怎么搜这类视频的搜索词（比如「AI 知识科普」），平台拿它去抖音查同类视频带的话题、征稿和热点',
   bilibili: 'bilibili：title 不超过 80 字，可以更完整；desc 写清楚这期讲了什么，有调研来源就列出主要来源；tags 5–10 个',
   youtube: 'youtube：和视频同一种语言；title 不超过 100 字，可以带一两个英文关键词方便搜索；desc 写清楚这期讲了什么，有调研来源就列出主要来源；tags 5–10 个，可以中英文混合',
   x: 'x（推特）：desc 就是推文正文。中文视频写中英双语：先一段中文、空一行、再一段英文，意思一致；其他语言的视频只用那一种语言。按推特的算法中文每个字算 2、英文字母和空格算 1，正文合计不超过 240（中英双语大约中文 60 字加英文 100 个字母）；不放链接；title 写一句短标题，只在工作台里看，不会发出去；tags 1–3 个，不带 #',
@@ -99,7 +99,40 @@ ${withCover && imageReady() ? '- cover_prompt：竖版封面图的生成提示�
 - 描述里不列具体商品价格（¥xxx、$xx/月）和"XX 官方价格页"，具体数字留在视频里讲，描述只写结论；来源写成"各家官方定价、公开评测榜单、二手市场成交价"这样的泛称（B站曾因简介里"闲鱼二手成交价 + 显卡价格"被判违规推广，简介被删）`;
 }
 
-export function createPublisher({ store, root }) {
+// 抖音：拿查到的话题、征稿、热点，让 Claude 定最终的话题、标题和关联热点
+export const DOUYIN_PICK = { type: 'object', required: ['title', 'desc', 'tags', 'campaign', 'hotspot', 'reasons'], properties: { title: { type: 'string' }, desc: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, campaign: { type: 'string' }, hotspot: { type: 'string' }, reasons: { type: 'string' } } };
+const fmtN = (n) => (n >= 1e8 ? `${(n / 1e8).toFixed(1)}亿` : n >= 1e4 ? `${Math.round(n / 1e4)}万` : String(n ?? '?'));
+export function douyinPickPrompt(item, draft, data) {
+  const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : '?');
+  const cands = data.candidates.map((c) => `- #${c.name}：播放 ${fmtN(c.views)}，参与 ${fmtN(c.users)} 人，创建 ${day(c.createdAt)}，平均每天 ${fmtN(c.viewsPerDay)} 播放${c.fromVideos ? `；同类热门视频里出现 ${c.fromVideos.videos} 次（近两周 ${c.fromVideos.recent} 次）` : ''}${c.saved ? '；用户记下的征稿' : ''}${c.desc ? `\n  简介：${c.desc.replace(/\s+/g, ' ').slice(0, 600)}` : ''}`).join('\n');
+  const hot = data.hotspots.slice(0, 20).map((h) => `- ${h.word}（热度 ${fmtN(h.hot)}）`).join('\n');
+  const acts = data.activities.map((a) => `- ${a.name}（${a.category}${a.reward ? `，奖励 ${a.reward}` : ''}，截止 ${day(a.end)}）：${a.pitch}`).join('\n');
+  return `给这条抖音视频定最终的标题、描述、话题，决定要不要参加征稿或活动、要不要关联热点。今天是 ${new Date().toISOString().slice(0, 10)}。
+
+视频：${item.title}
+钩子：${item.hook || ''}
+概要：${item.angle || ''}
+
+已经写好的初稿：
+标题：${draft.title}
+描述：${draft.desc}
+话题：${(draft.tags || []).join('、')}
+
+抖音上查到的候选话题（搜的是：${data.words.join('、')}${data.searched ? `，看了 ${data.sampledVideos} 条同类热门视频` : '，这次没搜同类视频，只有话题联想'}）：
+${cands || '（没有）'}
+
+当前的关联热点：
+${hot || '（没有）'}
+${acts ? `\n创作者中心的官方活动：\n${acts}\n` : ''}
+要求：
+- tags 3–5 个，不带 #，不带空格，只从候选里选或沿用初稿：一个覆盖面大的话题，加两三个精准的（同类热门视频常用、和内容贴、最近涨得快的）。和内容无关的大话题不要（比如联想出来的「爱情」）。
+- 征稿：简介里写了征稿规则、而且这条内容符合、没过截止的，就参加：带上它的必带话题，按它的规则改标题（比如要求的标题前缀），campaign 写话题名；没有合适的写空字符串。官方活动同理，参加就把活动要求的话题带上。
+- hotspot：只有这条内容真和某个热点有关才选一个，原样写热点词；没关系就写空字符串。不硬蹭。
+- title 不超过 30 字（加了征稿前缀也算在内），desc 一到三句，可以在初稿基础上改。不夸大，不写没依据的数字。
+- reasons：两到四行，给用户看：选了哪些话题、为什么（带上播放量这类数字），参加了哪个征稿或活动、规则是什么、截止哪天，关联了哪个热点或为什么没关联。`;
+}
+
+export function createPublisher({ store, root, douyin }) {
   // 走浏览器自动化、需要扫码绑定的平台
   const browsers = { douyin: createDouyin({ dataDir: path.join(root, 'data') }), xhs: createXhs({ dataDir: path.join(root, 'data') }), bilibili: createBili({ dataDir: path.join(root, 'data') }), youtube: createYt({ dataDir: path.join(root, 'data') }), x: createX({ dataDir: path.join(root, 'data') }) };
   const abs = (rel) => path.resolve(root, rel);
@@ -122,6 +155,38 @@ export function createPublisher({ store, root }) {
   };
   const coverDir = (it) => path.join(it.video?.project || 'videos/_covers', 'publish');
 
+  // ---------- 抖音：查话题、征稿、热点，让 Claude 定最终的话题、标题和关联热点 ----------
+  // 查不到（抖音改版、网络问题）就保留初稿，发布照常
+  async function pickDouyin(itemId, draft) {
+    if (!douyin) return;
+    const it = getItem(itemId);
+    const words = (draft.keywords?.length ? draft.keywords : draft.tags || []).slice(0, 3);
+    if (!words.length) return;
+    await store.update('items', itemId, { publish: { gen: { status: 'running', message: '正在查抖音的话题、征稿和热点（会弹出一个抖音窗口；要验证的话在那个窗口里滑一下）', at: Date.now() } } });
+    try {
+      const data = await douyin.research({ words, search: true });
+      const base = it.publish?.platforms?.douyin || { title: draft.title, desc: draft.desc, tags: draft.tags };
+      await store.update('items', itemId, { publish: { gen: { status: 'running', message: 'Claude 正在挑抖音话题', at: Date.now() } } });
+      const account = store.get('accounts', it.accountId) || {};
+      const { structured: r } = await runClaude(douyinPickPrompt(it, base, data), { model: modelFor(store, 'publish'), effort: effortFor(store, 'publish'), schema: DOUYIN_PICK });
+      if (!r) throw new Error('Claude 没有返回结果');
+      const tags = (r.tags || []).map((t) => String(t).replace(/^#/, '').replace(/\s+/g, '').trim()).filter(Boolean).slice(0, 5);
+      const stat = (name) => data.candidates.find((c) => c.name?.toLowerCase() === name.toLowerCase()) || null;
+      await store.update('items', itemId, { publish: {
+        platforms: { douyin: { title: String(r.title || base.title).trim(), desc: String(r.desc || base.desc).trim(), tags, hotspot: String(r.hotspot || '').trim() } },
+        douyinPick: {
+          at: Date.now(), reasons: String(r.reasons || '').trim(), campaign: String(r.campaign || '').trim(), hotspot: String(r.hotspot || '').trim(),
+          picked: tags.map((t) => { const c = stat(t); return { name: t, views: c?.views ?? null, users: c?.users ?? null, viewsPerDay: c?.viewsPerDay ?? null, campaign: !!c?.campaign }; }),
+          searched: data.searched, sampledVideos: data.sampledVideos, words: data.words, note: data.note || '', account: account.code || '',
+          candidates: data.candidates.slice(0, 20).map((c) => ({ name: c.name, views: c.views ?? null, users: c.users ?? null, viewsPerDay: c.viewsPerDay ?? null, campaign: !!c.campaign, fromVideos: c.fromVideos || null, saved: !!c.saved })),
+          error: null,
+        },
+      } });
+    } catch (err) {
+      await store.update('items', itemId, { publish: { douyinPick: { at: Date.now(), error: `没查到抖音话题，用的是初稿：${String(err.message).split('\n')[0].slice(0, 200)}` } } });
+    }
+  }
+
   // ---------- 生成发布信息 + 封面 ----------
   async function generateInfo(itemId, { coverOnly = false, coverTime, coverPrompt, mode, missingOnly = false } = {}) {
     const it = getItem(itemId);
@@ -140,7 +205,9 @@ export function createPublisher({ store, root }) {
           const account = store.get('accounts', it.accountId) || {};
           const { structured: r } = await runClaude(infoPrompt(it, account, missing, false, root), { model: modelFor(store, 'publish'), effort: effortFor(store, 'publish'), schema: infoSchema(missing, false), images: watchImages(it) });
           if (!r) throw new Error('Claude 没有返回发布信息');
-          await store.update('items', itemId, { publish: { platforms: Object.fromEntries(missing.map((k) => [k, clean(r[k] || {})])), gen: { status: 'done', message: '', at: Date.now() } } });
+          await store.update('items', itemId, { publish: { platforms: Object.fromEntries(missing.map((k) => [k, clean(r[k] || {})])) } });
+          if (missing.includes('douyin')) await pickDouyin(itemId, r.douyin || {});
+          await store.update('items', itemId, { publish: { gen: { status: 'done', message: '', at: Date.now() } } });
           return;
         }
         let t = coverTime ?? it.publish?.coverTime;
@@ -152,6 +219,7 @@ export function createPublisher({ store, root }) {
           t = r.cover_time;
           prompt = r.cover_prompt || prompt;
           await store.update('items', itemId, { publish: { platforms: Object.fromEntries(PUBLISH_KEYS.map((k) => [k, clean(r[k] || {})])), coverPrompt: prompt || null, selected: it.publish?.selected || ['douyin'], gen: { status: 'running', message: '正在做封面', at: Date.now() } } });
+          await pickDouyin(itemId, r.douyin || {});
         }
         // 三种比例：cover 3:4（抖音竖封面、小红书）· coverWide 16:9（B站、YouTube）· coverWide43 4:3（抖音横封面）
         const ts = Date.now();

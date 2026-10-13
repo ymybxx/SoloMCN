@@ -19,6 +19,7 @@ import { createLab } from './lab.js';
 import { createCharacters } from './characters.js';
 import { captureSource } from './assets.js';
 import { createBiliSource } from './bilisource.js';
+import { createDouyinSource } from './douyinsource.js';
 import { watchVideo, probe } from './watch.js';
 import { publicConfig, setImage, clearImage, setClaudeToken, clearClaudeToken } from './secrets.js';
 
@@ -89,7 +90,9 @@ async function pumpSkills() {
 }
 setTimeout(() => skills.maybeTidy().then(pumpSkills), 120_000).unref();
 setInterval(() => skills.maybeTidy().then(pumpSkills), 6 * 3600_000).unref();
-const publisher = createPublisher({ store, root });
+// 抖音话题、征稿和热点：发布前帮 Claude 挑话题（查话题用的小号和发布账号分开）
+const douyin = createDouyinSource({ root, store });
+const publisher = createPublisher({ store, root, douyin });
 const setupCheck = createSetupCheck({ hotUrl: HOT_URL });
 // 拉 YouTube 字幕用的登录（可选），cookie 导出到 data/youtube-cookies.txt 给热点服务的 yt-dlp 用
 const ytLogin = createYtLogin({ root });
@@ -372,6 +375,31 @@ async function handleApi(req, res, parts) {
       }
       if (parts[2] === 'check' && method === 'POST') return sendJson(res, 200, await L.check());
       if (parts[2] === 'logout' && method === 'POST') return sendJson(res, 200, L.logout());
+    }
+  }
+  // 抖音话题：查话题用的小号登录、你记下的征稿、按关键词查候选话题和热点
+  if (parts[0] === 'douyin') {
+    try {
+      if (parts[1] === 'login') {
+        const L = douyin.login;
+        if (parts.length === 2 && method === 'GET') return sendJson(res, 200, L.status());
+        if (parts[2] === 'start' && method === 'POST') return sendJson(res, 200, L.start());
+        if (parts[2] === 'done' && method === 'POST') return sendJson(res, 200, { ok: await L.finish() });
+        if (parts[2] === 'progress' && parts[3] && method === 'GET') { const st = L.progress(parts[3]); return st ? sendJson(res, 200, st) : sendError(res, 404, 'not_found', '没有这次登录'); }
+        if (parts[2] === 'check' && method === 'POST') return sendJson(res, 200, await L.check());
+        if (parts[2] === 'logout' && method === 'POST') return sendJson(res, 200, L.logout());
+      }
+      if (parts[1] === 'campaigns') {
+        if (parts.length === 2 && method === 'GET') return sendJson(res, 200, await douyin.campaigns());
+        if (parts.length === 2 && method === 'POST') return sendJson(res, 200, await douyin.addCampaign((await readBody(req)).name));
+        if (parts.length === 3 && method === 'DELETE') return sendJson(res, 200, await douyin.removeCampaign(parts[2]));
+      }
+      if (parts[1] === 'topics' && method === 'GET') {
+        const q = new URL(req.url, 'http://localhost').searchParams;
+        return sendJson(res, 200, await douyin.research({ words: String(q.get('words') || '').split(',').map((w) => w.trim()).filter(Boolean), search: q.get('search') !== '0' }));
+      }
+    } catch (err) {
+      return sendError(res, err.status || 502, 'douyin_failed', err.message);
     }
   }
   // 其他热点数据接口原样转发：/api/hs/global、/api/hs/feed、/api/hs/channels、/api/hs/x/pool、/api/hs/x/search?q=...、/api/hs/youtube/search?q=...
