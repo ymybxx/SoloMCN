@@ -109,12 +109,12 @@ const TASKS = {
   curate: {
     name: '精选素材',
     maxTurns: 80,
-    prompt: () => '/curate-topics',
+    prompt: ({ guide }) => `/curate-topics${guide ? `\n这次的方向（用户写的，优先按它来）：${guide}` : ''}`,
   },
   ideas: {
     name: '给账号出题',
     maxTurns: 50,
-    prompt: ({ pickId, accounts, n }) => `/account-ideas 精选 id：${pickId}；账号：${accounts.join('、')}；每个账号 ${n} 个`,
+    prompt: ({ pickId, accounts, n, guide }) => `/account-ideas 精选 id：${pickId}；账号：${accounts.join('、')}；每个账号 ${n} 个${guide ? `\n这次的方向（用户写的，优先按它来）：${guide}` : ''}`,
   },
   // 拆解一条 YouTube 视频：读字幕、简介和热门评论，写成拆解报告存到这条视频上（精选、出题、调研都复用）
   teardown: {
@@ -385,6 +385,8 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
     if (task === 'analysis' && !Object.values(store.all().items).some((i) => i.stage === 'published')) {
       throw Object.assign(new Error('还没有已发布的内容'), { status: 400 });
     }
+    // 精选、出题时用户写的一句方向（比如「找适合抖音 vibe知识大赏 征稿的素材」）
+    if (task === 'curate' || task === 'ideas') args.guide = String(args.guide || '').trim().slice(0, 500);
     if (task === 'ideas') {
       if (!/^[A-Za-z0-9_-]{1,40}$/.test(args.pickId || '') || !store.get('picks', args.pickId)) throw Object.assign(new Error('找不到这个精选'), { status: 400 });
       const codes = Object.values(store.all().accounts).map((a) => String(a.code));

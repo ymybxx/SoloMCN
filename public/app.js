@@ -677,6 +677,7 @@ function vPick(p){
   const form=`<div class="pick-form"><span class="lbl">给哪些账号出题</span>
       <div class="chips">${accList().map(a=>`<button class="chip c-${esc(a.color)}" aria-pressed="${S.pickAcc.has(a.code)}" data-act="pick-acc" data-k="${esc(a.code)}">${esc(a.code)} · ${esc(a.name)}</button>`).join('')}</div>
       <label class="lbl" for="pickN">每个账号出几个</label><select id="pickN">${[1,2,3,5].map(n=>`<option value="${n}" ${S.pickN===n?'selected':''}>${n} 个</option>`).join('')}</select>
+      <input id="ideasGuide" class="guide-in" maxlength="500" placeholder="出题方向（可选），比如：要参加抖音 vibe知识大赏 征稿">
       <div class="idea-actions"><button class="btn primary" data-act="pick-go" data-id="${esc(p.id)}" ${busy||!S.pickAcc.size?'disabled':''}>开始出题</button><button class="btn ghost" data-act="pick-cancel">取消</button></div></div>`;
   const actions=open?form
     :p.status==='new'?`<div class="idea-actions"><button class="btn primary" data-act="pick-open" data-id="${esc(p.id)}" ${busy?'disabled':''}>给账号出题</button><button class="btn ghost" data-act="pick-status" data-id="${esc(p.id)}" data-k="dropped">不做</button></div>`
@@ -696,7 +697,7 @@ function vRadar(){
   const run=runningRun('curate')||lastRun('curate');const busy=runningMain();
   const picks=pickList();const by=s=>picks.filter(p=>p.status===s);const todo=by('new'),done=by('ideas'),dropped=by('dropped');
   return `<div class="section-head"><h2>选题雷达</h2><p>Claude 读这一轮各渠道的素材，挑出值得做的主题；你决定给哪些账号出题，或者不做</p>
-      <div class="actions"><button class="btn primary" data-act="curate" ${busy?'disabled':''}>${runningRun('curate')?'Claude 精选中…':busy?'Claude 正在跑别的任务':'让 Claude 精选'}</button></div></div>
+      <div class="actions"><input id="curateGuide" class="guide-in" maxlength="500" placeholder="这次的方向（可选），比如：找适合抖音 vibe知识大赏 征稿的素材"><button class="btn primary" data-act="curate" ${busy?'disabled':''}>${runningRun('curate')?'Claude 精选中…':busy?'Claude 正在跑别的任务':'让 Claude 精选'}</button></div></div>
     ${vRun(run)}
     <div class="section-head sub"><h3>待决定</h3><p>${todo.length} 个</p></div>
     <div class="pick-list">${todo.map(vPick).join('')||'<div class="empty"><strong>没有待决定的主题</strong>点「让 Claude 精选」，或者在「素材」里把单条素材送进来</div>'}</div>
@@ -2032,7 +2033,7 @@ document.addEventListener('click',e=>{
     case 'yt-key-cancel':S.ytKeyEdit=false;render();break;
     case 'yt-key-save':ytKeySave();break;
     case 'yt-key-del':arm(b,'确认删除',async()=>{try{await api('DELETE','/api/hs/youtube/key');toast('已删除 key')}catch(e){toast(e.message||'删除失败')}await Promise.all([loadYtQuota(),loadFeed()])});break;
-    case 'curate':agentRun('curate');break;
+    case 'curate':{const g=($('#curateGuide')?.value||'').trim();agentRun('curate',g?{guide:g}:{});const el=$('#curateGuide');if(el)el.value='';break}
     case 'skill-sel':S.skillSel=k;S.skillCur=null;S.skillFileCur=null;render();if(k==='changes'||k==='new')loadSkills();else loadSkill(k);break;
     case 'goto-changes':S.tab='skills';S.skillSel='changes';try{localStorage.setItem('wb.tab','skills')}catch(_){};history.replaceState(null,'','#skills');render();window.scrollTo(0,0);loadSkills();break;
     case 'skill-file':S.skillFile={name:S.skillCur.name,path:k};S.skillFileCur=null;render();loadSkillFile();break;
@@ -2119,7 +2120,7 @@ document.addEventListener('click',e=>{
     case 'pick-open':{const p=S.picks[id];S.pickOpen=id;S.pickAcc=new Set((p?.accounts||[]).map(a=>S.accounts[a]?.code).filter(Boolean));render();break}
     case 'pick-cancel':S.pickOpen=null;render();break;
     case 'pick-acc':S.pickAcc.has(k)?S.pickAcc.delete(k):S.pickAcc.add(k);render();break;
-    case 'pick-go':{const accounts=[...S.pickAcc];S.pickOpen=null;agentRun('ideas',{pickId:id,accounts,n:S.pickN});S.tab='ideas';history.replaceState(null,'','#ideas');render();break}
+    case 'pick-go':{const accounts=[...S.pickAcc];S.pickOpen=null;const g=($('#ideasGuide')?.value||'').trim();agentRun('ideas',{pickId:id,accounts,n:S.pickN,...(g?{guide:g}:{})});S.tab='ideas';history.replaceState(null,'','#ideas');render();break}
     case 'pick-status':store.update('picks',id,{status:k,updatedAt:Date.now()});break;
     case 'idea-filter':S.ideaFilter=id;render();break;
     case 'stop':S.gen?.ctl.abort();break;
