@@ -4,7 +4,7 @@
 // 登录、检查、解绑这些各平台通用的部分在 browser.js。
 import fs from 'node:fs';
 import { clearTips } from './unblock.js';
-import { createBrowserAccounts, waitState, settle, fillChecked, insertChecked } from './browser.js';
+import { createBrowserAccounts, handOver, HANDOVER_MS, waitState, settle, fillChecked, insertChecked } from './browser.js';
 
 const CREATOR = 'https://member.bilibili.com/platform/home';
 const UPLOAD_URL = 'https://member.bilibili.com/platform/upload/video/frame';
@@ -29,7 +29,7 @@ export function createBili({ dataDir }) {
   async function publish(accountId, info, log) {
     acc.ensureBound(accountId);
     if (!fs.existsSync(info.mp4)) throw new Error(`找不到视频文件 ${info.mp4}`);
-    const ctx = await acc.openProfile(accountId);
+    const ctx = await acc.openProfile(accountId, info.fillOnly ? false : undefined);
     const page = ctx.pages()[0] || (await ctx.newPage());
     acc.unblock(page, log);
     const bodyText = () => page.evaluate(() => document.body.innerText);
@@ -130,6 +130,7 @@ export function createBili({ dataDir }) {
       log('点击立即投稿');
       const btn = page.locator('span.submit-add:text-is("立即投稿")').first();
       await btn.scrollIntoViewIfNeeded().catch(() => {});
+      if (info.fillOnly) return await handOver(ctx, page, () => page.getByText(/稿件投递成功|投稿成功/).first().waitFor({ state: 'visible', timeout: HANDOVER_MS }), log);
       if (info.dryRun) {
         log('试运行：停在点投稿之前');
         return { ok: true, dryRun: true, screenshot: await acc.shot(page, 'dryrun') };

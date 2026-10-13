@@ -3,7 +3,7 @@
 // 选择器按 2026-10 的实际页面校正过；小红书改版后这里要跟着改。
 // 登录、检查、解绑这些各平台通用的部分在 browser.js。
 import fs from 'node:fs';
-import { createBrowserAccounts, waitState, settle, fillChecked, insertChecked } from './browser.js';
+import { createBrowserAccounts, handOver, HANDOVER_MS, waitState, settle, fillChecked, insertChecked } from './browser.js';
 import { createStepPause } from './pacing.js';
 
 const CREATOR = 'https://creator.xiaohongshu.com/';
@@ -30,7 +30,7 @@ export function createXhs({ dataDir }) {
     acc.ensureBound(accountId);
     if (!fs.existsSync(info.mp4)) throw new Error(`找不到视频文件 ${info.mp4}`);
     const pause = createStepPause();
-    const ctx = await acc.openProfile(accountId);
+    const ctx = await acc.openProfile(accountId, info.fillOnly ? false : undefined);
     const page = ctx.pages()[0] || (await ctx.newPage());
     acc.unblock(page, log);
     try {
@@ -124,6 +124,7 @@ export function createXhs({ dataDir }) {
       await page.waitForFunction(() => document.querySelector('xhs-publish-btn')?.getAttribute('submit-disabled') === 'false', null, { timeout: 60_000 });
       const box = await bar.boundingBox();
       if (!box) throw new Error('没找到发布按钮');
+      if (info.fillOnly) return await handOver(ctx, page, () => Promise.race([page.waitForURL(/publish\/success/, { timeout: HANDOVER_MS }), page.getByText('发布成功').first().waitFor({ state: 'visible', timeout: HANDOVER_MS })]), log);
       if (info.dryRun) {
         log('试运行：停在点发布之前');
         return { ok: true, dryRun: true, screenshot: await acc.shot(page, 'dryrun') };

@@ -286,7 +286,8 @@ export function createPublisher({ store, root, douyin }) {
   }
 
   // platforms：自动发布的平台；manual：手动发布的平台（工作台不碰这个平台，只把要复制的东西和文件准备好）
-  async function publish(itemId, platforms, manual = []) {
+  // fillOnly：只填不发，每个平台都填好后停在点发布之前，窗口交给你，你自己点发布
+  async function publish(itemId, platforms, manual = [], { fillOnly = false } = {}) {
     const it = getItem(itemId);
     if (!it.video?.mp4) throw Object.assign(new Error('先生成视频'), { status: 400 });
     if (!it.publish?.platforms) throw Object.assign(new Error('先生成发布信息'), { status: 400 });
@@ -331,8 +332,10 @@ export function createPublisher({ store, root, douyin }) {
         let result;
         try {
           const info = it.publish.platforms[p] || {};
-          const out = await browsers[p].publish(it.accountId, { mp4: abs(it.video.mp4), cover: absOrNull(coverFor(p)), cover2: absOrNull(cover2For(p)), title: info.title, desc: info.desc, tags: info.tags, hotspot: p === 'douyin' ? info.hotspot || '' : '', collection: collectionFor(p) }, log);
-          result = { status: 'done', steps, error: null, screenshot: null, at: Date.now(), ...(out?.url ? { url: out.url } : {}) };
+          const out = await browsers[p].publish(it.accountId, { mp4: abs(it.video.mp4), cover: absOrNull(coverFor(p)), cover2: absOrNull(cover2For(p)), title: info.title, desc: info.desc, tags: info.tags, hotspot: p === 'douyin' ? info.hotspot || '' : '', collection: collectionFor(p), fillOnly }, log);
+          result = out?.fillOnly && !out.published
+            ? { status: 'filled', steps, error: null, screenshot: null, at: Date.now() }
+            : { status: 'done', steps, error: null, screenshot: null, at: Date.now(), ...(out?.url ? { url: out.url } : {}) };
         } catch (err) {
           result = { status: 'failed', steps, error: err.message.split('\n')[0].slice(0, 300), screenshot: err.screenshot ? path.relative(root, err.screenshot) : null, at: Date.now() };
         }

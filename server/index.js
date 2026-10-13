@@ -231,7 +231,7 @@ async function handleApi(req, res, parts) {
       }
       if (parts[1] === 'items' && ID_RE.test(parts[2] || '') && method === 'POST') {
         if (parts[3] === 'info') return sendJson(res, 200, await publisher.generateInfo(parts[2], { coverOnly: !!body.coverOnly, missingOnly: !!body.missingOnly, coverTime: body.coverTime != null && body.coverTime !== '' && Number.isFinite(Number(body.coverTime)) ? Number(body.coverTime) : undefined, coverPrompt: body.coverPrompt ? String(body.coverPrompt).slice(0, 2000) : undefined, mode: body.mode === 'frame' ? 'frame' : body.mode === 'ai' ? 'ai' : undefined }));
-        if (parts[3] === 'go') return sendJson(res, 200, await publisher.publish(parts[2], body.platforms, body.manual));
+        if (parts[3] === 'go') return sendJson(res, 200, await publisher.publish(parts[2], body.platforms, body.manual, { fillOnly: !!body.fillOnly }));
         // 抖音：找话题和活动（要先登录查话题用的小号），给出方案；你确认后按方案改
         if (parts[3] === 'douyin-find') return sendJson(res, 200, await publisher.findDouyin(parts[2]));
         if (parts[3] === 'douyin-apply') return sendJson(res, 200, await publisher.applyDouyin(parts[2], { title: body.title !== false }));

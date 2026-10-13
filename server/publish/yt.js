@@ -3,7 +3,7 @@
 // Studio 界面会跟随账号语言，选择器尽量用 id / name 属性而不是文字；YouTube 改版后这里要跟着改。
 // 登录、检查、解绑这些各平台通用的部分在 browser.js。
 import fs from 'node:fs';
-import { createBrowserAccounts, waitState, settle, insertChecked } from './browser.js';
+import { createBrowserAccounts, handOver, HANDOVER_MS, waitState, settle, insertChecked } from './browser.js';
 
 const STUDIO = 'https://studio.youtube.com/';
 const CREATE = 'ytcp-button.ytcpAppHeaderCreateIcon, #create-icon'; // 顶栏「创建」按钮
@@ -36,7 +36,7 @@ export function createYt({ dataDir }) {
   async function publish(accountId, info, log) {
     acc.ensureBound(accountId);
     if (!fs.existsSync(info.mp4)) throw new Error(`找不到视频文件 ${info.mp4}`);
-    const ctx = await acc.openProfile(accountId);
+    const ctx = await acc.openProfile(accountId, info.fillOnly ? false : undefined);
     const page = ctx.pages()[0] || (await ctx.newPage());
     acc.unblock(page, log);
     try {
@@ -119,6 +119,7 @@ export function createYt({ dataDir }) {
       log(`上传完成（${(await dialog.locator('ytcp-video-upload-progress').first().innerText().catch(() => '')).trim().slice(0, 40)}）`);
 
       log('点击发布');
+      if (info.fillOnly) return await handOver(ctx, page, () => page.getByText(/视频已发布|Video published/).first().waitFor({ state: 'visible', timeout: HANDOVER_MS }), log);
       if (info.dryRun) {
         log('试运行：停在点发布之前');
         return { ok: true, dryRun: true, screenshot: await acc.shot(page, 'dryrun') };

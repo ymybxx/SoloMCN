@@ -27,6 +27,19 @@ export async function waitState(page, fn, { timeout = 15_000, soft = false, what
 // 网络请求停下来（上传、保存这类后台请求结束）；等不到也不报错
 export const settle = (page, timeout = 10_000) => page.waitForLoadState('networkidle', { timeout }).catch(() => {});
 
+// 只填不发：都填好了，停在点发布之前，把窗口交给人。人检查后自己点了发布（success 等到了）算发出去了；
+// 人直接关掉窗口算没发。最多等 2 小时，过了就关窗口
+export const HANDOVER_MS = 2 * 3600_000;
+export async function handOver(ctx, page, success, log) {
+  log('都填好了，没有点发布：在弹出的窗口里检查一遍，没问题就自己点发布；不想发了直接关掉窗口');
+  await page.bringToFront().catch(() => {});
+  const closed = new Promise((r) => { ctx.once('close', () => r('closed')); page.once('close', () => r('closed')); });
+  const published = success().then(() => 'published', () => 'waiting');
+  const r = await Promise.race([closed, published, sleep(HANDOVER_MS).then(() => 'timeout')]);
+  log(r === 'published' ? '你点了发布，已经发出去了' : r === 'closed' ? '窗口关掉了，这次没发' : '等了 2 小时没发，窗口已关闭');
+  return { ok: true, fillOnly: true, published: r === 'published' };
+}
+
 // 普通输入框：标准填充，读回来核对，不一致再填一次
 export async function fillChecked(locator, value, what = '输入框') {
   for (let i = 0; i < 2; i++) {

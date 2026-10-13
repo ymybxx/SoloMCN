@@ -3,7 +3,7 @@
 // 页面结构最初参考开源项目 social-auto-upload，之后按实际页面校正过；抖音改版后这里的选择器要跟着改。
 // 登录、检查、解绑这些各平台通用的部分在 browser.js。
 import fs from 'node:fs';
-import { createBrowserAccounts, waitState, settle, fillChecked, insertChecked } from './browser.js';
+import { createBrowserAccounts, handOver, HANDOVER_MS, waitState, settle, fillChecked, insertChecked } from './browser.js';
 
 const CREATOR = 'https://creator.douyin.com/';
 const UPLOAD_URL = 'https://creator.douyin.com/creator-micro/content/upload';
@@ -28,7 +28,7 @@ export function createDouyin({ dataDir }) {
   async function publish(accountId, info, log) {
     acc.ensureBound(accountId);
     if (!fs.existsSync(info.mp4)) throw new Error(`找不到视频文件 ${info.mp4}`);
-    const ctx = await acc.openProfile(accountId);
+    const ctx = await acc.openProfile(accountId, info.fillOnly ? false : undefined);
     const page = ctx.pages()[0] || (await ctx.newPage());
     acc.unblock(page, log);
     try {
@@ -182,6 +182,7 @@ export function createDouyin({ dataDir }) {
 
       log('点击发布');
       const btn = page.getByRole('button', { name: '发布', exact: true });
+      if (info.fillOnly) return await handOver(ctx, page, () => page.waitForURL(/creator-micro\/content\/manage/, { timeout: HANDOVER_MS }), log);
       if (info.dryRun) {
         log('试运行：停在点发布之前');
         return { ok: true, dryRun: true, screenshot: await acc.shot(page, 'dryrun') };

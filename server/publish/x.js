@@ -3,7 +3,7 @@
 // 登录、检查、解绑这些各平台通用的部分在 browser.js；和 Google 一样，登录窗口不开远程调试端口。
 // 这里发的是用户自己绑定的账号，和读推特用的号池无关。
 import fs from 'node:fs';
-import { createBrowserAccounts, waitState, insertChecked } from './browser.js';
+import { createBrowserAccounts, handOver, HANDOVER_MS, waitState, insertChecked } from './browser.js';
 
 const HOME = 'https://x.com/home';
 const COMPOSE = 'https://x.com/compose/post';
@@ -49,7 +49,7 @@ export function createX({ dataDir }) {
     acc.ensureBound(accountId);
     if (!fs.existsSync(info.mp4)) throw new Error(`找不到视频文件 ${info.mp4}`);
     const text = buildTweet(info.desc || info.title, info.tags);
-    const ctx = await acc.openProfile(accountId);
+    const ctx = await acc.openProfile(accountId, info.fillOnly ? false : undefined);
     const page = ctx.pages()[0] || (await ctx.newPage());
     acc.unblock(page, log);
     try {
@@ -78,6 +78,7 @@ export function createX({ dataDir }) {
       await waitState(page, () => !!document.querySelector('[data-testid="attachments"] video, [data-testid="attachments"] [data-testid*="video" i]'), { timeout: 10_000, soft: true });
 
       log('点击发布');
+      if (info.fillOnly) return await handOver(ctx, page, () => Promise.race([page.locator('[data-testid="toast"]').first().waitFor({ state: 'visible', timeout: HANDOVER_MS }), box.waitFor({ state: 'detached', timeout: HANDOVER_MS })]), log);
       if (info.dryRun) {
         log('试运行：停在点发布之前');
         return { ok: true, dryRun: true, screenshot: await acc.shot(page, 'dryrun') };
