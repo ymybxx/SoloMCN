@@ -2149,7 +2149,7 @@ document.addEventListener('click',e=>{
     case 'lab-slim':labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/slim`,r=>`瘦身完成，腾出 ${fmtSize(r.freed)}`);break;
     case 'lab-rm':arm(b,'确认删除',()=>labCall('POST',`/api/lab/labs/${encodeURIComponent(id)}/remove`,r=>`已删除，腾出 ${fmtSize(r.freed)}`));break;
     case 'lab-cleanup':S.labCleaning=true;render();labCall('POST','/api/lab/cleanup',r=>r.done.length?`清理了 ${r.done.length} 项`:'没有需要清理的').finally(()=>{S.labCleaning=false;render()});break;
-    case 'fu-toggle':e.preventDefault();S.fuOpen=S.fuOpen===id?null:id;render();break;
+    case 'fu-toggle':e.preventDefault();S.fuOpen=S.fuOpen===id?null:id;if(S.open)renderDrawer();else render();break;
     case 'run-followup':{const text=($('#fu-'+id)?.value||'').trim();if(!text){toast('先写要追加的要求');break}b.disabled=true;
       api('POST',`/api/agent/runs/${encodeURIComponent(id)}/followup`,{text}).then(()=>{S.fuText={...(S.fuText||{}),[id]:''};S.fuOpen=null;toast('Claude 接着做了')},e=>{b.disabled=false;toast(e.message||'启动失败')});break}
     case 'yt-td':ytTeardown(id);break;
