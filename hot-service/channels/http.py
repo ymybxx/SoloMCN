@@ -17,6 +17,20 @@ def client() -> httpx.AsyncClient:
     return _client
 
 
+async def reset_client() -> None:
+    """连接池卡死时丢掉旧客户端，下一次请求新建一个。
+
+    电脑睡眠唤醒后，超时被取消的请求可能没把连接还回池子，池子占满后每个请求都报 PoolTimeout，不会自己好。
+    """
+    global _client
+    old, _client = _client, None
+    if old is not None:
+        try:
+            await old.aclose()
+        except Exception:  # noqa: BLE001 — 旧连接本来就是坏的
+            pass
+
+
 async def get_json(url: str, headers: dict | None = None):
     res = await client().get(url, headers=headers or {})
     res.raise_for_status()

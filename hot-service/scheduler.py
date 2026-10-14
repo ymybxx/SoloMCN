@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
+from channels.http import reset_client
 from db import DB
 
 RUN_TIMEOUT_SEC = 15 * 60  # 单次运行最长时间，超过算失败
@@ -125,6 +126,8 @@ class Scheduler:
         except Exception as e:  # noqa: BLE001 — 记下来，下一轮照常跑
             error = (f"{type(e).__name__}: {e}" if str(e) else type(e).__name__)[:500]
             await self.db.execute("update runs set finished_at = ?, error = ? where id = ?", time.time(), error, run_id)
+            if "PoolTimeout" in error:
+                await reset_client()
             return {"channel": channel_id, "count": 0, "error": error}
         finally:
             self.running.discard(channel_id)
