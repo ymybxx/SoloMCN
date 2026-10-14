@@ -84,6 +84,9 @@ function syncDrawer(){
   const id=S.open,it=local.items[id];if(!it||!S.draft)return;
   if(typeof it.script==='string'&&it.script!==S.draft.script&&!saveTimers.script&&!(S.gen&&S.gen.kind==='script')&&document.activeElement?.id!=='dScript'){
     S.draft.script=it.script;const t=$('#dScript');if(t)t.value=it.script}
+  // 标题、钩子、概要、创作说明被别处改了（Claude、另一个页面），没在改它们时跟着更新
+  for(const [f,el] of [['title','dTitle'],['hook','dHook'],['angle','dAngle'],['notes','dNotes']]){
+    if(typeof it[f]==='string'&&it[f]!==S.draft[f]&&!saveTimers[f]&&document.activeElement?.id!==el){S.draft[f]=it[f];const t=$('#'+el);if(t)t.value=it[f]}}
   const rs=itemRun('script',id),rc=itemRun('check',id),rv=itemRun('video',id),rr=itemRun('revise',id),re=itemRun('research',id);
   const sig=drawerSigOf(id,it);
   const a=document.activeElement;const typing=a&&$('#drawerRoot').contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
@@ -1951,7 +1954,8 @@ function setStage(k){
 async function agentItemTask(task,extra={}){
   const id=S.open;if(!id)return;flushSaves();
   try{
-    await store.update('items',id,{title:S.draft.title,hook:S.draft.hook,angle:S.draft.angle,script:S.draft.script,updatedAt:Date.now()});
+    // 只等手上没存完的修改存好（同一张卡片的保存按顺序排队）；不把打开详情时那一版的标题、钩子写回去，免得盖掉别处刚改的
+    await store.update('items',id,{updatedAt:Date.now()});
     await api('POST','/api/agent/run',{task,itemId:id,...extra});
     toast(task==='research'?'Claude 开始调研，一般 3–10 分钟，报告会存到这张卡片上':task==='script'?(extra.feedback?'Claude 开始按意见改脚本，改完会自动存回':'Claude 开始写脚本，写完会自动存回，可以先去做别的'):task==='video'?'Claude 开始生成视频，一般要 20–60 分钟，可以先去做别的':'Claude 开始预审');
   }catch(e){toast(e.message||'启动失败')}
