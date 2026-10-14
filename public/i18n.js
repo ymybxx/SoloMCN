@@ -32,7 +32,7 @@
     '出错': 'Error', '正常': 'OK', '运行中': 'Running', '正在启动…': 'Starting…', '正在读取…': 'Loading…', '读取中…': 'Loading…',
     '读取失败': 'Load failed', '操作': 'Actions', '操作失败': 'Action failed', '启动失败': 'Failed to start', '生成': 'Generate',
     '生成中': 'Generating', '生成中…': 'Generating…', '生成失败': 'Generation failed', '重新生成': 'Regenerate',
-    '检查': 'Check', '检查中…': 'Checking…', '检查失败': 'Check failed', '管理': 'Manage', '说明': 'Notes', '备注': 'Notes',
+    '检查': 'Check', '检查中…': 'Checking…', '检查失败': 'Check failed', '管理': 'Manage', '说明': 'Notes', '备注': 'Notes', '创作说明': 'Brief', '调研、写脚本、生成视频都会读这里': 'Research, scripting and video generation all read this', '这条想怎么做：大纲、主角、画风、时长、素材链接……': 'How this one should be made: outline, lead, style, length, links…',
     '名称': 'Name', '代号': 'Code', '颜色': 'Color', '平台': 'Platforms', '标题': 'Title', '描述': 'Description', '正文': 'Body',
     '简介': 'Description', '话题': 'Hashtags', '标签': 'Tags', '时长': 'Duration', '视频': 'Video', '截图': 'Screenshot',
     '新': 'New', '更新': 'updated', '注意': 'Caution', '避开': 'Avoid', '通过': 'Pass',

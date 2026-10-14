@@ -1933,7 +1933,7 @@ function renderDrawer(){
         </div>
       </div>
       <div class="blk">
-        <div class="field"><label for="dNotes">备注</label><textarea id="dNotes" rows="3" placeholder="素材链接、制作备注、复盘想法">${esc(d.notes)}</textarea></div>
+        <div class="field"><label for="dNotes">创作说明</label><p class="hint">调研、写脚本、生成视频都会读这里</p><textarea id="dNotes" rows="3" placeholder="这条想怎么做：大纲、主角、画风、时长、素材链接……">${esc(d.notes)}</textarea></div>
       </div>
       <div><button class="btn danger" data-act="del-item">删除这条内容</button></div>
       </div>
