@@ -175,6 +175,8 @@ const TASKS = {
 // 自我进化开着时，每次运行的提示里多一段：遇到坑就直接改进对应的技能（跑完平台对比、记一条技能改动）
 // 找文件别在整个家目录里大范围搜：会碰到别的 App 的私有文件夹，macOS 会弹窗问用户要不要允许
 const WHERE_TO_LOOK = `找文件只在工作台项目目录（${ROOT}）和任务里明确给出的位置找。不要在整个家目录、~/Library、/ 这类大范围里 find、grep、ls -R：会碰到别的 App 的数据，系统会弹窗打扰用户。`;
+// 无人值守的运行在最后一条回复后就结束了：还在后台跑的子代理、命令没人等，结论也没人接着用（曾经因此做完视频没登记）
+const FOREGROUND = '子代理（Agent）和命令都在前台跑完再往下走，不要放到后台（run_in_background）。这次运行在你最后一条回复之后就结束，后台还在跑的东西没人等、结果也没人接着处理。';
 const EVOLVE = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，做完后直接改对应技能的文件（.claude/skills/<技能名>/ 下）：做法的坑改做法技能，工具的坑改工具技能，通用流程的问题改流程技能。要改，不要只往后追加：同主题的合并，过时的删掉；SKILL.md 保持简短，细节放附录。只为以后的运行改，不为了这一次临时改。最后在汇报里单独一行写「技能改动：改了什么、为什么」。';
 
 const TOOL_NAMES = {
@@ -502,7 +504,7 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet
       ['-p', prompt, ...(resumeSession ? ['--resume', resumeSession] : []),
         '--model', modelFor(store, task), '--effort', effortFor(store, task), '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--max-turns', String(t.maxTurns),
-        '--append-system-prompt', [LANG_PROMPTS[uiLang()], CONTENT_OUTPUT_POLICY, t.tools !== '' ? WHERE_TO_LOOK : '', t.tools !== '' && skills?.settings().evolve ? EVOLVE : '', cred.prompt].filter(Boolean).join('\n'),
+        '--append-system-prompt', [LANG_PROMPTS[uiLang()], CONTENT_OUTPUT_POLICY, t.tools !== '' ? WHERE_TO_LOOK : '', t.tools !== '' ? FOREGROUND : '', t.tools !== '' && skills?.settings().evolve ? EVOLVE : '', cred.prompt].filter(Boolean).join('\n'),
         '--permission-mode', 'dontAsk', '--tools', t.tools ?? ALL_TOOLS.join(','),
         ...(t.tools === '' ? [] : ['--allowedTools', ALLOWED_TOOLS.join(',')]),
         ...(t.schema ? ['--json-schema', JSON.stringify(t.schema)] : [])],
