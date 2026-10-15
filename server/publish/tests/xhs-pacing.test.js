@@ -11,11 +11,14 @@ mock.module('../browser.js', {
       ensureBound() {},
       openProfile: async () => current.context,
       shot: async () => 'local-fixture.png',
+      unblock() {},
     }),
     waitState: async () => true,
     settle: async () => { current.events.push('cover-settled'); },
     fillChecked: async () => { current.events.push('title-filled'); },
     insertChecked: async () => { current.events.push('body-filled'); },
+    handOver: async () => {},
+    HANDOVER_MS: 0,
   },
 });
 mock.module('../pacing.js', {

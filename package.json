@@ -10,7 +10,8 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "dev": "node --watch server/index.js",
+    "test": "node --test --experimental-test-module-mocks server/publish/tests"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
