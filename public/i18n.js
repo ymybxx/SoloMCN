@@ -387,7 +387,7 @@
     '排队中': 'Queued', 'Claude 在改…': 'Claude is editing…', '等你确认': 'Waiting for you', '已生效': 'Applied', '没要': 'Declined', '已撤回': 'Reverted', '没做完': 'Not finished',
     '通过': 'Approve', '不要了': 'Decline', '再改改': 'Revise', '撤回': 'Revert', '确认撤回': 'Confirm revert', '重试': 'Retry', '看对比': 'View diff', '收起对比': 'Hide diff',
     '想改进什么，说一句': 'What should improve? Say it in a sentence', '交给 Claude': 'Hand it to Claude', '想到什么写什么': 'Write whatever comes to mind',
-    '自我进化': 'Self-improvement', '开着': 'On', '现在整理一下': 'Tidy up now', '哪些改动要先给你看': 'Which changes you review first', '直接生效（能撤回）': 'Apply right away (revertible)', '先给我看': 'Show me first',
+    '技能怎么改': 'How skills change', '整理一下': 'Tidy up', '技能只在你提要求时改：在总控台或这里写想法、点「整理一下」，Claude 在草稿里改好，你看过对比点通过才生效。生成、修改视频这些运行不会改技能。': 'Skills change only when you ask: write an idea here or on the dashboard, or click "Tidy up", and Claude drafts the change; it applies after you review the diff and approve. Runs such as generating or revising videos never change skills.', '出厂更新（有冲突的总是先给你看）': 'Factory updates (conflicts always wait for you)', '直接换上（能撤回）': 'Apply right away (revertible)', '自我进化': 'Self-improvement', '开着': 'On', '现在整理一下': 'Tidy up now', '哪些改动要先给你看': 'Which changes you review first', '直接生效（能撤回）': 'Apply right away (revertible)', '先给我看': 'Show me first',
     '待处理': 'To handle', '最近的改动': 'Recent changes', '没有要处理的改动。': 'Nothing to handle.', '还没有改动记录。': 'No changes yet.', '这个技能的改动': 'Changes to this skill',
     '启用': 'Enabled', '有改动没保存': 'Unsaved changes', '放弃改动': 'Discard', '恢复出厂': 'Restore factory version', '自己加的': 'Added by you', '改过': 'Edited', '出厂': 'Factory',
     '实践占用空间': 'Practice storage', '经验本': 'Lab notes', '立即清理': 'Clean up now', '清理中…': 'Cleaning…', '共用工具箱': 'Shared toolbox',
