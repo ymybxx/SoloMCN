@@ -1085,4 +1085,26 @@ server.registerTool(
   tool(async (body) => call('POST', '/api/lab/toolbox', body)),
 );
 
+server.registerTool(
+  'edit_skill',
+  {
+    title: '改技能',
+    description:
+      '自我进化：把这次运行发现的坑、更好的做法改进在用的技能里。技能文件在 .claude/skills/<技能名>/ 下，可以直接读；' +
+      '但不要用 Edit、Write 或命令去改它们（无人值守的运行没有权限写那里），一律用这个工具改，由工作台写进去，运行结束后记成一条技能改动、能撤回。' +
+      '改一处：给 old_string（原样照抄现在的内容，要在文件里唯一）和 new_string；新建或整份重写：给 content。',
+    inputSchema: {
+      skill: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/).describe('技能名，比如 make-video'),
+      file: z.string().max(200).optional().describe('技能目录里的相对路径，默认 SKILL.md，比如 scripts/assemble.mjs'),
+      old_string: z.string().max(20000).optional().describe('要替换的原文，原样照抄'),
+      new_string: z.string().max(20000).optional().describe('替换成的内容'),
+      content: z.string().max(100000).optional().describe('整份文件内容（新建文件或整份重写时用，和 old_string 二选一）'),
+    },
+  },
+  tool(async (body) => {
+    if (!process.env.WORKBENCH_RUN_ID) throw new Error('这里不是工作台启动的运行，不能改技能');
+    return call('POST', '/api/skill-run-edit', { ...body, runId: process.env.WORKBENCH_RUN_ID });
+  }),
+);
+
 await server.connect(new StdioServerTransport());

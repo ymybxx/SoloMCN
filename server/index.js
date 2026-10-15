@@ -272,6 +272,12 @@ async function handleApi(req, res, parts) {
     if (method === 'GET') return sendJson(res, 200, skills.settings());
     if (method === 'PUT') return sendJson(res, 200, await skills.setSettings(await readBody(req)));
   }
+  // 运行中改技能（workbench 的 edit_skill 工具）：只给还在跑的运行用
+  if (parts[0] === 'skill-run-edit' && method === 'POST') {
+    const b = await readBody(req);
+    if (store.get('agentRuns', String(b.runId || ''))?.status !== 'running') return sendError(res, 400, 'bad_input', '找不到这次运行，或者已经结束了');
+    return sendJson(res, 200, await skills.runEdit(b.runId, b));
+  }
   if (parts[0] === 'skill-changes') {
     const q = new URL(req.url, 'http://localhost').searchParams;
     if (parts.length === 1 && method === 'GET') return sendJson(res, 200, skills.listChanges({ skill: q.get('skill') || undefined, limit: Math.min(200, Number(q.get('limit')) || 50) }));

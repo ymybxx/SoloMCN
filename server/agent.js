@@ -177,7 +177,7 @@ const TASKS = {
 const WHERE_TO_LOOK = `找文件只在工作台项目目录（${ROOT}）和任务里明确给出的位置找。不要在整个家目录、~/Library、/ 这类大范围里 find、grep、ls -R：会碰到别的 App 的数据，系统会弹窗打扰用户。`;
 // 无人值守的运行在最后一条回复后就结束了：还在后台跑的子代理、命令没人等，结论也没人接着用（曾经因此做完视频没登记）
 const FOREGROUND = '子代理（Agent）和命令都在前台跑完再往下走，不要放到后台（run_in_background）。这次运行在你最后一条回复之后就结束，后台还在跑的东西没人等、结果也没人接着处理。';
-const EVOLVE = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，做完后直接改对应技能的文件（.claude/skills/<技能名>/ 下）：做法的坑改做法技能，工具的坑改工具技能，通用流程的问题改流程技能。要改，不要只往后追加：同主题的合并，过时的删掉；SKILL.md 保持简短，细节放附录。只为以后的运行改，不为了这一次临时改。最后在汇报里单独一行写「技能改动：改了什么、为什么」。';
+const EVOLVE = '自我进化开着：这次做的时候，如果遇到了技能里没写到的坑、写错的地方，或者找到了明显更好的做法，做完后用 workbench 的 edit_skill 工具改对应的技能（技能文件在 .claude/skills/<技能名>/ 下，可以读；但这次运行没有权限直接写那里，不要用 Edit、Write、cp、sed 这类方式改，被拒绝了也不要换别的办法绕）：做法的坑改做法技能，工具的坑改工具技能，通用流程的问题改流程技能。要改，不要只往后追加：同主题的合并，过时的删掉；SKILL.md 保持简短，细节放附录。只为以后的运行改，不为了这一次临时改；这次要用的脚本改动，先复制到这次的工作目录里改着用。最后在汇报里单独一行写「技能改动：改了什么、为什么」。';
 
 const TOOL_NAMES = {
   get_feed: '读取渠道素材',
@@ -197,6 +197,7 @@ const TOOL_NAMES = {
   save_research: '保存调研报告',
   save_series: '保存系列',
   lab_ask_claude: '问 Claude',
+  edit_skill: '改技能',
   x_search: '搜索推特',
   x_user_tweets: '读取推特用户',
   x_list_timeline: '读取推特列表',
@@ -498,7 +499,7 @@ export function createAgent({ store, cwd, lab, skills, hooks = {} }) {
     // 只对工作台启动的运行生效，你自己的终端不受影响。npm 和通用缓存（XDG）不改：出片用的 HyperFrames 和它的 Chrome 已经缓存在默认位置，改了要重下一遍
     const programs = path.join(cwd, 'data', 'programs');
     const downloads = { HF_HOME: path.join(programs, 'huggingface'), TORCH_HOME: path.join(programs, 'torch'), PIP_CACHE_DIR: path.join(programs, 'cache', 'pip') };
-    const env = { ...cliEnv(), ...downloads, ...cred.env, MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000) };
+    const env = { ...cliEnv(), ...downloads, ...cred.env, MCP_TOOL_TIMEOUT: String(ASK_TIMEOUT_MS + 5 * 60_000), WORKBENCH_RUN_ID: id };
     const proc = spawn(
       claudeBin(),
       // 每次都指定模型（页面「设置」里选的）：不指定就用账号当时的默认模型，Opus 额度用完会悄悄换成 Sonnet

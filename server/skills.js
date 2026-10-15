@@ -365,6 +365,30 @@ export function createSkills({ root, store }) {
       fs.rmSync(snap, { recursive: true, force: true });
     }
   }
+  // 运行中改技能：Claude Code 不让无人值守的运行直接写 .claude/ 下的文件，所以由工作台替它写到在用的技能里。
+  // 不同步这次运行自己的快照，跑完对比时就算成这次运行改的（按「运行时改的」规则记一条改动，能撤回）
+  async function runEdit(runId, { skill, file, old_string: oldStr, new_string: newStr, content } = {}) {
+    if (!settings().evolve) throw bad('自我进化关着，这次不改技能');
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(runId || '') || !fs.existsSync(runDir(runId))) throw bad('这类运行不改技能');
+    const name = check(skill), rel = checkRel(file || 'SKILL.md');
+    if (!fs.existsSync(path.join(LIVE, name, 'SKILL.md'))) throw bad(`没有技能 ${name}`, 404);
+    if (settings().disabled.includes(name)) throw bad('这个技能关着，不改');
+    const p = path.join(LIVE, name, rel), cur = buf(p);
+    let text;
+    if (typeof content === 'string') text = content;
+    else {
+      if (cur === null) throw bad(`${name}/${rel} 不存在；新建文件请给 content`, 404);
+      if (typeof oldStr !== 'string' || !oldStr || typeof newStr !== 'string') throw bad('给 old_string 和 new_string，或者给整份 content');
+      const now = cur.toString('utf8'), n = now.split(oldStr).length - 1;
+      if (n !== 1) throw bad(n ? `old_string 出现了 ${n} 次，多带几行上下文让它唯一` : 'old_string 在文件里找不到（先读一遍现在的内容，原样照抄）');
+      text = now.replace(oldStr, () => newStr);
+    }
+    if (rel === 'SKILL.md' && !text.trim()) throw bad('SKILL.md 不能是空的');
+    const b = Buffer.from(text.endsWith('\n') ? text : text + '\n');
+    writeFile(p, b);
+    syncRunSnapshots(path.join(name, rel), b, runId);
+    return { ok: true, file: `${name}/${rel}`, message: '已改好，运行结束后记成一条技能改动' };
+  }
   // 技能在运行之外被改了（你在页面上改、通过或撤回一条改动、另一次运行改的）：正在跑的运行的快照也跟着改，免得算成它们改的
   function syncRunSnapshots(rel, b, exceptRun) {
     for (const d of fs.existsSync(CHANGES) ? fs.readdirSync(CHANGES).filter((x) => x.startsWith('run-') && x !== `run-${exceptRun}`) : []) {
@@ -533,7 +557,7 @@ export function createSkills({ root, store }) {
   return {
     sync, list, get, readSkillFile, writeSkillFile, create, remove, reset, setEnabled, settings, setSettings,
     listChanges, diff, apply, reject, revert, refine, idea, suggest, tidy, maybeTidy, nextQueued, markWorking, finishDraft,
-    draftDir, mergeDirs, runBegin, runEnd, historyContent, rec, LIVE,
+    draftDir, mergeDirs, runBegin, runEnd, runEdit, historyContent, rec, LIVE,
   };
 }
 
