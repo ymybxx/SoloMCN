@@ -8,21 +8,49 @@ https://github.com/user-attachments/assets/3db8f9d6-2435-43d9-a3a7-a553002618d9
 
 
 
-### Turn Claude Code into your short-video team
+### A one-person MCN: turn Claude Code into your short-video team
 
-**Don't build workflows. Let Claude do the work. From China's trending lists and hot posts on X to Douyin, Xiaohongshu, Bilibili, YouTube and X, one person runs a whole channel network, and every step is done by Claude itself.**
+**Claude is the employee and SoloMCN is its workplace: material kept ready, know-how kept as skills, the decisions left to you. From trending topics, hands-on research and storyboards to finished videos published on Douyin, Xiaohongshu, Bilibili, YouTube and X, every step is done by Claude itself.**
 
 [中文](README.md) · MIT License · Powered by [Claude Code](https://claude.com/claude-code)
 
 </div>
 
-![SoloMCN workbench](docs/images/hero.png)
+## What it has made
 
-## A different way to build AI software
+![An AI's origin story](docs/images/v0.6/tulpa-worlds.jpg)
 
-Most AI apps start with a workflow: drag nodes, wire them up, hard-code a prompt at every step, plug in a pile of APIs. The AI can only ever do what the workflow allows.
+A 3-minute animation in which an AI tells how it learned to talk, walking through cave paintings, Egyptian murals, ink landscapes, Van Gogh, pop art and Ghibli. SoloMCN used to make only explainers and real-footage edits; this animation craft was added with one sentence, see "Learn a new skill from one sentence" below.
 
-SoloMCN goes the other way: **zero workflow building, drive Claude directly.**
+![Hands-on research](docs/images/v0.6/research-hands-on.jpg)
+
+"Delete the source and let AI recover it from the binary" and "What happens after you press Enter": Claude ran the experiments itself during research, and the process became the footage. The presenter on the right is a full set of expressions generated from one character image.
+
+## Highlights
+
+### Learn a new skill from one sentence, and keep the know-how
+
+Using someone else's skill usually means installing it yourself and using it once in a chat. The video gets made, but how it fits your voice-over, captions, series style and publishing ends up scattered across chat history and throwaway scripts, and next time you start over.
+
+In SoloMCN you write one line on the dashboard:
+
+> Install github.com/alchaincyf/huashu-art-motion, create a craft skill animated-story, and set up an animation series for the main channel
+
+Claude installs it, then writes an "animated story" craft: how scripting, video generation and revisions use it, and how voice-over, music and captions plug in. It wires the craft into the pipeline and creates the series. The changes wait in a draft until you've read the line-by-line diff and approved them.
+
+![One sentence becomes a craft](docs/images/v0.6/skills-idea.png)
+
+Every note you give on the craft afterwards improves the craft itself, and every change can be diffed and reverted. The next animation uses the improved version.
+
+### Research gets hands-on
+
+Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures pages and official videos as footage. Anything it can verify by hand it does on the spot: writing and running code, installing tools, actually generating with online AI tools, and recording the process as footage.
+
+To explain AI decompilation, for example, it generated a random 79-line C game, compiled it with -O2, stripped the symbols, sealed the source, and gave the AI only the binary. The local Ghidra had no Apple Silicon decompiler, so it built one. In 96 seconds the AI wrote C that compiled, matched the original on two thousand random inputs and three thousand long games, and both versions scored 125.
+
+### No workflows: let Claude do the work
+
+Most AI apps start with a workflow: drag nodes, wire them up, hard-code a prompt at every step, plug in a pile of APIs. The AI can only ever do what the workflow allows. SoloMCN goes the other way: **zero workflow building, drive Claude directly.**
 
 |  | Workflow-built AI apps | SoloMCN |
 |---|---|---|
@@ -34,7 +62,7 @@ SoloMCN goes the other way: **zero workflow building, drive Claude directly.**
 
 The workbench is Claude's workplace and does three things: **keeps material ready** (trending lists, X, YouTube and Bilibili fetched on a schedule, with your logins), **keeps experience and skills** (how each step is done lives in standard Claude Code skills, and every change can be diffed, reverted and only applies after you approve), and **hands over tools while leaving you the decisions** (read and write channels and trends, capture web pages, publish to each platform; you pick topics, approve skill changes and decide what to publish). The real work is done by Claude Code: it researches on the web, writes code to build the video, checks the frames and fixes its own mistakes.
 
-### Things that actually happened
+#### Things that actually happened
 
 While making the demo video in this README:
 
@@ -43,16 +71,6 @@ While making the demo video in this README:
 - **It makes its own visuals.** The characters are original vector art it drew. The GitHub pages, news report and scholar's blog cut into the video are real pages it captured during research, with highlighter marks and red circles added.
 
 None of this was a pre-built flow. Claude worked it out on the spot.
-
-### What it has made
-
-After one sentence installed the open-source [huashu-art-motion](https://github.com/alchaincyf/huashu-art-motion) animation skill and created an "animated story" craft, SoloMCN made a 3-minute animation in which an AI tells how it learned to talk, walking through cave paintings, Egyptian murals, ink landscapes, Van Gogh, pop art and Ghibli.
-
-![An AI's origin story](docs/images/v0.6/tulpa-worlds.jpg)
-
-Research gets hands-on: it decompiled a game it wrote itself and measured what one bug fix costs, and the process became the footage.
-
-![Hands-on research](docs/images/v0.6/research-hands-on.jpg)
 
 ## From trend to publish, all handed to Claude
 
@@ -65,7 +83,6 @@ Trending lists + X ─→ Curate topics ─→ Ideas per channel ─→ Sourced 
 Every arrow is a Claude Code run. You watch each step live and can interject mid-run. You decide at three points: which idea to make, whether the video is good, whether to publish.
 
 - **A one-person MCN.** Several channels, each with several series. Audience, tone, voice and visual style live on the series, so channels don't overlap.
-- **Research with sources.** Before writing, Claude looks up real prices, capabilities, steps and counter-arguments, each with a source, and captures pages and official videos as footage. Anything it can verify by hand it does on the spot (writing and running code, actually generating with online tools) and records the process as footage.
 - **See what's hot overseas.** A built-in X (Twitter) source catches new AI formats before they take off in China; see "The X source" below. There's also a YouTube source: add a free YouTube Data API key under Sources → YouTube and it regularly fetches the most-viewed recent videos for your keywords, while Claude can search videos and read descriptions and top comments on its own.
 - **Edit real footage.** For idol stages, concert fancams or variety-show moments, research searches Bilibili, finds the moments viewers react to most from danmaku density, and clips whole fancams as footage. The video step aligns several performances of the same song to one audio track and cuts on the beat, for an outfit-change edit or a stage montage. Log in to a secondary Bilibili account under Channels → Bilibili popular videos to get 1080P clips.
 - **Learn from hits, make your own.** Click "Teardown" on a YouTube video in the feed and Claude reads its captions, description and top comments, then writes why it works, how it's structured, the hook, what commenters argue about, and what may or may not be borrowed. Captions and the teardown stay with the video and are reused by curation, ideas, research and scripts; ideas take a new audience and angle, and the script and visuals are our own.
@@ -74,7 +91,7 @@ Every arrow is a Claude Code run. You watch each step live and can interject mid
 - **Bring your own video.** Pick a local file (not copied). Claude "watches" it (frames plus speech-to-text) and writes copy for each platform.
 - **English or Chinese UI.** Switch in Settings; Claude's progress notes follow. Content language follows each series: describe a series as English and its ideas, scripts, voice-over and copy come out in English.
 
-## The X source: see what hasn't taken off in China yet
+<details><summary><b>The X source: see what hasn't taken off in China yet</b></summary>
 
 Many new AI formats and tools go viral on X first, and it takes days or weeks before anyone in China makes videos about them. That gap is where short-video creators win. Most trend tools only read Chinese charts; SoloMCN reads X directly:
 
@@ -91,7 +108,11 @@ Many new AI formats and tools go viral on X first, and it takes days or weeks be
 
 > The pool searches X with the accounts' login cookies, which is against X's terms; accounts may be rate-limited or banned. Use spare accounts, not your main one.
 
+</details>
+
 ## Screenshots
+
+![SoloMCN workbench](docs/images/hero.png)
 
 | Ideas per channel | Research & footage |
 |---|---|
@@ -161,7 +182,7 @@ How each step is done lives in skills (standard Claude Code skills: a folder who
 | Kind | Skills | Responsible for |
 |---|---|---|
 | Flow | `curate-topics` `account-ideas` `research-topic` `write-script` `precheck-content` `make-video` `revise-video` `review-data` | The generic steps: curating, ideas, research, scripts, pre-checks, making and revising videos, analytics |
-| Craft | `explainer-video` `stage-montage` | How one kind of content is made at each step: explainer videos, real-footage edits (outfit-swap, stage mashups). A series picks its craft, or Claude picks per item |
+| Craft | `explainer-video` `stage-montage` | How one kind of content is made at each step: explainer videos, real-footage edits (outfit-swap, stage mashups). A series picks its craft, or Claude picks per item; crafts you add with one sentence (like the animated story above) live here too |
 | Tool | `voice-over` `transcribe` | Programs used in several places: voice-over, speech-to-text |
 
 Want sharper topics, shorter scripts or a different visual style? Edit the skill. No code involved. Or type an idea on the dashboard, such as "add the channel watermark to every video": Claude finds the skills to change, shows you a line-by-line diff, and nothing changes until you approve. A new style is a new craft skill.
@@ -207,7 +228,7 @@ videos/            Generated video projects, never committed
 
 ## Credits
 
-Trending-list approach inspired by [TrendRadar](https://github.com/sansan0/TrendRadar), [newsnow](https://github.com/ourongxing/newsnow) and [DailyHotApi](https://github.com/imsyy/DailyHotApi). Videos are rendered with [HyperFrames](https://github.com/heygen-com/hyperframes) (Apache-2.0).
+Trending-list approach inspired by [TrendRadar](https://github.com/sansan0/TrendRadar), [newsnow](https://github.com/ourongxing/newsnow) and [DailyHotApi](https://github.com/imsyy/DailyHotApi). Videos are rendered with [HyperFrames](https://github.com/heygen-com/hyperframes) (Apache-2.0). Animated stories use [huashu-art-motion](https://github.com/alchaincyf/huashu-art-motion) by Huashu (MIT).
 
 ## License
 
