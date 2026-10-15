@@ -32,7 +32,7 @@ SoloMCN goes the other way: **zero workflow building, drive Claude directly.**
 | What you configure | One API key per capability | One Claude subscription |
 | Changing the process | Edit nodes and code | Edit a paragraph |
 
-The workbench does just two things: **hands Claude its tools** (read and write channels and trends, capture web pages, publish to each platform) and **gives you a place to watch and decide**. The real work is done by Claude Code: it researches on the web, writes code to build the video, checks the frames and fixes its own mistakes.
+The workbench is Claude's workplace and does three things: **keeps material ready** (trending lists, X, YouTube and Bilibili fetched on a schedule, with your logins), **keeps experience and skills** (how each step is done lives in standard Claude Code skills, and every change can be diffed, reverted and only applies after you approve), and **hands over tools while leaving you the decisions** (read and write channels and trends, capture web pages, publish to each platform; you pick topics, approve skill changes and decide what to publish). The real work is done by Claude Code: it researches on the web, writes code to build the video, checks the frames and fixes its own mistakes.
 
 ### Things that actually happened
 
@@ -43,6 +43,16 @@ While making the demo video in this README:
 - **It makes its own visuals.** The characters are original vector art it drew. The GitHub pages, news report and scholar's blog cut into the video are real pages it captured during research, with highlighter marks and red circles added.
 
 None of this was a pre-built flow. Claude worked it out on the spot.
+
+### What it has made
+
+After one sentence installed the open-source [huashu-art-motion](https://github.com/alchaincyf/huashu-art-motion) animation skill and created an "animated story" craft, SoloMCN made a 3-minute animation in which an AI tells how it learned to talk, walking through cave paintings, Egyptian murals, ink landscapes, Van Gogh, pop art and Ghibli.
+
+![An AI's origin story](docs/images/v0.6/tulpa-worlds.jpg)
+
+Research gets hands-on: it decompiled a game it wrote itself and measured what one bug fix costs, and the process became the footage.
+
+![Hands-on research](docs/images/v0.6/research-hands-on.jpg)
 
 ## From trend to publish, all handed to Claude
 
