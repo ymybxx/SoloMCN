@@ -3,11 +3,11 @@
 // 记录每个技能是基于哪一版出厂版本装的（data/skills/base/<名字>/），用来判断「改过没有」和做三方合并。
 //
 // 技能的每一次变化都是一条「技能改动」（store 的 skillChanges），不管从哪来：
-//   idea 用户在总控台提的想法 / run 生成、修改视频时 Claude 直接改的 / suggest 其他运行提的建议 /
-//   update 出厂更新 / tidy 定期整理 / manual 用户在技能页自己改的
+//   idea 用户在总控台、技能页提的想法 / tidy 用户要求的整理 / update 出厂更新 / manual 用户在技能页自己改的
+//   （以前的 run、suggest 是运行自己改的、提的，已经去掉：运行不改技能，旧记录照常显示）
 // 改动前后的文件存在 data/skills/changes/<id>/before、after（只存变了的文件），能看逐行对比、能撤回。
-// 要 Claude 动手的改动（想法、建议、有冲突的出厂更新、整理）先在草稿里改（changes/<id>/draft，是全部技能的副本，
-// start 是开工时的样子），改完按设置直接生效或等用户确认；通过时按三方合并写回，期间技能被别处改过也不会丢。
+// 要 Claude 动手的改动（想法、整理、有冲突的出厂更新）先在草稿里改（changes/<id>/draft，是全部技能的副本，
+// start 是开工时的样子），改完等用户确认；通过时按三方合并写回，期间技能被别处改过也不会丢。
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -15,9 +15,9 @@ import { execFileSync } from 'node:child_process';
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,60}$/;
 const SKIP = new Set(['node_modules', '.git', '.DS_Store']);
-// 各来源的改动默认怎么处理：auto 直接生效（可撤回），confirm 等用户确认
-// suggest 来自能上网的运行（调研、精选……），网页里的内容可能借它混进技能，默认先过目
-export const DEFAULT_POLICY = { idea: 'confirm', run: 'auto', suggest: 'confirm', update: 'auto', tidy: 'auto' };
+// 技能只在用户提要求时改（总控台、技能页的想法，整理，再改改）：Claude 在草稿里改好，用户确认后才生效。
+// 运行（调研、写脚本、出片……）不改技能。出厂更新可以选直接换上，有冲突的总是先给用户看
+export const DEFAULT_POLICY = { update: 'auto' };
 const OPEN = ['queued', 'working', 'pending', 'failed'];
 
 export function createSkills({ root, store }) {
@@ -28,6 +28,8 @@ export function createSkills({ root, store }) {
   const CHANGES = path.join(root, 'data', 'skills', 'changes');
   const DISABLED = path.join(root, 'data', 'skills', 'disabled'); // 关掉的技能挪到这里，不占 Claude 的上下文
   fs.mkdirSync(CHANGES, { recursive: true });
+  // 以前运行开跑前存的技能快照（运行不再改技能），清掉
+  for (const d of fs.readdirSync(CHANGES)) if (d.startsWith('run-')) fs.rmSync(path.join(CHANGES, d), { recursive: true, force: true });
 
   const bad = (m, status = 400) => Object.assign(new Error(m), { status });
   const check = (name) => {
@@ -43,13 +45,13 @@ export function createSkills({ root, store }) {
   // ---------- 设置 ----------
   function settings() {
     const s = store.get('settings', 'skills') || {};
-    return { evolve: s.evolve !== false, policy: { ...DEFAULT_POLICY, ...(s.policy || {}) }, disabled: s.disabled || [], lastTidyAt: s.lastTidyAt || 0 };
+    return { policy: { update: s.policy?.update === 'confirm' ? 'confirm' : 'auto' }, disabled: s.disabled || [] };
   }
   async function setSettings(body = {}) {
     const cur = settings();
     const policy = { ...cur.policy };
     for (const k of Object.keys(DEFAULT_POLICY)) if (['auto', 'confirm'].includes(body.policy?.[k])) policy[k] = body.policy[k];
-    const next = { ...(store.get('settings', 'skills') || {}), evolve: typeof body.evolve === 'boolean' ? body.evolve : cur.evolve, policy };
+    const next = { ...(store.get('settings', 'skills') || {}), policy };
     await store.set('settings', 'skills', next);
     return settings();
   }
@@ -214,11 +216,11 @@ export function createSkills({ root, store }) {
       conflicts.push(f.path);
     }
     if (conflicts.length) throw bad(`这几个文件在这之后又被改过，合不上：${conflicts.join('、')}。先看看现在的版本再决定`, 409);
-    for (const [p, b] of plan) { writeFile(p, b); syncRunSnapshots(path.relative(LIVE, p), b); }
+    for (const [p, b] of plan) writeFile(p, b);
   }
   const dropWork = (id) => { for (const d of ['start', 'draft', 'old', 'new']) fs.rmSync(path.join(cdir(id), d), { recursive: true, force: true }); };
   // 有冲突、由 Claude 合的出厂更新总是先给用户看
-  const policyOf = (source, r) => (source === 'manual' ? 'auto' : source === 'update' && r?.conflicts?.length ? 'confirm' : settings().policy[source] || 'confirm');
+  const policyOf = (source, r) => (source === 'manual' ? 'auto' : source === 'update' && !r?.conflicts?.length ? settings().policy.update : 'confirm');
 
   async function apply(id) {
     const r = rec(id);
@@ -320,83 +322,10 @@ export function createSkills({ root, store }) {
     if (text.length < 2) throw bad('先写一句想改什么');
     return begin('idea', { idea: text, title: text.slice(0, 60) });
   }
-  // 其他运行（调研、精选……不能直接改文件的）提的建议：交给 Claude 判断、改进草稿
-  async function suggest({ skill, problem, suggestion, runId, itemId, task }) {
-    if (!settings().evolve) return { ok: false, message: '自我进化关着，这条建议没有记录' };
-    const text = [problem && `遇到的问题：${problem}`, suggestion && `建议：${suggestion}`].filter(Boolean).join('\n').slice(0, 3000);
-    if (!text) throw bad('写一下遇到了什么、建议怎么改');
-    const r = await begin('suggest', { title: String(problem || suggestion).slice(0, 60), suggestion: text, target: skill ? String(skill).slice(0, 60) : null, fromRun: runId || null, itemId: itemId || null, task: task || null });
-    return { ok: true, change: r.id, message: '已记下，稍后由 Claude 整理进技能' };
-  }
   async function tidy() {
     if (Object.values(store.all().skillChanges || {}).some((r) => r.source === 'tidy' && OPEN.includes(r.status))) throw bad('已经有一次整理在排队或等确认');
-    await patchSettings({ lastTidyAt: Date.now() });
     return begin('tidy', { title: '整理技能' });
   }
-  // 定期整理：自我进化开着、上次整理后又攒了 5 条以上改动、隔了一周以上
-  async function maybeTidy() {
-    const s = settings();
-    if (!s.evolve || Date.now() - s.lastTidyAt < 7 * 864e5) return null;
-    const n = Object.values(store.all().skillChanges || {}).filter((r) => r.status === 'applied' && ['run', 'suggest', 'idea'].includes(r.source) && (r.decidedAt || 0) > s.lastTidyAt).length;
-    if (n < 5) return null;
-    try { return await tidy(); } catch { return null; }
-  }
-
-  // 每次运行 Claude 都可以直接改在用的技能：开跑前存一份，跑完对比
-  const runDir = (runId) => path.join(CHANGES, `run-${runId}`);
-  function runBegin(runId) {
-    if (!settings().evolve || fs.existsSync(runDir(runId))) return;
-    copyDir(LIVE, runDir(runId));
-  }
-  async function runEnd(runId, meta = {}) {
-    const snap = runDir(runId);
-    if (!fs.existsSync(snap)) return null;
-    try {
-      const rels = changed(snap, LIVE);
-      if (!rels.length) return null;
-      const id = newId();
-      fs.mkdirSync(cdir(id), { recursive: true });
-      await save(id, { source: 'run', status: 'working', createdAt: Date.now(), fromRun: runId, files: [], title: '运行时改的', ...meta });
-      const r = await settle(id, snap, LIVE, { live: true });
-      // 同时在跑的其他运行：这些文件以现在的样子为准，免得算成它们改的
-      for (const rel of rels) syncRunSnapshots(rel, buf(path.join(LIVE, rel)), runId);
-      return r;
-    } finally {
-      fs.rmSync(snap, { recursive: true, force: true });
-    }
-  }
-  // 运行中改技能：Claude Code 不让无人值守的运行直接写 .claude/ 下的文件，所以由工作台替它写到在用的技能里。
-  // 不同步这次运行自己的快照，跑完对比时就算成这次运行改的（按「运行时改的」规则记一条改动，能撤回）
-  async function runEdit(runId, { skill, file, old_string: oldStr, new_string: newStr, content } = {}) {
-    if (!settings().evolve) throw bad('自我进化关着，这次不改技能');
-    if (!/^[A-Za-z0-9_-]{1,64}$/.test(runId || '') || !fs.existsSync(runDir(runId))) throw bad('这类运行不改技能');
-    const name = check(skill), rel = checkRel(file || 'SKILL.md');
-    if (!fs.existsSync(path.join(LIVE, name, 'SKILL.md'))) throw bad(`没有技能 ${name}`, 404);
-    if (settings().disabled.includes(name)) throw bad('这个技能关着，不改');
-    const p = path.join(LIVE, name, rel), cur = buf(p);
-    let text;
-    if (typeof content === 'string') text = content;
-    else {
-      if (cur === null) throw bad(`${name}/${rel} 不存在；新建文件请给 content`, 404);
-      if (typeof oldStr !== 'string' || !oldStr || typeof newStr !== 'string') throw bad('给 old_string 和 new_string，或者给整份 content');
-      const now = cur.toString('utf8'), n = now.split(oldStr).length - 1;
-      if (n !== 1) throw bad(n ? `old_string 出现了 ${n} 次，多带几行上下文让它唯一` : 'old_string 在文件里找不到（先读一遍现在的内容，原样照抄）');
-      text = now.replace(oldStr, () => newStr);
-    }
-    if (rel === 'SKILL.md' && !text.trim()) throw bad('SKILL.md 不能是空的');
-    const b = Buffer.from(text.endsWith('\n') ? text : text + '\n');
-    writeFile(p, b);
-    syncRunSnapshots(path.join(name, rel), b, runId);
-    return { ok: true, file: `${name}/${rel}`, message: '已改好，运行结束后记成一条技能改动' };
-  }
-  // 技能在运行之外被改了（你在页面上改、通过或撤回一条改动、另一次运行改的）：正在跑的运行的快照也跟着改，免得算成它们改的
-  function syncRunSnapshots(rel, b, exceptRun) {
-    for (const d of fs.existsSync(CHANGES) ? fs.readdirSync(CHANGES).filter((x) => x.startsWith('run-') && x !== `run-${exceptRun}`) : []) {
-      const p = path.join(CHANGES, d, rel);
-      if (b === null) fs.rmSync(p, { force: true }); else { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, b); }
-    }
-  }
-
   // 用户在技能页改一个文件：直接生效，记一条改动
   async function writeSkillFile(name, rel, content, { reason = '' } = {}) {
     check(name);
@@ -410,7 +339,6 @@ export function createSkills({ root, store }) {
     copyDir(path.join(LIVE, name), path.join(before, name));
     const b = Buffer.from(content.endsWith('\n') ? content : content + '\n');
     writeFile(path.join(LIVE, name, rel), b);
-    syncRunSnapshots(path.join(name, rel), b);
     await save(id, { source: 'manual', status: 'working', createdAt: Date.now(), files: [], title: reason ? String(reason).slice(0, 80) : `改了 ${name}/${rel}`, reason: String(reason || '').slice(0, 300) });
     const after = path.join(cdir(id), 'draft');
     copyDir(path.join(LIVE, name), path.join(after, name));
@@ -556,8 +484,8 @@ export function createSkills({ root, store }) {
 
   return {
     sync, list, get, readSkillFile, writeSkillFile, create, remove, reset, setEnabled, settings, setSettings,
-    listChanges, diff, apply, reject, revert, refine, idea, suggest, tidy, maybeTidy, nextQueued, markWorking, finishDraft,
-    draftDir, mergeDirs, runBegin, runEnd, runEdit, historyContent, rec, LIVE,
+    listChanges, diff, apply, reject, revert, refine, idea, tidy, nextQueued, markWorking, finishDraft,
+    draftDir, mergeDirs, historyContent, rec, LIVE,
   };
 }
 

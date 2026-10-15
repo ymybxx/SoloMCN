@@ -1597,7 +1597,7 @@ async function loadSkillFile(){
 const SKILL_KIND={flow:'流程',craft:'做法',tool:'工具'};
 const SKILL_KIND_NOTE={flow:'每个环节的通用步骤，工作台点按钮时调用',craft:'一种内容各环节具体怎么做，按系列或内容选用',tool:'几处都会用的程序和它的用法'};
 const skillPill=x=>!x.enabled?'<span class="pill"><i></i>关着</span>':x.origin==='custom'?'<span class="pill"><i></i>自己加的</span>':x.update?'<span class="pill warn"><i></i>出厂更新待合并</span>':x.modified?'<span class="pill ok"><i></i>改过</span>':'<span class="pill"><i></i>出厂</span>';
-const CHG_SRC={idea:'你的想法',run:'运行中改的',suggest:'运行中的建议',update:'出厂更新',tidy:'定期整理',manual:'你改的'};
+const CHG_SRC={idea:'你的想法',run:'运行中改的',suggest:'运行中的建议',update:'出厂更新',tidy:'整理',manual:'你改的'};
 const CHG_ST={queued:['排队中',''],working:['Claude 在改…','warn'],pending:['等你确认','warn'],applied:['已生效','ok'],rejected:['没要',''],reverted:['已撤回',''],failed:['没做完','bad']};
 const chgList=(filter)=>Object.entries(S.skillChanges||{}).map(([id,v])=>({id,...v})).filter(c=>c.status!=='empty'&&(!filter||filter(c))).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 const chgOpen=c=>['queued','working','pending','failed'].includes(c.status);
@@ -1637,18 +1637,14 @@ function ideaBox(id){
     <div class="actions"><button class="btn primary" data-act="skill-idea" data-k="${id}">交给 Claude</button></div></div>`;
 }
 function vChanges(){
-  const set=S.skillSet||{evolve:true,policy:{}};
+  const set=S.skillSet||{policy:{}};
   const open=chgList(chgOpen),done=chgList(c=>!chgOpen(c)).slice(0,30);
-  const pol=(k,n)=>`<label class="pol"><span>${n}</span><select data-skpol="${k}"><option value="auto" ${set.policy[k]==='auto'?'selected':''}>直接生效（能撤回）</option><option value="confirm" ${set.policy[k]==='confirm'?'selected':''}>先给我看</option></select></label>`;
   return `${ideaBox('ideaSkills')}
     <div class="panel grid" style="gap:10px">
-      <div class="blk-head"><div class="label">自我进化</div>
-        <label class="sk-switch"><input type="checkbox" data-act="skill-evolve" ${set.evolve?'checked':''}> ${set.evolve?'开着':'关着'}</label>
-        <div class="actions"><button class="btn ghost" data-act="skill-tidy">现在整理一下</button></div></div>
-      <p class="hint">开着时，Claude 在调研、写脚本、出片中遇到坑或找到更好的做法，会顺手改进对应的技能，每次都记在下面；攒多了每周自动整理一次（合并重复、删掉过时的）。</p>
-      <details><summary class="faint">哪些改动要先给你看</summary><div class="grid" style="gap:6px;margin-top:8px">
-        ${pol('idea','你的想法')}${pol('run','生成、修改视频时 Claude 直接改的')}${pol('update','出厂更新（有冲突的总是先给你看）')}${pol('tidy','定期整理')}
-</div></details>
+      <div class="blk-head"><div class="label">技能怎么改</div>
+        <div class="actions"><button class="btn ghost" data-act="skill-tidy">整理一下</button></div></div>
+      <p class="hint">技能只在你提要求时改：在总控台或这里写想法、点「整理一下」，Claude 在草稿里改好，你看过对比点通过才生效。生成、修改视频这些运行不会改技能。</p>
+      <label class="pol"><span>出厂更新（有冲突的总是先给你看）</span><select data-skpol="update"><option value="auto" ${set.policy.update!=='confirm'?'selected':''}>直接换上（能撤回）</option><option value="confirm" ${set.policy.update==='confirm'?'selected':''}>先给我看</option></select></label>
     </div>
     <div class="section-head" style="margin-top:6px"><h2>待处理</h2></div>
     ${open.length?open.map(changeCard).join(''):'<div class="empty">没有要处理的改动。</div>'}
@@ -1718,7 +1714,6 @@ async function skillAction(k,b){
       const content=`---\nname: ${name}\ndescription: ${pre}${desc.replace(/^(做法|工具)：/,'')}\n${kind==='flow'?'':`metadata:\n  kind: ${kind}\n`}---\n\n# ${name}\n\n`;
       await api('POST','/api/skills',{name,content});S.skillSel=name;S.skillFile={name,path:'SKILL.md'};toast('建好了，接着写正文');await loadSkills();return}
     if(k==='tidy'){await api('POST','/api/skill-changes/tidy');toast('已开始整理，好了会出现在下面');return}
-    if(k==='evolve'){S.skillSet=await api('PUT','/api/skill-settings',{evolve:b.checked});toast(b.checked?'自我进化已打开':'自我进化已关闭');render();return}
     const cur=S.skillCur;if(!cur)return;const name=cur.name;const url='/api/skills/'+encodeURIComponent(name);
     const f=S.skillFileCur;const key=name+'/'+(f?.path||'');
     if(k==='save'){const reason=($('#skillReason')?.value||'').trim();await api('PUT',url+'/file?path='+encodeURIComponent(f.path),{content:S.skillDraft?.[key]??f.content,reason});if(S.skillDraft)delete S.skillDraft[key];toast('已保存，下次运行就用新的');await loadSkills()}
@@ -2046,7 +2041,6 @@ document.addEventListener('click',e=>{
     case 'skill-reset':arm(b,'确认恢复',()=>skillAction('reset',b));break;
     case 'skill-delete':arm(b,'确认删除',()=>skillAction('delete',b));break;
     case 'skill-enable':skillAction('enable',b);break;
-    case 'skill-evolve':skillAction('evolve',b);break;
     case 'skill-idea':skillAction('idea',b);break;
     case 'skill-tidy':skillAction('tidy',b);break;
     case 'skill-new-idea':skillAction('new-idea',b);break;

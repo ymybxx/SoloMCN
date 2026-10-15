@@ -54,18 +54,9 @@ setTimeout(labCleanup, 60_000).unref();
 setInterval(labCleanup, 6 * 3600_000).unref();
 // 技能是本地数据：启动时装上新的出厂技能，出厂更新没改过的直接换上、改过的三方合并（见 skills.js）
 const skills = createSkills({ root, store });
-const NO_SNAPSHOT = ['account', 'series', 'skills'];
 const agent = createAgent({ store, cwd: root, lab, skills, hooks: {
-  // 每次运行 Claude 都可以直接改技能：开跑前存一份，跑完对比，记成一条技能改动
-  // （填表类的账号、系列不用工具；改进技能自己在草稿里改，另有记录）
-  onStart: (id, task) => { if (!NO_SNAPSHOT.includes(task)) skills.runBegin(id); },
   onDone: async (id, task, run) => {
     if (task === 'skills') await skills.finishDraft(run.args?.changeId, { ok: run.status === 'done', summary: run.result, error: run.error || (run.status === 'stopped' ? '被停止了' : '') });
-    if (!NO_SNAPSHOT.includes(task)) {
-      const report = String(run.result || '');
-      const line = (report.match(/技能改动[:：]\s*(.+)/) || [])[1];
-      await skills.runEnd(id, { itemId: run.args?.itemId, task, title: line ? line.slice(0, 60) : `${run.name || '运行'}时改的`, summary: line || report.slice(-1500) });
-    }
     pumpSkills();
   },
 } });
@@ -88,8 +79,8 @@ async function pumpSkills() {
     pumping = false;
   }
 }
-setTimeout(() => skills.maybeTidy().then(pumpSkills), 120_000).unref();
-setInterval(() => skills.maybeTidy().then(pumpSkills), 6 * 3600_000).unref();
+// 启动后接着做上次排队中的技能改动
+setTimeout(pumpSkills, 120_000).unref();
 // 抖音话题、征稿和热点：发布前帮 Claude 挑话题（查话题用的小号和发布账号分开）
 const douyin = createDouyinSource({ root, store });
 const publisher = createPublisher({ store, root, douyin });
@@ -271,12 +262,6 @@ async function handleApi(req, res, parts) {
   if (parts[0] === 'skill-settings') {
     if (method === 'GET') return sendJson(res, 200, skills.settings());
     if (method === 'PUT') return sendJson(res, 200, await skills.setSettings(await readBody(req)));
-  }
-  // 运行中改技能（workbench 的 edit_skill 工具）：只给还在跑的运行用
-  if (parts[0] === 'skill-run-edit' && method === 'POST') {
-    const b = await readBody(req);
-    if (store.get('agentRuns', String(b.runId || ''))?.status !== 'running') return sendError(res, 400, 'bad_input', '找不到这次运行，或者已经结束了');
-    return sendJson(res, 200, await skills.runEdit(b.runId, b));
   }
   if (parts[0] === 'skill-changes') {
     const q = new URL(req.url, 'http://localhost').searchParams;
